@@ -4,6 +4,16 @@ use super::{apev2, flac, id3v1, id3v2, native_probe, wav};
 use super::probe::{Format, Probe, probe_format};
 use std::path::Path;
 
+/// 走路径沙箱的读取入口（服务端专用）。
+///
+/// 做法是在**边界处解析一次**：resolve 已把 symlink 全部跟随、并确认目标落在库根内，
+/// 之后内部所有 `std::fs::read` 命中的都是那个已验证的规范路径，不可能再逃逸。
+/// 代价是不做逐次调用级校验——好处是内部函数签名不变、迁移面最小。
+pub fn read_tags_fs(fs: &crate::fs::PathSandbox, path: &Path) -> Result<AudioMetadata> {
+    let target = fs.resolve(path).map_err(|e| ReadError::Escape(e.to_string()))?;
+    read_tags(&target)
+}
+
 pub fn read_tags(path: &Path) -> Result<AudioMetadata> {
     let p = probe_format(path);
     match &p {

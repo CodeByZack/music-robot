@@ -243,3 +243,9 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
         extract_stream_info_md5(o) == extract_stream_info_md5(n) && audio_hash_flac(o) == audio_hash_flac(n)
     })).map_err(WriteError::Atomic)
 }
+
+/// 走路径沙箱的 FLAC 写入（服务端专用）
+pub fn write_flac_tags_fs(fs: &crate::fs::PathSandbox, path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
+    let target = fs.resolve(path)?;
+    write_flac_tags(&target, meta)
+}

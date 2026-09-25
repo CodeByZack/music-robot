@@ -23,6 +23,8 @@ pub enum ReadError {
     Id3PrefixedUnknown,
     /// 完全无法识别的格式
     Unrecognized,
+    /// 路径沙箱拒绝：请求的路径在库根之外（服务端越权防线，必须与 IO 错分开可观测）
+    Escape(String),
 }
 impl ReadError {
     pub fn message(&self) -> String { self.to_string() }
@@ -34,6 +36,7 @@ impl std::fmt::Display for ReadError {
             ReadError::Id3PrefixedReal(fmt) => write!(f, "无法识别：文件以 ID3v2 头开始但内部为 {fmt}（疑似 yt-dlp --add-metadata 产物）。请用 ffmpeg 重封装修复：ffmpeg -i <file> -c copy <out>.{fmt}"),
             ReadError::Id3PrefixedUnknown => write!(f, "无法识别：ID3v2 头之后的内容不是已知音频容器，拒绝按 MP3 解析"),
             ReadError::Unrecognized => write!(f, "无法识别：不支持的文件格式或文件无有效标签区"),
+            ReadError::Escape(p) => write!(f, "路径越界：{p}"),
         }
     }
 }

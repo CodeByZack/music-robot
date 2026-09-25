@@ -16,6 +16,6 @@ pub use id3v1::{id3v1_parse, id3v1_genres, parse_track_byte};
 pub use id3v2::{be_u32_at, decode_text, decode_txxx, latin1_decode, latin1_encode, le_u32_at, parse_id3v2, read_sync_safe, utf8_lossy as utf8_lossy_local, write_sync_safe};
 pub use apev2::find_ape_footer;
 pub use wav::parse_riff_chunks as parse_wav_chunks;
-pub use dispatch::{read_tags, read_mp3, read_flac, FramesMeta};
+pub use dispatch::{read_tags, read_tags_fs, read_mp3, read_flac, FramesMeta};
 pub use probe::{probe_format, Format, Probe};
 pub mod apev2_pub { pub use super::apev2::{parse_ape_tag, find_ape_footer, ApeItem, ApeTag}; }

@@ -136,3 +136,9 @@ pub fn write_wav_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError>
     atomic_replace(path, next, Some(&|o: &[u8], n: &[u8]| audio_hash_wav(o) == audio_hash_wav(n)))
         .map_err(WriteError::Atomic)
 }
+
+/// 走路径沙箱的 WAV 写入（服务端专用）
+pub fn write_wav_tags_fs(fs: &crate::fs::PathSandbox, path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
+    let target = fs.resolve(path)?;
+    write_wav_tags(&target, meta)
+}

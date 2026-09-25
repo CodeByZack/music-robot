@@ -123,12 +123,15 @@ pub enum WriteError {
     Atomic(AtomicError),
     /// 格式守卫：文件并非声称的容器（TS 里是 `throw new Error('不是合法 FLAC/WAV: …')`）
     BadFormat(String),
+    /// 路径沙箱拒绝：请求的路径在库根之外
+    Escape(String),
 }
 impl std::fmt::Display for WriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self { WriteError::Read(e) => write!(f, "读取失败：{e}"),
             WriteError::Atomic(e) => write!(f, "{e}"),
-            WriteError::BadFormat(m) => write!(f, "{m}") }
+            WriteError::BadFormat(m) => write!(f, "{m}"),
+            WriteError::Escape(p) => write!(f, "路径越界：{p}") }
     }
 }
 impl From<ReadError> for WriteError { fn from(e: ReadError) -> Self { WriteError::Read(std::io::Error::other(e.to_string())) } }
@@ -170,4 +173,13 @@ pub fn write_mp3_tags(path: &Path, meta: &Mp3WriteMeta) -> Result<(), WriteError
 
     atomic_replace(path, next, Some(&|o: &[u8], n: &[u8]| audio_hash(o) == audio_hash(n)))
         .map_err(WriteError::Atomic)
+}
+
+impl From<crate::fs::FsError> for WriteError {
+    fn from(e: crate::fs::FsError) -> Self { WriteError::Escape(e.to_string()) }
+}
+/// 走路径沙箱的 MP3 写入（服务端专用）
+pub fn write_mp3_tags_fs(fs: &crate::fs::PathSandbox, path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
+    let target = fs.resolve(path)?;
+    write_mp3_tags(&target, meta)
 }

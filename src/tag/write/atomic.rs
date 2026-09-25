@@ -58,3 +58,18 @@ pub fn atomic_replace(path: &Path, buf: Vec<u8>, verify: Option<Verify>) -> Resu
     }
     body
 }
+
+/// 走路径沙箱的原子替换（服务端专用）。resolve 在边界做一次，
+/// 之后 tmp 与原文件同目录 → rename 同设备，越界不可能发生。
+pub fn atomic_replace_fs(
+    fs: &crate::fs::PathSandbox,
+    path: &Path,
+    buf: Vec<u8>,
+    verify: Option<Verify>,
+) -> Result<(), AtomicError> {
+    let target = fs.resolve(path).map_err(|e| AtomicError::Io {
+        stage: "路径解析",
+        source: std::io::Error::other(e.to_string()),
+    })?;
+    atomic_replace(&target, buf, verify)
+}
