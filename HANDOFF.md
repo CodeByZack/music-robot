@@ -14,14 +14,30 @@ TS 已被决定抛弃，不再需要同步修改。
 
 ## 1. 环境（先读这个，否则会卡在第一步）
 
-**Rust 不是系统安装的**，装在 `/vol1/@appshare/dsh/rust-test/` 下，需要 3 个环境变量。
-`/usr/bin/rustc` 是 apt 装的 1.63，太旧用不了。
+**Rust 是装在 dsh 用户下的全局工具链**（非系统级，因为没 root）：
+
+```
+/vol1/@appshare/dsh/tools/rust/
+├── setup.sh          # source 一下即可用 cargo/rustc
+├── rustup/           # toolchains/stable-aarch64（rustc 1.98.1）
+└── cargo/            # cargo 本体 + registry 依赖缓存
+```
+
+`/usr/bin/rustc` 是 apt 装的 1.63，太旧用不了。已放开 755，**其他用户也能读**。
 
 ```bash
-cd /vol1/@appshare/dsh/data/music-tag
-source env.sh          # 已提供，含 RUSTUP_HOME / CARGO_HOME / PATH
-cargo --version        # 应输出 cargo 1.98.1
+# 方式一：项目内（附带 mt 别名）
+cd /vol1/@appshare/dsh/data/music-tag && source env.sh
+mt -h
+
+# 方式二：任意位置
+source /vol1/@appshare/dsh/tools/rust/setup.sh
+cargo --version        # cargo 1.98.1
 ```
+
+DSH 的 agent 会话（`dsh` 用户）已写进 `~/.bashrc`，**自动生效，不用手动 source**。
+真人 `zackdk` 想要全局可用：`sudo ln -sfn /vol1/@appshare/dsh/tools/rust/cargo/bin/cargo /usr/local/bin/cargo`
+（命令已写在 `setup.sh` 底部注释里）。
 
 或者直接跑编译好的二进制（**不需要 cargo**）：
 

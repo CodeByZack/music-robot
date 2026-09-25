@@ -7,7 +7,7 @@
 
 | 项 | 值 |
 |---|---|
-| 工具链 | rustup 1.98.1，装在用户目录，**无需 root**（`RUSTUP_HOME`/`CARGO_HOME` = 本目录下 `../rust-test/{rustup,cargo}`） |
+| 工具链 | rustup 1.98.1，装在用户目录，**无需 root**（全局位置 `/vol1/@appshare/dsh/tools/rust/{rustup,cargo}`，`source setup.sh` 即可） |
 | CPU | ARM Cortex-A55 ×4 @1992MHz，7.4G 内存 + zram |
 | 空项目冷编译 | 2.7s；`cargo test` 1.5s |
 | 含 48 crate 依赖 | 82s / target 181M |
