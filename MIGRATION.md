@@ -15,9 +15,7 @@
 
 跑测试前先设环境：
 ```bash
-export RUSTUP_HOME=/vol1/@appshare/dsh/rust-test/rustup \
-       CARGO_HOME=/vol1/@appshare/dsh/rust-test/cargo \
-       PATH="$CARGO_HOME/bin:$PATH"
+source /vol1/@appshare/dsh/tools/rust/setup.sh   # 等效于设置 RUSTUP_HOME / CARGO_HOME / PATH
 cargo test
 ```
 
