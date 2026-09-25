@@ -3,11 +3,15 @@ pub mod intent;
 pub mod atomic;
 pub mod id3v2_editor;
 pub mod mp3_writer;
+pub mod flac_writer;
+pub mod wav_writer;
 
 pub use atomic::{atomic_replace, AtomicError};
 pub use intent::{merge_fields, diff_fields, format_diff, sniff_image_mime, AfterView, DiffLine, WriteMeta, WritableFields, UNSET_KEYS};
 pub use id3v2_editor::Id3EditMeta;
-pub use mp3_writer::{audio_hash, build_id3v1, build_id3v2_frames, mp3_audio_region, write_mp3_tags, Mp3WriteMeta};
+pub use mp3_writer::{audio_hash, build_id3v1, build_id3v2_frames, mp3_audio_region, write_mp3_tags, Mp3WriteMeta, WriteError};
+pub use flac_writer::{audio_hash_flac, build_picture_block, build_vorbis_comment_block, write_flac_tags};
+pub use wav_writer::{audio_hash_wav, write_wav_tags};
 
 use std::path::Path;
 

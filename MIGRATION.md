@@ -163,3 +163,24 @@ APEv2 footer 固定 32B：`APETAGEX(8) + version(4)@8 + items_size(4)@12 + item_
 | E: tag_size off-by-one（吞 1 字节音频） | ❌ 5 条红（含 w02c 独立锚点） |
 | F: 多歌手改借位 TPE2（REVIEW §2.5 老 bug） | ❌ diff_write 红：TS=`["甲","乙"]` vs Rust=`["2"]` |
 | D: 完全摘掉 verify 传参 | ✅ 仍绿 —— **可接受**：D 单独不损坏数据（写入内容未变，只是少了一道自检），而 E/C 证明真实损坏会被别的测试抓住 |
+
+## FLAC / WAV 写侧
+
+`tests/flacwav.rs` 9 用例。FLAC 键级局部编辑（保留全部非 4/6 元数据块）+ PICTURE 重建 +
+STREAMINFO md5 & 裸区 sha256 双校验；WAV INFO 子项级编辑 + 内嵌 id3 chunk + RIFF size 重算 + data chunk hash。
+
+### 本轮抓到的两个问题（都是我自己造的）
+
+**① 双重块头 bug（实现缺陷）**：TS 的 `pieces` 存的是**含头完整块**，末尾用 `b.bytes.subarray(4)` 剥头再重贴；
+我改成「Piece 只存 payload」但把 `build_picture_block()`（带头）塞了进去 → PICTURE 头上再套一个头，
+读侧解出 `type=0x06000031`、封面数 0。修法：内部统一用不带头的 `picture_payload()`，
+公开的 `build_picture_block()` 才加头。**这类"移植时改了数据结构但没改全所有生产者"的错误，
+只有靠真实读回测试才能抓到——f02 正是这么抓到的。**
+
+**② 又一个空壳断言（测试缺陷）**：w03 验证「RIFF size 必须重算」，但注入陈旧 size 后仍绿。
+诊断发现 `diff=0` —— 我用 `lyrics` 字段写入，而 **WAV 的 LIST INFO 根本没有歌词槽位**，
+writer 静默丢弃 → 文件尺寸没变 → 陈旧值恰好等于正确值。修法：改用 `comment`(ICMT) 并加前置断言
+`assert_ne!(b.len(), orig.len())`——**先证明"这次写入真的改变了尺寸"，再断言 size 被重算**。
+
+教训与前两条同源：**断言所依赖的前提要显式检查**，否则测试会在"什么都没发生"的状态下报通过。
+到目前为止四轮假阳性分别是：静默 skip、自比无锚点、注入未生效、前提未成立。

@@ -118,10 +118,17 @@ fn v1_meta_from(orig: &[u8], meta: &Id3EditMeta) -> Id3EditMeta {
 }
 
 #[derive(Debug)]
-pub enum WriteError { Read(std::io::Error), Atomic(AtomicError) }
+pub enum WriteError {
+    Read(std::io::Error),
+    Atomic(AtomicError),
+    /// 格式守卫：文件并非声称的容器（TS 里是 `throw new Error('不是合法 FLAC/WAV: …')`）
+    BadFormat(String),
+}
 impl std::fmt::Display for WriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { WriteError::Read(e) => write!(f, "读取失败：{e}"), WriteError::Atomic(e) => write!(f, "{e}") }
+        match self { WriteError::Read(e) => write!(f, "读取失败：{e}"),
+            WriteError::Atomic(e) => write!(f, "{e}"),
+            WriteError::BadFormat(m) => write!(f, "{m}") }
     }
 }
 impl From<ReadError> for WriteError { fn from(e: ReadError) -> Self { WriteError::Read(std::io::Error::other(e.to_string())) } }

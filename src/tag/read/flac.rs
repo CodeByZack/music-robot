@@ -31,6 +31,7 @@ pub fn parse_flac_metadata(buf: &[u8]) -> Option<Vec<FlacBlock>> {
 ///   totalSamples = ((b13&0x0f)<<32)|b14<<24|b15<<16|b16<<8|b17
 pub fn parse_stream_info(payload: &[u8]) -> (u32, u32, u64) {
     if payload.len() < 18 { return (0, 0, 0) }
+    // md5 在 payload[18..34]，由 extract_stream_info_md5 单独提供
     let b = |i: usize| payload[i] as u32;
     let sample_rate = (b(10) << 12) | (b(11) << 4) | (b(12) >> 4);
     let _channels = ((b(12) >> 1) & 0x07) + 1;
@@ -103,4 +104,14 @@ pub fn flac_audio_start(buf: &[u8]) -> usize {
         if last { break }
     }
     p.min(buf.len())
+}
+
+/// STREAMINFO 里存的原音频 MD5（hex）。FLAC 校验用：它描述的是**音频**，
+/// 因此不随元数据块变化而变 —— 两次读出来不一致就说明音频被动过。
+pub fn extract_stream_info_md5(buf: &[u8]) -> String {
+    let blocks = match parse_flac_metadata(buf) { Some(b) => b, None => return String::new() };
+    match blocks.iter().find(|b| b.ty == 0) {
+        Some(si) if si.payload.len() >= 34 => si.payload[18..34].iter().map(|x| format!("{x:02x}")).collect(),
+        _ => String::new(),
+    }
 }
