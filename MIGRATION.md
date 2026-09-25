@@ -282,7 +282,7 @@ TS 是抛 "Attempt to access memory outside buffer bounds"。已改成 `Err(Unre
 重建方式（仅当文件丢失时）：
 
 ```bash
-cd /vol1/@appshare/dsh/rust-test/music-tag
+cd /vol1/@appshare/dsh/data/music-tag
 rm -rf fixtures
 cp -a /vol1/@appshare/dsh/data/tagwash-test/samples          fixtures   # 6 个音乐样本，64M
 cp -a /vol1/@appshare/dsh/data/tagwash-test/tests/fixtures/*.wav fixtures  # 3 个小 WAV，712K

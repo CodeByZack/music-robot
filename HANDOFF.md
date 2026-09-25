@@ -18,7 +18,7 @@ TS 已被决定抛弃，不再需要同步修改。
 `/usr/bin/rustc` 是 apt 装的 1.63，太旧用不了。
 
 ```bash
-cd /vol1/@appshare/dsh/rust-test/music-tag
+cd /vol1/@appshare/dsh/data/music-tag
 source env.sh          # 已提供，含 RUSTUP_HOME / CARGO_HOME / PATH
 cargo --version        # 应输出 cargo 1.98.1
 ```
@@ -40,6 +40,19 @@ $B -h
 
 ⚠️ **本机约定（AGENTS.md）**：NAS 资源有限，**不要随意全量 build / 全量 test**。
 优先 `cargo test --test <文件名>` 只跑改动的部分，验证完再全量跑一次。
+
+#### ⚠️ 移动项目目录后必须强制重建
+
+测试里大量使用 `env!("CARGO_MANIFEST_DIR")`，它是**编译期常量**。
+`mv` 会**保留文件 mtime**，cargo 的指纹因此不变 → 复用旧二进制 →
+测试拿着旧路径去找 fixture，报 `No such file or directory`。
+
+```bash
+touch tests/*.rs src/lib.rs   # 骗过 cargo 指纹，触发重建
+cargo test
+```
+
+（2026-09 从 `rust-test/` 搬到 `data/` 时踩的坑，17 个用例假红。）
 
 ---
 
