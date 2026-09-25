@@ -1,0 +1,138 @@
+# music-tag → Rust 迁移记录
+
+> 目标：以 TS 仓库（`/vol1/@appshare/dsh/data/tagwash-test`）为**参照实现**，逐模块移植。
+> 铁律：**测试先行；不改期望值让测试通过；不使用第三方标签库（lofty/id3）。**
+
+## 环境（实测，非推断）
+
+| 项 | 值 |
+|---|---|
+| 工具链 | rustup 1.98.1，装在用户目录，**无需 root**（`RUSTUP_HOME`/`CARGO_HOME` = 本目录下 `../rust-test/{rustup,cargo}`） |
+| CPU | ARM Cortex-A55 ×4 @1992MHz，7.4G 内存 + zram |
+| 空项目冷编译 | 2.7s；`cargo test` 1.5s |
+| 含 48 crate 依赖 | 82s / target 181M |
+| ⚠️ 禁止 | 构建产物放 `/tmp`（tmpfs 仅 3.7G）；apt 的 rustc 1.63 低于 lofty MSRV 1.89 |
+
+跑测试前先设环境：
+```bash
+export RUSTUP_HOME=/vol1/@appshare/dsh/rust-test/rustup \
+       CARGO_HOME=/vol1/@appshare/dsh/rust-test/cargo \
+       PATH="$CARGO_HOME/bin:$PATH"
+cargo test
+```
+
+## 依赖策略
+
+- **产品代码零依赖**：标签读写全自研。ffprobe 输出的 JSON 用手写的字节安全标量抽取（`dispatch.rs::json_scalar`），不引 serde。
+- **仅 dev-dependency 有 serde_json**：差分测试要解析 TS 侧 `read --json`。曾手搓 60 行解析器，连续踩「对象键前空白未跳过」「嵌套结构」两个 bug 并**导致测试假绿**，故按决策换成 serde_json。
+- **encoding_rs（GB18030）**：已接入（原缺口 1 关闭）。TS 靠 Node 内置 `TextDecoder('gb18030')`，属平台能力补位而非标签逻辑外包。实测两帧 COMM 的解码结果与 TS 逐字节一致（含第二帧正确解出「酷我音乐」）。
+
+## 已完成
+
+- [x] `tests/read.rs` —— TS 14 用例逐条移植（先写测试、确认其失败，再实现）
+- [x] `src/tag/read/metadata.rs` —— AudioMetadata 契约（Option vs undefined/null 显式区分）
+- [x] `src/tag/read/id3v2.rs` —— syncsafe / unsync / UTF-16LE·BE·BOM / APIC / USLT / TXXX / 三版本帧头
+- [x] `src/tag/read/id3v1.rs` —— 含 148 项流派表
+- [x] `src/tag/read/gbk_sniff.rs` —— 高字节占比 + GB18030 解码双判据（encoding_rs）
+- [x] `src/tag/read/probe.rs` —— ID3 链跳跃 + APE hasHeader 位 + 64KB footer 自校验 + MPEG sync
+- [x] `src/tag/read/flac.rs` —— 块遍历 / STREAMINFO 位域 / Vorbis Comment / PICTURE
+- [x] `src/tag/read/apev2.rs`、`native_probe.rs`（FLAC 精确；MP3 位率表未完成）
+- [x] `src/tag/read/dispatch.rs` —— readTags 分派 + ffprobe 双通道
+- [x] `tests/differential.rs` —— **跨语言实时对拍**：调 node 读 TS 输出，逐字段比对 6 样本
+
+当前：`cargo test` = 14 read + 1 differential 全绿；差分测试经注入 `+1` 验证确会红。
+
+## 迁移中实际踩到的坑（这部分最值钱）
+
+1. **测试静默 skip 伪装成通过。** `ts_read_json()` 返回 None 时 `return`，cargo 记作 `1 passed`。注入错误断言后仍绿才发现。已改为**参照实现不可用即 panic**——绝不允许静默跳过。（正是 `SCRIPTC-NOTES.md §三` 记的那类假阳性。）
+2. **FLAC PICTURE 字段是大端 u32**，且 mime/desc 变长、data 取剩余全部。我最初写成小端 + 固定长度切 slice → 封面数 0。
+3. **STREAMINFO 位域丢进位**：`bitsPerSample = (((b12&1)<<4)|(b13>>4))+1`，`b12` 最低位是 sampleRate/channels/bits 三者的共享边界。错读成 `(b12>>1)&7 + 1` → 得 2bit 而非 24bit。
+4. **不能按 key 出现顺序切 JSON 区间**：带封面的 MP3 里 `"streams"` 排在 format 的 `duration` **之前**，切片后取不到 duration → 时长 0。改成花括号配平定位对象。
+5. **UTF-8 字节边界 panic**：用 char 索引去切含中文的 `&str` → `byte index is not a char boundary`。动态语言转来的人最容易反复撞的一类。
+
+## 已知偏差与缺口（不许悄悄溜过去）
+
+| # | 项 | 状态 |
+|---|---|---|
+| ~~缺口1~~ | GB18030 解码 | ✅ **已关闭**（encoding_rs）。判据恢复为与 TS 同构的双条件：高字节占比 >0.3 **且** 解码后含 CJK。另多拿到 `had_replacements` 信号（TS 无），将来可用于收紧误报。 |
+| 陷阱1 | `id3v2.ts:33-37` unsync 与规范不符（FF+E0..FF 多跳一字节） | Rust 侧**刻意照搬同一行为**并注释标记。修它属破坏性变更，需差分基准背书后再议。 |
+| ~~陷阱2~~ | looks_gbk 判据偏松 | ✅ **已随缺口 1 关闭**——两条判据都在，与 TS 完全同构。 |
+| ~~缺口2~~ | mp3_native_probe 位率表 | ✅ **已补全**：三张码率表（MPEG1/2 × L1/L2/L3）+ 采样率 + samplesPerFrame + Xing/Info 帧数优先、CBR 字节兜底。实测 `TAGWASH_NO_FFPROBE=1` 下 5 个 MP3 时长误差 **+32~+42ms**（符合设计目标 ±40ms），FLAC 精确。 |
+| ~~缺口3~~ | WAV 读侧 | ✅ **已实现**：RIFF chunk 树（含奇数 size 的偶对齐 pad）、fmt / data / LIST INFO / 内嵌 `id3 ` chunk、字段映射、native probe 按 byteRate 精算时长。新增 `tests/wav.rs` 4 用例并做过变异验证。 |
+| ~~缺口4~~ | apev2.rs 冗余赋值警告 | ✅ 已清；且借这次重写发现我的移植**原本就走样了**（详见下方「APEv2 重写记录」）。当前 `cargo build` **零警告**。 |
+
+## 下一步（严格保持测试先行）
+
+1. 补 `tests/write.rs`（TS write.test 20 例 + write-cmd 21 例）→ 再实现 `tag/write/*`
+2. 决策缺口 1（GB18030），顺带解掉陷阱 2
+3. `tests/batch.rs`（scanner/doctor/scan/wash preview）
+4. wash --apply + 原子写 + audioHash 不变量
+
+## 附：COMM 帧的坑（本轮实测记录）
+
+盛夏/老男孩等样本有 **2 个 COMM 帧**：第一帧 desc 本身是 UTF-16 乱码（`ÿþ`）、text 也是垃圾；
+第二帧才是 `desc="ID3v1 Comment"`、text 为真 GBK（解出「酷我音乐」）。
+定位必须按 desc 内容匹配（TS/Rust 同一判据），**不能取第一个 COMM**——否则会拿垃圾当结论。
+
+## WAV fixture 配方（可复现，勿手工摆字节）
+
+fixture 落在 TS 仓库 `tests/fixtures/`，由 ffmpeg 从样本现场切出（体积 16KB~350KB）：
+
+```bash
+cd /vol1/@appshare/dsh/data/tagwash-test && mkdir -p tests/fixtures
+# 无标签：验证「空」与「解析失败」可区分（占位实现曾对此假成功）
+ffmpeg -y -i "samples/华夏传说 - 凤凰传奇.mp3" -t 2 -map_metadata -1 -c:a pcm_s16le -ar 44100 -ac 2 tests/fixtures/plain.wav
+# 全字段 LIST INFO：INAM/IART/IPRD/ICRD/IGNR/ICMT 映射
+ffmpeg -y -i "samples/华夏传说 - 凤凰传奇.mp3" -t 2 -c:a pcm_s16le -ar 44100 -ac 2 \
+  -metadata title="测试标题" -metadata artist="测试歌手" -metadata album="测试专辑" \
+  -metadata date="2019" -metadata genre="Rock" -metadata comment="测试备注" tests/fixtures/tagged.wav
+# 奇数长度 INFO 子项（单字符标题 + 8kHz 单声道）：专门踩 RIFF 偶对齐 pad
+ffmpeg -y -i "samples/华夏传说 - 凤凰传奇.mp3" -t 1 -c:a pcm_s16le -ar 8000 -ac 1 \
+  -metadata title="奇" -metadata artist="短名A" tests/fixtures/oddpad.wav
+```
+
+Ground truth（ffprobe）：plain/tagged = 2.000s / 44100Hz / 16bit / 2ch；oddpad = 1.000s / 8000Hz / 16bit / 1ch。
+TS 参照输出已核对一致；`tsfixtures` 是指向该目录的符号链接。
+
+## 变异测试记录（证明断言真的会咬人）
+
+上一轮差分测试曾因静默 skip 而**假绿**，故本轮对新增用例逐条注入错误验证：
+
+| 注入 | 结果 |
+|---|---|
+| 去掉 RIFF 偶对齐 pad（`+ (size_us & 1)`） | ❌ 红 —— LIST INFO 字段错位，title None vs 测试标题 |
+| read_wav 短路成默认 WavInfo（模拟假成功） | ❌ 红 —— tagged / oddpad 两用例同时失败 |
+| 差分测试 rawFrames +1 | ❌ 红 —— Havana 帧数不一致 |
+
+⚠️ 教训：**没有变异验证过的"全绿"不算证据。** 本轮第一次尝试注入 B 时 python 脚本 assert 失败、注入根本没生效，我却看到"4 passed"——如果直接记录下来就是又一次假绿。改成先 assert 再跑才拿到真实结果。
+
+## APEv2 重写记录（清警告时挖出的真问题）
+
+原 `apev2.rs` 是我第一版凭印象写的，与 TS 参照有多处偏差；为消除 `kstart` 未使用告警而重写时逐行对照才发现：
+
+| 偏差 | 后果 |
+|---|---|
+| **漏了 key 小写化** | TS `parseItems` 有 `.toLowerCase()`（APEv2 键大小写不敏感），下游按 `title`/`artist` 取值。**Rust 侧会全部取不到值** —— 真实功能缺陷 |
+| 用 `for _ in 0..count` 驱动遍历 | TS 用 `while p+8<=len`。声明 count 与实际不符的畸形文件会被截断或越界 |
+| 缺两处逃逸条件 | ① `key_end >= len` break ② 零长值且 key 贴末尾必须显式跳出，否则 **p 不前进 → 死循环** |
+| `valueStart > len` 检查顺序颠倒 | 先算 valueEnd 再查 start，越界 panic 风险 |
+| `parse_ape_tag` 里误用 `?` | 第一个候选位置失败即中止整函数，**永远试不到 ID3v1 之前那个位置**（TS 是 continue）。短文件还会因 `checked_sub(160)` 下溢直接返回 None |
+
+### ⚠️ 陷阱 3：APEv2 的 size 字段语义，参照实现与规范不一致
+
+- **规范**：footer 的 tagSize 字段 = items 区 + footer(32B)。
+- **你的 TS 实现**（`apev2.ts:29` `buf.slice(pos - info.size, pos)`）把它当 **items-only** 用。
+- 实测：同一份合成字节，写 `items+32` 时 TS 返回 null，写 `items` 才解析成功。
+
+这意味着**真实世界的 APEv2 文件（尤其 MusicBrainz Picard 等规范写入器产出的）可能被现有实现判为"无 APE tag"**——静默漏读，不报错。Rust 侧本轮**刻意保持与参照一致**（移植保真优先），并把该疑点登记在此。建议下一步拿一个真实带 APE 的 MP3 验证；若确认是 bug，修在 TS 侧、Rust 跟随。
+
+### fixture 布局备忘（踩过的坑）
+
+APEv2 footer 固定 32B：`APETAGEX(8) + version(4)@8 + items_size(4)@12 + item_count(4)@16 + flags(4)@20 + reserved(8)@24`。
+我最初把 reserved 写成 12B（footer 变 36B），导致解析器在错误偏移找 magic → 测试全红。**reserved 只有 8 字节。**
+
+### 变异验证（新增）
+
+| 注入 | 结果 |
+|---|---|
+| 去掉 `.to_lowercase()` | ❌ 红：`left "Title"` vs `right "title"` |

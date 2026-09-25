@@ -1,0 +1,6 @@
+target/
+tsfixtures
+!/Cargo.toml
+Cargo.lock
+# 符号链接本身不入库，但要在 README/MIGRATION 记录其指向
+/tsfixtures
