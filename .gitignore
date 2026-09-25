@@ -2,5 +2,6 @@ target/
 tsfixtures
 !/Cargo.toml
 Cargo.lock
-# 符号链接本身不入库，但要在 README/MIGRATION 记录其指向
+# 测试音频样本不入库（64M）——真拷贝放本地，来源与重建方式见 MIGRATION.md
+/fixtures
 /tsfixtures

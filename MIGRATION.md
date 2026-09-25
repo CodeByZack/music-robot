@@ -268,3 +268,25 @@ TS 是抛 "Attempt to access memory outside buffer bounds"。已改成 `Err(Unre
 - `write_tags` 对 FLAC/WAV 直接返回 `Unrecognized`——writer 早已移植完但从未被分派。现已接入。
 - `intent::WriteMeta` 与 `Id3EditMeta` 重复定义，`merge_fields` 产出的类型喂不进 `write_tags`。
   已合并为 `pub use Id3EditMeta as WriteMeta`，`AfterView` 补 `disc_total`。
+
+## 测试音频样本（fixtures/ 与 tsfixtures/）
+
+原为软链接指向 TS 项目，现已改为**真拷贝**（不再依赖 TS 目录存在），但**不入库**
+（64M 二进制，`.gitignore` 已忽略）。
+
+重建方式：
+
+```bash
+cd /vol1/@appshare/dsh/rust-test/music-tag
+rm -rf fixtures tsfixtures
+cp -a /vol1/@appshare/dsh/data/tagwash-test/samples          fixtures    # 6 个真实样本，64M
+cp -a /vol1/@appshare/dsh/data/tagwash-test/tests/fixtures    tsfixtures # 3 个小 WAV，712K
+chmod 755 fixtures tsfixtures && chmod 644 fixtures/* tsfixtures/*
+```
+
+- `fixtures/`：6 个真实音乐文件（mp3 ×5 + flac ×1），含广告词 / GBK 乱码 / ID3v1 垃圾尾等真实脏数据，
+  是 `scan`/`read` 告警检测的主要素材。
+- `tsfixtures/`：3 个小 WAV（`tagged` / `plain` / `oddpad`），供 WAV 读写用例使用。
+
+⚠️ 不要在 `fixtures/` 上直接跑 `wash --apply`——那里现在是**本项目自己的副本**，
+改坏了直接从 TS 项目重拷一次即可，但会丢失"与 TS 对照基线"的一致性。
