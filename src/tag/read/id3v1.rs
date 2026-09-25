@@ -79,7 +79,11 @@ pub fn id3v1_parse(buf: &[u8]) -> Option<Id3v1Tag> {
     let track_present = byte125 == 0 && byte126 != 0;
     let track = if track_present { parse_track_byte(byte126) } else { None };
     let comment = clean(if track_present { &comment_raw[..28.min(comment_raw.len())] } else { &comment_raw });
-    let genre_byte = if track_present { tag[127] } else { tag[126] };
+    // ⚠️ genre 恒在 offset 127（ID3v1 布局固定 128B：125 恒 0x00，126 是 v1.1 track 字节，
+    //    127 永远是 genre）。旧实现 `track_present ? tag[127] : tag[126]` 在非 v1.1 时
+    //    错读 126（padding 位，恒 0）→ genre=0 被当成 "Blues"，导致 blank 后 genres 残留。
+    //    本 bug 在 TS 参照实现里同样存在（已复现，见下方回归用例），此处按 ID3v1 规格修正。
+    let genre_byte = tag[127];
     let genre = if genre_byte <= 147 { Some(genre_byte) } else { None };
     Some(Id3v1Tag { title, artist, album, year, comment, track, track_present, genre })
 }

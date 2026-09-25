@@ -208,3 +208,22 @@ fn which(bin: &str) -> Option<std::path::PathBuf> {
     std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths)
         .map(|d| d.join(bin)).find(|p| p.is_file()))
 }
+
+#[test]
+fn id3v1_genre_always_at_127_not_padding() {
+    // 回归：ID3v1 genre 恒在 offset 127。旧实现非 v1.1 时错读 126（padding 0x00）
+    // → genre=0 被当成 "Blues"，blank 后 genres 残留。TS 参照实现同样有此 bug。
+    // 变异点：把 `tag[127]` 改回 `if track_present { tag[127] } else { tag[126] }` → 本用例必 RED。
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/华夏传说 - 凤凰传奇.mp3");
+    let dst = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/id3v1-genre.mp3");
+    std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    std::fs::copy(&src, &dst).unwrap();
+    music_tag::tag::write::write_tags(&dst, &music_tag::tag::write::WriteMeta { blank_all: true, ..Default::default() }).unwrap();
+
+    let back = music_tag::tag::read::read_tags(&dst).unwrap();
+    assert!(back.genres.is_empty(), "blank 后 genres 必须为空，实际 {:?}（ID3v1 genre 字节错读）", back.genres);
+    assert!(back.composers.is_empty());
+    let leftover = music_tag::cli::wash::blank_leftovers(&back);
+    assert!(leftover.is_empty(), "blank_leftovers 必须干净：{leftover:?}");
+    let _ = std::fs::remove_file(&dst);
+}

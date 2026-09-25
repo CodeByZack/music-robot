@@ -222,3 +222,49 @@ TS `FsLike` 的形状是 `Pick<typeof fs, 'readFileSync'|...>`——那是「注
   缓解：服务端把曲库目录设为非用户可写，并只允许服务账号解析 symlink。
 - **不是权限模型**：只回答"路径在不在库根下"，不回答"这个用户有没有权限"。
   多租户隔离要靠上层 token/tenant 映射到不同 root。
+
+---
+
+## CLI 外壳（第 5 阶段）
+
+`src/cli/`：零依赖手写参数解析（不引 clap）、read/write/blank/scan/doctor/wash 六个子命令、
+`CommandIO` 可注入输出通道、`Logger` 事件流 + NDJSON sink。测试**在内存里直接调函数**，不 spawn 子进程。
+
+### 本阶段抓到的真 bug（不是移植偏差）
+
+**1. ID3v1 genre 恒在 offset 127，旧实现错读 padding 位 → blank 后 genres 残留 "Blues"**
+
+`id3v1.rs` 里 `let genre_byte = if track_present { tag[127] } else { tag[126] }`——非 v1.1 布局时
+读的是 126（padding，恒 0x00），于是 genre=0 被当成 ID3v1 的 "Blues"。后果：`blank` 之后
+`genres=["Blues"]`，读回复核判「残留」，**wash blank 对每个 MP3 都失败**。
+
+⚠️ **TS 参照实现有同一个 bug**（`id3v1.ts:77` 同样 `trackPresent ? tag[127] : tag[126]`），
+已用 TS 端到端复现。Rust 侧按 ID3v1 规格修正，TS 侧待同步修。
+
+变异验证：把 `tag[127]` 改回条件式 → `tests/read.rs::id3v1_genre_always_at_127_not_padding` 红。
+
+**2. FLAC 魔数成立但块序列损坏时静默降级成「空但合法」**
+
+`read_flac` 里 `parse_flac_metadata` 返回 `None` 时 `return Ok(m)`——损坏 FLAC 被判成「无标签的合法文件」。
+TS 是抛 "Attempt to access memory outside buffer bounds"。已改成 `Err(Unrecognized)`。
+
+**3. 扫描分级靠错误**文案**匹配，把 broken 误判成 rejected**
+
+`inspect_file` 用 `msg.contains("无法识别")` 兜底判 rejected，但 `ReadError::Unrecognized` 的文案
+恰好含「无法识别」四字，于是「fLaC + 损坏体」（TS 判 broken）在 Rust 被判 rejected。
+这正是 P2-4 想消灭的脆弱性——**已改成按错误变体映射**：`Id3PrefixedReal/Id3PrefixedUnknown` → rejected，
+其余 → broken。变异回退文案匹配 → s04/s06 红。
+
+### 已钉死的「忠实移植」边界（不要"修好"）
+
+| 现象 | 处理 |
+|---|---|
+| 纯文本冒充 `.mp3` → scanner 判 `ok` / `format=unknown` / `frameCount=0` | 钉死。MP3 是 sync-marker 格式，无帧也合法；TS 同样行为。见 `s08_text_disguised_as_mp3_is_ok_like_ts` |
+| `read --json <file>` 的 `--json` 会把 `<file>` 当成自己的值 | 钉死。`parseArgs` 的「下一参数不以 `--` 开头即取值」规则使然；正确写法 `read <file> --json`。见 `e14_boolean_flag_eats_following_positional` |
+| wash 对「scanner 判 ok 的文本冒充 mp3」执行 blank → 文件被改写、读回复核失败 | 钉死并如实报 `failed`。这是 scanner「可解析」与 wash「可处理」的语义缝隙，TS 同样存在。见 `e15_wash_on_frameless_mp3_is_a_known_limitation` |
+
+### 顺带修掉的遗留
+
+- `write_tags` 对 FLAC/WAV 直接返回 `Unrecognized`——writer 早已移植完但从未被分派。现已接入。
+- `intent::WriteMeta` 与 `Id3EditMeta` 重复定义，`merge_fields` 产出的类型喂不进 `write_tags`。
+  已合并为 `pub use Id3EditMeta as WriteMeta`，`AfterView` 补 `disc_total`。

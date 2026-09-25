@@ -13,7 +13,7 @@ fn i01_merge_only_named_fields() {
     let m = merge_fields(f);
     assert_eq!(m.title.as_deref(), Some("新标题"));
     assert!(m.artists.is_none() && m.albums.is_none() && m.year.is_none(), "未点名字段不得出现");
-    assert!(m.unset.is_empty(), "没给 --unset 就不应有删除标记");
+    assert!(m.unset_fields.is_empty(), "没给 --unset 就不应有删除标记");
 }
 
 #[test]
@@ -24,22 +24,23 @@ fn i02_unset_marks_deletion_and_supersedes_value() {
     f.unset = unset(&["title"]);
     let m = merge_fields(f);
     assert!(m.title.is_none(), "--unset title 与 --title 同时给时，unset 优先");
-    assert_eq!(m.unset, vec!["title".to_string()]);
+    assert_eq!(m.unset_fields, vec!["title".to_string()]);
 }
 
 #[test]
 fn i03_cover_semantics_three_cases() {
     // TS 3/13：--cover 替换 / --unset-cover 清空 / 不给则不输出
     let mut f = WritableFields::default();
-    assert!(merge_fields(f.clone()).replace_cover.is_none() && !merge_fields(f.clone()).unset_cover);
+    let m0 = merge_fields(f.clone());
+    assert!(m0.pictures.is_none() && !m0.unset_fields.iter().any(|x| x == "pictures"));
     f.replace_cover = Some(music_tag::tag::read::Picture {
         mime_type: "image/jpeg".into(), pic_type: 3, description: String::new(), data: vec![0xFF, 0xD8],
     });
-    assert!(merge_fields(f.clone()).replace_cover.is_some());
+    assert!(merge_fields(f.clone()).pictures.is_some());
     f.replace_cover = None;
     f.unset_cover = true;
     let m = merge_fields(f);
-    assert!(m.unset_cover && m.replace_cover.is_none());
+    assert!(m.unset_fields.iter().any(|x| x == "pictures") && m.pictures.is_none());
 }
 
 #[test]

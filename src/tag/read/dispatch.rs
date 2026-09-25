@@ -236,7 +236,14 @@ pub fn read_flac(path: &Path) -> Result<AudioMetadata> {
     let np = probe_audio(path, &buf, Format::Flac, 0);
     if np.duration_ms == 0 { if let Some(x) = native_probe::flac_native_probe(&buf) { m.sample_rate = x.sample_rate; m.bits_per_sample = x.bits_per_sample; m.duration_ms = x.duration_ms; } }
     else { (m.duration_ms, m.sample_rate, m.bits_per_sample, m.bitrate_bps) = (np.duration_ms, np.sample_rate, np.bits_per_sample, np.bitrate_bps); }
-    let blocks = match flac::parse_flac_metadata(&buf) { Some(b) => b, None => return Ok(m) };
+    // ⚠️ fLaC 魔数成立但块序列解析失败 = 文件损坏，必须报错。
+    //   早期版本这里 `None => return Ok(m)` 静默降级成「空但合法」的元数据，
+    //   导致扫描把损坏 FLAC 判成 ok、blank 还"成功"——TS 参照实现是直接抛
+    //   "Attempt to access memory outside buffer bounds"。
+    let blocks = match flac::parse_flac_metadata(&buf) {
+        Some(b) => b,
+        None => return Err(crate::tag::read::ReadError::Unrecognized),
+    };
     if let Some(si) = blocks.iter().find(|b| b.ty == 0) {
         let (sr, bits, _) = flac::parse_stream_info(&si.payload);
         if sr != 0 { m.sample_rate = sr } if bits != 0 { m.bits_per_sample = Some(bits) }
