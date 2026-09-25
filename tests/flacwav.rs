@@ -1,12 +1,12 @@
 //! FLAC / WAV 写侧测试 —— 移植自 write.test.ts 4/10、14/14 + write-cmd 附加 FLAC 用例。
-//! ⚠️ 全在副本上跑，不碰 samples/ 与 tests/fixtures/ 原文件。
+//! ⚠️ 全在本项目自己的 fixtures/ 副本上跑，测试自己 cp 到 target/ 再折腾。
 use music_tag::tag::read::{flac::parse_flac_metadata, parse_wav_chunks, read_tags};
 use music_tag::tag::write::{audio_hash_flac, audio_hash_wav, write_flac_tags, write_wav_tags, Mp3WriteMeta};
 use std::path::{Path, PathBuf};
 
-/// mp3/flac 样本在 fixtures/（指向 TS samples/），WAV fixture 在 tsfixtures/（指向 TS tests/fixtures/）
+/// 全部样本在 fixtures/：6 个音乐文件（mp3×5 + flac×1）+ 3 个小 WAV
 fn sample(n: &str) -> PathBuf {
-    let base = if n.ends_with(".wav") { "tsfixtures" } else { "fixtures" };
+    let base = "fixtures";
     Path::new(env!("CARGO_MANIFEST_DIR")).join(base).join(n)
 }
 fn scratch(t: &str, file: &str) -> PathBuf {

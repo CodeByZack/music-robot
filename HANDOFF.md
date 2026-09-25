@@ -7,7 +7,7 @@
 ## 0. 一句话现状
 
 TS 音乐标签清洗工具（`/vol1/@appshare/dsh/data/tagwash-test`）的 Rust 重写。**CLI 部分已完成**
-（6 个子命令、127 用例全绿、0 警告），下一步是**服务端**（axum + tokio）。
+（6 个子命令、120 用例全绿、0 警告），下一步是**服务端**（axum + tokio）。
 TS 已被决定抛弃，不再需要同步修改。
 
 ---
@@ -61,9 +61,8 @@ music-tag/
 │   ├── fs.rs           # PathSandbox 路径沙箱（Rust 独有，服务端必备）
 │   ├── scanner.rs      # 递归枚举 + ok/warn/rejected/broken 四分级
 │   └── logger.rs       # 事件流 + NDJSON sink
-├── tests/              # 12 个文件，127 用例
-├── fixtures/           # 6 个真实音乐样本，64M（不入库，来源见 MIGRATION.md）
-├── tsfixtures/         # 3 个小 WAV（不入库）
+├── tests/              # 12 个文件，120 用例
+├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（不入库，见 MIGRATION.md）
 ├── MIGRATION.md        # 移植记录 + 已抓到的 bug + 忠实移植边界
 └── HANDOFF.md          # ← 本文件
 ```
@@ -114,33 +113,19 @@ pub trait CommandIO { fn log(&self, m: &str); fn error(&self, m: &str); }
 
 ---
 
-## 4. ⚠️ 第一优先级：TS 被删之前必须处理的事
+## 4. 与 TS 的解耦状态
 
-**7 个测试会 shell 出去调 TS 实现当参照 oracle**：
+**已解耦完毕**，TS 可以随时删除，本仓库不受影响：
 
-- `tests/differential.rs` — 1 个用例
-- `tests/diff_write.rs` — 6 个用例
+- ✅ `tests/differential.rs` / `tests/diff_write.rs`（7 个会 shell 出去调 TS 的差分测试）已删除。
+  它们的使命已完成——验证 Rust 移植与参照实现一致，历史结论见 `MIGRATION.md`。
+- ✅ `tsfixtures/` 目录已删除，3 个小 WAV 已并入 `fixtures/`。
+  （WAV 本身是测试素材不是 TS 代码，只是名字当初跟着软链叫的，改名而非删除。）
+- ✅ `fixtures/` 是真拷贝，不依赖 TS 目录存在。
+- ✅ 全部源码/测试已无 `tagwash-test` 路径引用。
 
-它们依赖两个东西：
-```rust
-const TS_REPO: &str = "/vol1/@appshare/dsh/data/tagwash-test";   // TS 项目目录
-const NODE_CANDIDATES: &[&str] = &["node", "/var/apps/nodejs_v24/target/bin/node"];
-```
-
-**关键问题：TS 或 node 不可用时它们是 `panic!`，不是跳过**：
-```rust
-if which_node().is_none() { panic!("参照实现不可用：找不到 node。差分测试拒绝静默跳过。") }
-```
-
-所以 **TS 一删，`cargo test` 全套就红**。删 TS 之前必须二选一：
-
-1. **直接删掉这两个测试文件** —— 推荐。它们的使命已经完成（验证 Rust 移植与参照一致），
-   历史价值已经写进 `MIGRATION.md` 的对照表里。
-2. 或者改成优雅跳过 —— 但注意 `panic` 是**故意的**，防止有人"静默跳过"把测试悄悄弄丢。
-   如果要改，请保留显式的 `eprintln!` 警告 + 在 CI 里看得见。
-
-**另外注意**：`fixtures/` 和 `tsfixtures/` 已经改成真拷贝了（见提交 `160cbf2`），
-**不依赖 TS 目录存在**，这部分安全。但重建脚本里还写着 TS 路径，删 TS 前记得先备份样本。
+**唯一残留**：`MIGRATION.md` 底部的**样本重建脚本**还写着 TS 路径。
+如果 TS 已删除，重建只能从备份恢复——**删 TS 前请先把 `fixtures/` 备份到别处**（65M）。
 
 ---
 
@@ -243,7 +228,7 @@ git -c user.name=migration -c user.email=none@local commit -q -m "..."
 提交信息写中文，一句话概括改动 + 用例数 + 抓到的 bug。例：
 
 ```
-CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，127 用例；修 ID3v1 genre 错位/FLAC 静默降级/分级文案匹配三个真 bug
+CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID3v1 genre 错位/FLAC 静默降级/分级文案匹配三个真 bug
 ```
 
 ### 7.3 依赖纪律
@@ -288,14 +273,12 @@ cargo test --test read id3v1_genre  # 只跑一个用例
 | `tests/intent.rs` | 7 | 意图层 |
 | `tests/sandbox.rs` | 10 | 路径沙箱（**10 个对抗用例**） |
 | `tests/flacwav.rs` | 9 | FLAC/WAV 写侧 |
-| `tests/differential.rs` | 1 | **⚠️ 依赖 TS，见第 4 节** |
-| `tests/diff_write.rs` | 6 | **⚠️ 依赖 TS，见第 4 节** |
 | `tests/apev2.rs` / `tests/wav.rs` | 5 / 4 | APEv2 / WAV 读 |
 
 ### 8.3 测试数据
 
-`fixtures/`（64M）和 `tsfixtures/`（712K）**不入库**。重建方式在 `MIGRATION.md` 底部。
-删 TS 之前务必先备份这两个目录。
+`fixtures/`（65M，9 个文件）**不入库**。重建方式在 `MIGRATION.md` 底部。
+删 TS 之前务必先备份这个目录（重建脚本依赖 TS 路径）。
 
 **不要在 `fixtures/` 上跑 `wash --apply`** —— 那是你的对照基线。测试代码都自己 `cp` 到
 `target/` 下再折腾。

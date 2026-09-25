@@ -92,7 +92,7 @@ ffmpeg -y -i "samples/华夏传说 - 凤凰传奇.mp3" -t 1 -c:a pcm_s16le -ar 8
 ```
 
 Ground truth（ffprobe）：plain/tagged = 2.000s / 44100Hz / 16bit / 2ch；oddpad = 1.000s / 8000Hz / 16bit / 1ch。
-TS 参照输出已核对一致；`tsfixtures` 是指向该目录的符号链接。
+TS 参照输出已核对一致。（`tsfixtures` 软链后来已移除，WAV 样本并入 `fixtures/`。）
 
 ## 变异测试记录（证明断言真的会咬人）
 
@@ -269,24 +269,24 @@ TS 是抛 "Attempt to access memory outside buffer bounds"。已改成 `Err(Unre
 - `intent::WriteMeta` 与 `Id3EditMeta` 重复定义，`merge_fields` 产出的类型喂不进 `write_tags`。
   已合并为 `pub use Id3EditMeta as WriteMeta`，`AfterView` 补 `disc_total`。
 
-## 测试音频样本（fixtures/ 与 tsfixtures/）
+## 测试音频样本（fixtures/）
 
 原为软链接指向 TS 项目，现已改为**真拷贝**（不再依赖 TS 目录存在），但**不入库**
-（64M 二进制，`.gitignore` 已忽略）。
+（65M 二进制，`.gitignore` 已忽略）。共 9 个文件：6 个音乐样本 + 3 个小 WAV。
 
-重建方式：
+| 文件 | 用途 |
+|---|---|
+| 6 × mp3/flac | 真实脏数据样本（广告词 / GBK 乱码 / ID3v1 垃圾尾），scan/read 告警检测素材 |
+| `tagged.wav` / `plain.wav` / `oddpad.wav` | WAV 读写用例（分别对应有标签 / 无标签 / 奇数 padding） |
+
+重建方式（仅当文件丢失时）：
 
 ```bash
 cd /vol1/@appshare/dsh/rust-test/music-tag
-rm -rf fixtures tsfixtures
-cp -a /vol1/@appshare/dsh/data/tagwash-test/samples          fixtures    # 6 个真实样本，64M
-cp -a /vol1/@appshare/dsh/data/tagwash-test/tests/fixtures    tsfixtures # 3 个小 WAV，712K
-chmod 755 fixtures tsfixtures && chmod 644 fixtures/* tsfixtures/*
+rm -rf fixtures
+cp -a /vol1/@appshare/dsh/data/tagwash-test/samples          fixtures   # 6 个音乐样本，64M
+cp -a /vol1/@appshare/dsh/data/tagwash-test/tests/fixtures/*.wav fixtures  # 3 个小 WAV，712K
+chmod 755 fixtures && chmod 644 fixtures/*
 ```
 
-- `fixtures/`：6 个真实音乐文件（mp3 ×5 + flac ×1），含广告词 / GBK 乱码 / ID3v1 垃圾尾等真实脏数据，
-  是 `scan`/`read` 告警检测的主要素材。
-- `tsfixtures/`：3 个小 WAV（`tagged` / `plain` / `oddpad`），供 WAV 读写用例使用。
-
-⚠️ 不要在 `fixtures/` 上直接跑 `wash --apply`——那里现在是**本项目自己的副本**，
-改坏了直接从 TS 项目重拷一次即可，但会丢失"与 TS 对照基线"的一致性。
+⚠️ 不要在 `fixtures/` 上直接跑 `wash --apply`——那里是**对照基线**，改坏了重拷一次即可。

@@ -3,8 +3,8 @@
 use music_tag::tag::read::read_tags;
 
 fn fx(name: &str) -> std::path::PathBuf {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tsfixtures").join(name);
-    assert!(p.exists(), "fixture 缺失：{}（需先在 TS 仓库 tests/fixtures/ 生成）", p.display());
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name);
+    assert!(p.exists(), "fixture 缺失：{}（重建方式见 MIGRATION.md）", p.display());
     p
 }
 

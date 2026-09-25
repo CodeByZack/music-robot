@@ -1,7 +1,4 @@
 target/
-tsfixtures
-!/Cargo.toml
-Cargo.lock
-# 测试音频样本不入库（64M）——真拷贝放本地，来源与重建方式见 MIGRATION.md
+
+# 测试音频样本不入库（64M）——真拷贝放本地，重建方式见 MIGRATION.md
 /fixtures
-/tsfixtures
