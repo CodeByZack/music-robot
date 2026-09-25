@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "音乐标签清洗工具（Rust 自研读写层，零依赖）"
 
+[[bin]]
+name = "music-tag"
+path = "src/main.rs"
+
 [dependencies]
 encoding_rs = "0.8.42"
 sha2 = "0.11.0"
