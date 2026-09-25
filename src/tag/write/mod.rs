@@ -1,2 +1,40 @@
-//! 写入层能力模块（对应 src/tag/write/**）——纯库。
+//! 写入层能力模块（对应 src/tag/write/**）——纯库，Web 直接 import。
 pub mod intent;
+pub mod atomic;
+pub mod id3v2_editor;
+pub mod mp3_writer;
+
+pub use atomic::{atomic_replace, AtomicError};
+pub use intent::{merge_fields, diff_fields, format_diff, sniff_image_mime, AfterView, DiffLine, WriteMeta, WritableFields, UNSET_KEYS};
+pub use id3v2_editor::Id3EditMeta;
+pub use mp3_writer::{audio_hash, build_id3v1, build_id3v2_frames, mp3_audio_region, write_mp3_tags, Mp3WriteMeta};
+
+use std::path::Path;
+
+/// 统一写入口：按 magic 分派（TS writeTags :15-30）。
+///
+/// ⚠️ TS 里那段「运行时检测 intent 专属字段误传」（round6 P2-3）**不需要移植**：
+/// Rust 的 `WritableFields` 与 `WriteMeta` 是两个不同类型，编译器已经保证不会混。
+pub fn write_tags(path: &Path, meta: &Mp3WriteMeta) -> Result<(), crate::tag::read::ReadError> {
+    use crate::tag::read::{probe_format, Format, Probe};
+    // ⚠️ 格式守卫（review §2.1）：未知容器**必须在任何写入动作之前**明确拒绝。
+    //   TS 曾经按扩展名盲写，实测把 4KB 假 .m4a 塞成 ID3 头、容器直接损坏。
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    match probe_format(path) {
+        Probe::Id3PrefixedReal(_) | Probe::Id3ChainUnresolved => {
+            return Err(crate::tag::read::ReadError::Id3PrefixedUnknown)
+        }
+        Probe::Plain(Format::Mp3) => return write_mp3_tags(path, meta).map_err(|e| crate::tag::read::ReadError::Io(std::io::Error::other(e.to_string()))),
+        Probe::Plain(Format::Flac) | Probe::Plain(Format::Wav) => {
+            // FLAC/WAV 写侧尚未移植；此处明确报错而非静默成功
+            return Err(crate::tag::read::ReadError::Unrecognized)
+        }
+        Probe::Unknown => {
+            // magic 无信时按扩展名兜底（与读侧对称），但未知扩展一律拒绝
+            if ext == "mp3" {
+                return write_mp3_tags(path, meta).map_err(|e| crate::tag::read::ReadError::Io(std::io::Error::other(e.to_string())))
+            }
+            return Err(crate::tag::read::ReadError::Unrecognized)
+        }
+    }
+}

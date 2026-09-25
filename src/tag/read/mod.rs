@@ -13,6 +13,8 @@ mod dispatch;
 pub use metadata::{AudioMetadata, Picture, RawFrame, ReadError, Result};
 pub use gbk_sniff::{gbk_sniff, decode_maybe_gbk, GbkSniffResult};
 pub use id3v1::{id3v1_parse, id3v1_genres, parse_track_byte};
+pub use id3v2::{decode_text, decode_txxx, latin1_decode, latin1_encode, parse_id3v2, read_sync_safe, write_sync_safe};
+pub use apev2::find_ape_footer;
 pub use dispatch::{read_tags, read_mp3, read_flac, FramesMeta};
 pub use probe::{probe_format, Format, Probe};
 pub mod apev2_pub { pub use super::apev2::{parse_ape_tag, find_ape_footer, ApeItem, ApeTag}; }

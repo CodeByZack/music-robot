@@ -136,3 +136,30 @@ APEv2 footer 固定 32B：`APETAGEX(8) + version(4)@8 + items_size(4)@12 + item_
 | 注入 | 结果 |
 |---|---|
 | 去掉 `.to_lowercase()` | ❌ 红：`left "Title"` vs `right "title"` |
+
+## MP3 写侧（atomic + id3v2-editor + mp3_writer）
+
+`tests/mp3write.rs` 12 用例 + `tests/diff_write.rs` 6 用例。产品新增依赖 `sha2`（裸音频完整性 hash，
+对应 Node 内置 crypto；std 的 DefaultHasher 不保证跨版本稳定，不能承担此职责）。
+
+### ⚠️ 本轮最重要的发现：一条"全绿"的假阳性测试
+
+最初 w02_bare_audio_hash_invariant 报通过，但把 `verify` 改成**恒真**后它仍然通过 ——
+因为它比较的是 `audio_hash(原) == audio_hash(新)`，两侧都用同一个被测函数。
+若 `mp3_audio_region` 本身算错（例如恒返回同一区间），这条断言永远成立。
+
+修法：**加独立锚点**，不再只依赖被测代码自身：
+- `w02b` verify 恒假 → 必须拒绝落盘且原文件逐字节不变（验证闸门真的存在）
+- `w02c` 用「原始音频字节区间是否在新文件中逐字节可见」来判定，绕开 hash 实现
+  （注入 off-by-one 吞掉 1 字节音频后，此条与另外 4 条同时红 ✓）
+
+教训同前：**跑过 ≠ 验证过**。变异注入必须先用 assert 确认落地，否则连"注入失败"都会被读成"测试通过"。
+
+### 变异验证汇总（写侧）
+
+| 注入 | 结果 |
+|---|---|
+| C: `raw_start = 0`（不跳 ID3v2） | ❌ 8 条红 |
+| E: tag_size off-by-one（吞 1 字节音频） | ❌ 5 条红（含 w02c 独立锚点） |
+| F: 多歌手改借位 TPE2（REVIEW §2.5 老 bug） | ❌ diff_write 红：TS=`["甲","乙"]` vs Rust=`["2"]` |
+| D: 完全摘掉 verify 传参 | ✅ 仍绿 —— **可接受**：D 单独不损坏数据（写入内容未变，只是少了一道自检），而 E/C 证明真实损坏会被别的测试抓住 |

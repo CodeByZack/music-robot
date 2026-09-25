@@ -6,9 +6,13 @@ description = "音乐标签清洗工具（Rust 自研读写层，零依赖）"
 
 [dependencies]
 encoding_rs = "0.8.42"
-# 标签读写层**零依赖**（不使用 lofty / id3 等第三方标签库，全部自研）。
-# 唯一例外：encoding_rs —— GB18030 码表。TS 侧靠 Node/V8 内置 TextDecoder('gb18030') 获得该能力，
-# Rust std 只有 UTF-8/UTF-16，属平台能力缺口而非标签逻辑外包。Firefox 维护、纯 Rust、无 C 依赖。
+sha2 = "0.11.0"
+# 标签读写层**全部自研**：不使用 lofty / id3 等任何第三方标签库。
+# 下面两个是「平台能力补位」，不是标签逻辑外包——它们在 TS 侧同样由 Node 运行时免费提供：
+#   encoding_rs : GB18030 码表（Node 内置 TextDecoder('gb18030')）
+#   sha2        : 裸音频完整性 hash（Node 内置 crypto.createHash('sha256')）
+#                 ⚠️ 不能用 std 的 DefaultHasher 替代：它不保证跨版本稳定，无法承担
+#                    「绝不损坏音频」的校验职责，也无法与 TS 侧输出对拍。
 
 [dev-dependencies]
 # 仅测试用：解析 TS 参照实现输出的 JSON。产品代码保持零依赖。
