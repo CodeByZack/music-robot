@@ -1,6 +1,6 @@
 //! 意图层（mergeFields / diffFields / sniffImageMime）—— 移植自 tests/cli/write-cmd.test.ts 的 1-5 用例
 //! 这层是纯逻辑（不碰文件），先把它锁死，写侧实现才有地基。
-use music_tag::tag::write::intent::{diff_fields, format_diff, merge_fields, sniff_image_mime, WritableFields};
+use music_robot::tag::write::intent::{diff_fields, format_diff, merge_fields, sniff_image_mime, WritableFields};
 use std::collections::BTreeSet;
 
 fn unset(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
@@ -33,7 +33,7 @@ fn i03_cover_semantics_three_cases() {
     let mut f = WritableFields::default();
     let m0 = merge_fields(f.clone());
     assert!(m0.pictures.is_none() && !m0.unset_fields.iter().any(|x| x == "pictures"));
-    f.replace_cover = Some(music_tag::tag::read::Picture {
+    f.replace_cover = Some(music_robot::tag::read::Picture {
         mime_type: "image/jpeg".into(), pic_type: 3, description: String::new(), data: vec![0xFF, 0xD8],
     });
     assert!(merge_fields(f.clone()).pictures.is_some());
@@ -56,26 +56,26 @@ fn i04_sniff_image_magic() {
 #[test]
 fn i05_diff_shows_only_changed_lines() {
     // TS 5/13：变化行 + 无变化
-    let mut before = music_tag::tag::read::AudioMetadata::default();
+    let mut before = music_robot::tag::read::AudioMetadata::default();
     before.title = Some("旧标题".into());
     before.artists = vec!["旧歌手".into()];
-    let mut after = music_tag::tag::read::AudioMetadata::default();
+    let mut after = music_robot::tag::read::AudioMetadata::default();
     after.title = Some("新标题".into());
     after.artists = vec!["旧歌手".into()];
-    let av = music_tag::tag::write::intent::AfterView::from(&after);
+    let av = music_robot::tag::write::intent::AfterView::from(&after);
     let d = diff_fields(&before, &av);
     assert_eq!(d.iter().map(|x| x.key.clone()).collect::<BTreeSet<_>>(), BTreeSet::from(["title".to_string()]));
     assert_eq!(d[0].before, "旧标题");
     assert_eq!(d[0].after, "新标题");
     assert!(format_diff(&d).contains("旧标题") && format_diff(&d).contains("新标题"));
-    let same = diff_fields(&before, &music_tag::tag::write::intent::AfterView::from(&before));
+    let same = diff_fields(&before, &music_robot::tag::write::intent::AfterView::from(&before));
     assert!(same.is_empty(), "无变化应零行");
 }
 
 #[test]
 fn i06_unset_key_whitelist_rejects_unknown() {
     // ARCHITECTURE §11.4：未知 --unset 键必须明确报错（wash/write 都靠这个白名单）
-    use music_tag::tag::write::intent::is_unset_key;
+    use music_robot::tag::write::intent::is_unset_key;
     assert!(is_unset_key("track-total") && is_unset_key("lyrics-timed"), "复查 §3.2 补的两个键必须在册");
     assert!(!is_unset_key("titel"), "拼错的键不得放行");
 }

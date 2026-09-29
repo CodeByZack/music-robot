@@ -1,8 +1,8 @@
 //! 参数解析测试 —— 移植自 tests/cli/args.test.ts（8 例 + 1 辅助）
-use music_tag::cli::args::{parse_args, int_flag, UsageError};
+use music_robot::cli::args::{parse_args, int_flag};
 
-fn v(args: &[&str]) -> music_tag::cli::args::ParsedArgs { parse_args(args).unwrap() }
-fn f(args: &[&str], k: &str) -> music_tag::cli::args::Flag { v(args).flags.get(k).cloned().unwrap_or_default() }
+fn v(args: &[&str]) -> music_robot::cli::args::ParsedArgs { parse_args(args).unwrap() }
+fn f(args: &[&str], k: &str) -> music_robot::cli::args::Flag { v(args).flags.get(k).cloned().unwrap_or_default() }
 
 #[test] fn a01_inline_equals() {
     let p = v(&["--title=新标题", "x.mp3"]);
@@ -58,7 +58,7 @@ fn f(args: &[&str], k: &str) -> music_tag::cli::args::Flag { v(args).flags.get(k
 
 #[test] fn a09_extra_bare_flag_rejected_by_single() {
     let f = f(&["--title", "A", "--title", "B"], "title");
-    assert!(matches!(f.single("title"), Err(UsageError(m)) if m.contains("只能出现一次")));
+    assert!(matches!(f.single("title"), Err(e) if e.message.contains("只能出现一次")));
 }
 
 #[test] fn a10_int_flag_js_semantics() {
@@ -83,7 +83,7 @@ fn f(args: &[&str], k: &str) -> music_tag::cli::args::Flag { v(args).flags.get(k
 #[test] fn a13_reject_unknown_via_parsed_args() {
     let p = v(&["--whatever", "x"]);
     let e = p.reject_unknown(&["title"], "支持: --title").err().unwrap();
-    assert!(e.0.contains("未知选项") && e.0.contains("whatever"), "应指明是哪个 flag：{}", e.0);
+    assert!(e.message.contains("未知选项") && e.message.contains("whatever"), "应指明是哪个 flag：{}", e.message);
 }
 
 #[test] fn a14_require_positionals() {

@@ -1,7 +1,9 @@
 //! ID3v2.2/2.3/2.4 帧解析 —— 移植自 src/tag/read/id3v2.ts（零依赖）
 //!
 //! 迁移纪律：**逐分支照搬 TS 的宽容行为**，不做"顺手修正"。
-//! 已知偏差必须保留到差分基准建立之后再议（详见 docs/MIGRATION.md 陷阱清单）。
+//! 已知偏差**刻意保留**，改动属破坏性变更 —— 清单与理由见 HANDOFF.md §6.2 / §6.4。
+//! （当初作参照的 TS 仓库已决定抛弃，差分对拍测试也已删除，所以这些偏差**不会再被自动发现**，
+//!   只能靠这份清单人工维护。）
 use super::metadata::{Picture, RawFrame};
 
 /// 7-bit syncsafe 读取。TS 版无边界检查（越界读到 undefined→0），此处等价地用 get_or(0)。
@@ -33,7 +35,7 @@ fn map_v22(id: &str) -> String {
 /// 去除反同步字节。
 /// ⚠️ 与 TS `unsync()`（id3v2.ts:28-40）保持**逐字节一致**，包括审计发现的那处与规范不符的
 /// 跳过逻辑（FF 后跟 E0-FF 时多跳一字节）。修它会改变既有文件的解析结果 → 属破坏性变更，
-/// 必须先有差分基准。见 docs/MIGRATION.md「陷阱 1」。
+/// 需要新的独立理由并**先问用户**。见 HANDOFF.md §6.4 第 1 条。
 pub fn unsync(buf: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(buf.len());
     let mut i = 0usize;
@@ -159,7 +161,14 @@ pub fn decode_uslt(data: &[u8]) -> Option<LyricsFrame> {
     else if data.get(text_start).copied() == Some(0) { text_start += 1 }
     let text_buf = &data[text_start.min(data.len())..];
     let text = if utf16 { decode_utf16(text_buf, enc == 2) } else if enc == 3 { utf8_lossy(text_buf) } else { latin1_decode(text_buf) };
-    Some(LyricsFrame { language, description, text })
+    // 与 decode_text 一致：裁掉尾部 NUL。
+    // description 尤其重要 —— dispatch 用 description == "LYRICS" 区分「同步歌词」与
+    // 「普通歌词」，带 NUL 会让这个比较永远不成立，歌词会被归错类。
+    Some(LyricsFrame {
+        language,
+        description: trim_trailing_nuls(&description),
+        text: trim_trailing_nuls(&text),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +189,13 @@ pub fn decode_txxx(data: &[u8]) -> Option<TxxxFrame> {
     else if data.get(v_start).copied() == Some(0) { v_start += 1 }
     let v_buf = &data[v_start.min(data.len())..];
     let value = if utf16 { decode_utf16(v_buf, enc == 2) } else if enc == 3 { utf8_lossy(v_buf) } else { latin1_decode(v_buf) };
-    Some(TxxxFrame { key, value })
+    // 与 decode_text 保持一致：文本尾部的 NUL 是编码终止符残留，不是内容的一部分。
+    // 漏掉这步会让 TXXX 派生的字段带上 NUL —— 实测 fixtures 里 album_artist 就是
+    // 「优乐美\0」，它会污染 albums 的 UNIQUE(name, album_artist) 唯一键。
+    Some(TxxxFrame {
+        key: trim_trailing_nuls(&key),
+        value: trim_trailing_nuls(&value),
+    })
 }
 
 #[derive(Debug, Clone)]

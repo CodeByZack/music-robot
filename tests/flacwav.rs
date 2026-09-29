@@ -1,7 +1,7 @@
 //! FLAC / WAV 写侧测试 —— 移植自 write.test.ts 4/10、14/14 + write-cmd 附加 FLAC 用例。
 //! ⚠️ 全在本项目自己的 fixtures/ 副本上跑，测试自己 cp 到 target/ 再折腾。
-use music_tag::tag::read::{flac::parse_flac_metadata, parse_wav_chunks, read_tags};
-use music_tag::tag::write::{audio_hash_flac, audio_hash_wav, write_flac_tags, write_wav_tags, Mp3WriteMeta};
+use music_robot::tag::read::{flac::parse_flac_metadata, parse_wav_chunks, read_tags};
+use music_robot::tag::write::{audio_hash_flac, audio_hash_wav, write_flac_tags, write_wav_tags, Id3EditMeta};
 use std::path::{Path, PathBuf};
 
 /// 全部样本在 fixtures/：6 个音乐文件（mp3×5 + flac×1）+ 3 个小 WAV
@@ -20,7 +20,7 @@ fn scratch(t: &str, file: &str) -> PathBuf {
 fn vorbis_keys(buf: &[u8]) -> Vec<String> {
     let blocks = parse_flac_metadata(buf).unwrap_or_default();
     match blocks.iter().find(|b| b.ty == 4) {
-        Some(vc) => music_tag::tag::read::flac::parse_vorbis_comment(&vc.payload).0.iter().map(|p| p.key.to_uppercase()).collect(),
+        Some(vc) => music_robot::tag::read::flac::parse_vorbis_comment(&vc.payload).0.iter().map(|p| p.key.to_uppercase()).collect(),
         None => vec![],
     }
 }
@@ -33,7 +33,7 @@ fn f01_key_level_edit_keeps_unnamed_keys_and_blocks() {
     let keys_before = vorbis_keys(&before);
     assert!(keys_before.iter().any(|k| k == "ENCODER"), "前置：原文件应有未点名的 ENCODER 键，实际 {keys_before:?}");
 
-    let mut m = Mp3WriteMeta::default();
+    let mut m = Id3EditMeta::default();
     m.title = Some("新标题".into());
     write_flac_tags(&f, &m).unwrap();
 
@@ -53,8 +53,8 @@ fn f02_picture_block_rebuilt_and_audio_intact() {
     let orig = std::fs::read(&f).unwrap();
     let h0 = audio_hash_flac(&orig);
     let png: Vec<u8> = vec![0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A, 0,0,0,0x0D];
-    let mut m = Mp3WriteMeta::default();
-    m.pictures = Some(vec![music_tag::tag::read::Picture { mime_type: "image/png".into(), pic_type: 3, description: String::new(), data: png.clone() }]);
+    let mut m = Id3EditMeta::default();
+    m.pictures = Some(vec![music_robot::tag::read::Picture { mime_type: "image/png".into(), pic_type: 3, description: String::new(), data: png.clone() }]);
     write_flac_tags(&f, &m).unwrap();
     let after = std::fs::read(&f).unwrap();
     assert_eq!(audio_hash_flac(&after), h0, "FLAC 裸音频 hash 变了 → 音频被污染");
@@ -70,7 +70,7 @@ fn f03_streaminfo_and_other_blocks_preserved_verbatim() {
     let orig = std::fs::read(&f).unwrap();
     let types_before: Vec<u8> = parse_flac_metadata(&orig).unwrap().iter().map(|b| b.ty).collect();
     let si_before = parse_flac_metadata(&orig).unwrap().iter().find(|b| b.ty == 0).unwrap().payload.clone();
-    let mut m = Mp3WriteMeta::default();
+    let mut m = Id3EditMeta::default();
     m.comment = Some("改一下注释".into());
     write_flac_tags(&f, &m).unwrap();
     let after = std::fs::read(&f).unwrap();
@@ -85,7 +85,7 @@ fn f04_blank_clears_vorbis_and_pictures() {
     let f = scratch("f04", "牵丝戏 - 白兀.flac");
     let orig = std::fs::read(&f).unwrap();
     let h0 = audio_hash_flac(&orig);
-    let mut m = Mp3WriteMeta::default(); m.blank_all = true;
+    let mut m = Id3EditMeta::default(); m.blank_all = true;
     write_flac_tags(&f, &m).unwrap();
     let after = std::fs::read(&f).unwrap();
     assert_eq!(audio_hash_flac(&after), h0, "blank 不得碰音频");
@@ -102,7 +102,7 @@ fn f05_not_flac_rejected_without_mutation() {
     let fake = dir.join("fake.flac");
     std::fs::write(&fake, vec![b'B'; 2048]).unwrap();
     let before = std::fs::read(&fake).unwrap();
-    let mut m = Mp3WriteMeta::default(); m.title = Some("x".into());
+    let mut m = Id3EditMeta::default(); m.title = Some("x".into());
     assert!(write_flac_tags(&fake, &m).is_err(), "非法 FLAC 必须报错");
     assert_eq!(std::fs::read(&fake).unwrap(), before, "被拒文件必须一字未改");
 }
@@ -113,7 +113,7 @@ fn w01_wav_list_info_partial_edit() {
     let f = scratch("w01", "tagged.wav");
     let before = read_tags(&f).unwrap();
     assert_eq!(before.title.as_deref(), Some("测试标题"), "前置 fixture 检查");
-    let mut m = Mp3WriteMeta::default();
+    let mut m = Id3EditMeta::default();
     m.title = Some("改过的标题".into());
     write_wav_tags(&f, &m).unwrap();
     let after = read_tags(&f).unwrap();
@@ -129,7 +129,7 @@ fn w02_wav_pcm_data_chunk_untouched() {
     let f = scratch("w02", "plain.wav");
     let orig = std::fs::read(&f).unwrap();
     let h0 = audio_hash_wav(&orig);
-    let mut m = Mp3WriteMeta::default();
+    let mut m = Id3EditMeta::default();
     m.title = Some("加个标题".into());
     m.lyrics = Some("歌词内容".into());
     write_wav_tags(&f, &m).unwrap();
@@ -144,7 +144,7 @@ fn w03_wav_riff_size_consistent_after_edit() {
     //   传 lyrics 会被静默丢弃、文件尺寸不变，于是"陈旧 size == 正确 size"，断言失去意义
     //   （第一版就踩了这个空壳断言，注入陈旧 size 后仍绿）。
     let f = scratch("w03", "tagged.wav");
-    let mut m = Mp3WriteMeta::default();
+    let mut m = Id3EditMeta::default();
     m.comment = Some("很长的备注以确实改变文件尺寸".repeat(60));
     write_wav_tags(&f, &m).unwrap();
     let b = std::fs::read(&f).unwrap();
@@ -162,7 +162,7 @@ fn w04_not_wav_rejected_without_mutation() {
     let fake = dir.join("fake.wav");
     std::fs::write(&fake, vec![b'C'; 2048]).unwrap();
     let before = std::fs::read(&fake).unwrap();
-    let mut m = Mp3WriteMeta::default(); m.title = Some("x".into());
+    let mut m = Id3EditMeta::default(); m.title = Some("x".into());
     assert!(write_wav_tags(&fake, &m).is_err(), "非法 WAV 必须报错");
     assert_eq!(std::fs::read(&fake).unwrap(), before, "被拒文件必须一字未改");
 }

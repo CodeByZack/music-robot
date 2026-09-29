@@ -1,19 +1,25 @@
 [package]
-name = "music-tag"
+name = "music-robot"
 version = "0.1.0"
 edition = "2021"
-description = "音乐标签清洗工具（Rust 自研读写层，零依赖）"
+license = "MIT OR Apache-2.0"
+description = "音乐服务器：曲库索引 / 音频流 / 插件化刮削 · 标签读写层全自研"
 
 [[bin]]
-name = "music-tag"
+name = "music-robot"
 path = "src/main.rs"
 
 [dependencies]
 encoding_rs = "0.8.42"
 sha2 = "0.11.0"
-# serde_json：仅用于 CLI 的 --json 输出。与 encoding_rs/sha2 同类——平台能力补位
-# （Node 侧是运行时内置 JSON），不是标签逻辑外包。不引入 serde derive，只手写 Value。
+# serde_json：**不引入 serde derive，只手写 Value**。使用面比当初设想的广得多：
+# CLI 的 --json 输出、插件协议的 JSON Lines 编解码、服务端所有请求/响应体、配置解析。
+# 与 encoding_rs/sha2 同类——平台能力补位（Node 侧是运行时内置 JSON），不是标签逻辑外包。
 serde_json = "1"
+# libc：只为进程沙箱的四个系统调用兜底——setsid / setrlimit / prctl / kill。
+# 已经是 Cargo.lock 里的传递依赖，加为直接依赖不会新增任何编译。
+# ⚠️ 绝不用它做标签逻辑。（tokio / axum 见文件末尾 —— 那是服务端运行时，与标签层无关。）
+libc = "0.2"
 # 标签读写层**全部自研**：不使用 lofty / id3 等任何第三方标签库。
 # 下面两个是「平台能力补位」，不是标签逻辑外包——它们在 TS 侧同样由 Node 运行时免费提供：
 #   encoding_rs : GB18030 码表（Node 内置 TextDecoder('gb18030')）
@@ -21,8 +27,39 @@ serde_json = "1"
 #                 ⚠️ 不能用 std 的 DefaultHasher 替代：它不保证跨版本稳定，无法承担
 #                    「绝不损坏音频」的校验职责，也无法与 TS 侧输出对拍。
 
+# rusqlite：服务端唯一的存储依赖（S2 数据库骨架起用）。用 bundled 是因为本机
+# 只有 libsqlite3 运行时、没有开发库也没有 pkg-config —— bundled 会从 C 源码编译
+# SQLite 静态库，不依赖系统环境，代价是首次编译明显变慢。
+# ⚠️ 标签读写层依旧**完全不碰**它。
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+# ── 服务端运行时（S14 起，用户已授权引入）────────────────────────────────
+# tokio 只开真正用到的特性，**不用 full** —— full 会多编译 net/time/signal 之外的
+# 一堆东西，本机是 NAS，编译时间要省着花。
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+axum = "0.8"
+# cors 特性用于 S14 验收点里的「CORS 预检」。
+tower-http = { version = "0.6", features = ["cors"] }
+
+# hmac / base64：JWT（S15）要用，与 sha2 同属「**平台能力补位**」而非逻辑外包 ——
+# Node 侧 crypto.createHmac / Buffer.toString('base64') 都是运行时免费提供的。
+# ⚠️ hmac 0.13 与 sha2 0.11 同属 digest 0.11 一代，两者版本必须配套，不能单独升。
+hmac = "0.13"
+base64 = "0.23"
+# argon2：口令哈希（S15）。**唯一一处我刻意多花几个包的地方** —— 口令存储用
+# 慢 KDF 才抗得住离线爆破，argon2id 是 OWASP 的首选推荐（PBKDF2 也可接受但更弱）。
+# std 特性用于盐值生成（OsRng）。
+argon2 = "0.6"
+
+# ⚠️ 上面三个只有 `src/server/` 用。标签读写层、插件层、扫描层**一律不碰**：
+#   插件是不可信**子进程**（见 src/plugin/sandbox.rs），不是 async 任务；
+#   给它们套 tokio 既没必要，也会让沙箱那套 fork/exec 逻辑难写。
+
 [dev-dependencies]
+# tower 只用于测试里直接对一个 Router 发请求（ServiceExt::oneshot），不绑端口。
+# axum 本身就带 tower/util，这里加为直接依赖几乎不增加编译量。
+tower = { version = "0.5", features = ["util"] }
 
 [lib]
-name = "music_tag"
+name = "music_robot"
 path = "src/lib.rs"

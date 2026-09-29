@@ -1,6 +1,14 @@
+pub mod config;
 pub mod logger;
 pub mod scanner;
+pub mod watcher;
 pub mod cli;
 pub mod fs;
+pub mod storage;
+pub mod audio;
+pub mod db;
 pub mod tag;
+pub mod plugin;
+pub mod service;
+pub mod server;
 pub use tag::read::read_tags;

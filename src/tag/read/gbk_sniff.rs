@@ -12,7 +12,7 @@ pub struct GbkSniffResult {
     pub looks_gbk: bool,
     pub high_byte_ratio: f64,
     /// 解码过程是否产生过替换字符 U+FFFD。**encoding_rs 独有信号**，
-    /// TS 侧拿不到——可用于加强判据（见下方 looksGbk 说明与 MIGRATION.md 陷阱2）。
+    /// TS 侧拿不到——将来可用于收紧误报（当前判据与 TS 同构，见下方 looks_gbk 的计算）。
     pub had_replacements: bool,
 }
 

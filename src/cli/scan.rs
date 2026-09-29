@@ -5,7 +5,7 @@ use crate::cli::args::{parse_args, wants_help, UsageError};
 use crate::cli::io::CommandIO;
 use crate::scanner::{rel_path, scan_dir, ScanEntry};
 
-pub const SCAN_USAGE: &str = r#"用法: music-tag scan <dir> [--json]
+pub const SCAN_USAGE: &str = r#"用法: music-robot scan <dir> [--json]
 
 递归扫描目录下的 .mp3/.flac/.wav，逐文件只读体检并分级：
   ok        无警告、格式识别正常

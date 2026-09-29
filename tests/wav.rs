@@ -1,10 +1,10 @@
-//! WAV 读侧测试 —— 参照实现是 TS 对上述 fixture 的 read --json 输出。
-//! ⚠️ fixture 由 ffmpeg 从样本现场生成（见 MIGRATION.md「WAV fixture 配方」），非手工摆字节。
-use music_tag::tag::read::read_tags;
+//! WAV 读侧测试。
+//! ⚠️ fixture 由 ffmpeg 从样本现场生成（配方见 HANDOFF.md §8.3），**非手工摆字节**。
+use music_robot::tag::read::read_tags;
 
 fn fx(name: &str) -> std::path::PathBuf {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name);
-    assert!(p.exists(), "fixture 缺失：{}（重建方式见 MIGRATION.md）", p.display());
+    assert!(p.exists(), "fixture 缺失：{}（重建方式见 HANDOFF.md §8.3）", p.display());
     p
 }
 
@@ -47,7 +47,7 @@ fn wav_odd_sized_chunk_padding_is_honored() {
 #[test]
 fn wav_native_probe_duration_matches_byte_rate() {
     // 兜底通道：时长 = data 字节 ÷ byteRate，必须精确（WAV 是未压缩格式，不该有 ±40ms 误差）
-    use music_tag::tag::read::native_probe::wav_native_probe;
+    use music_robot::tag::read::native_probe::wav_native_probe;
     for (name, want_ms) in [("plain.wav", 2000i64), ("tagged.wav", 2000), ("oddpad.wav", 1000)] {
         let buf = std::fs::read(fx(name)).unwrap();
         let np = wav_native_probe(&buf);

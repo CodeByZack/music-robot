@@ -32,8 +32,8 @@ fn tmp_name(path: &Path) -> std::path::PathBuf {
     // 随机后缀：std 无 RNG，用纳秒 + 地址熵混合即可满足「并发不互踩」的目的
     let seed = (ts as u64) ^ ((path.as_os_str().len() as u64) << 32) ^ (pid as u64).wrapping_mul(0x9E3779B97F4A7C15);
     let r = (seed >> 17) % 0xFFFFFF;
-    let stem = path.file_name().and_then(|s| s.to_str()).unwrap_or("tagwash");
-    path.with_file_name(format!("{stem}.tagwash-tmp-{pid}-{ts:x}-{r:06x}"))
+    let stem = path.file_name().and_then(|s| s.to_str()).unwrap_or("music-robot");
+    path.with_file_name(format!("{stem}.music-robot-tmp-{pid}-{ts:x}-{r:06x}"))
 }
 
 /// 原子替换：copy 原文件到 tmp → 写新内容 → 校验 → rename 覆盖。

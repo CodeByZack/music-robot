@@ -53,12 +53,12 @@ fn keys_of(field: &str) -> &'static [&'static str] {
 }
 
 fn vendor_of(payload: &[u8]) -> String {
-    if payload.len() < 4 { return "tagwash".into() }
+    if payload.len() < 4 { return "music-robot".into() }
     let len = le_u32_at(payload, 0) as usize;
-    if 4 + len > payload.len() { return "tagwash".into() }
+    if 4 + len > payload.len() { return "music-robot".into() }
     let v: String = super::super::read::utf8_lossy_local(&payload[4..4 + len])
         .chars().filter(|c| !('\u{0}'..='\u{1f}').contains(c)).collect();
-    if v.is_empty() { "tagwash".into() } else { v }
+    if v.is_empty() { "music-robot".into() } else { v }
 }
 
 fn payload_from(pairs: &[VorbisPair], vendor: &str) -> Vec<u8> {
@@ -159,7 +159,7 @@ pub fn build_picture_block(pic: &Picture) -> Vec<u8> { block_with(6, &picture_pa
 
 /// 完整 VORBIS_COMMENT 块（供全量重建/测试）
 pub fn build_vorbis_comment_block(m: &Id3EditMeta) -> Vec<u8> {
-    block_with(4, &payload_from(&edit_vorbis_pairs(&[], m), "tagwash"), false)
+    block_with(4, &payload_from(&edit_vorbis_pairs(&[], m), "music-robot"), false)
 }
 
 /// FLAC 裸音频 sha256（STREAMINFO md5 之外的第二道校验）
@@ -182,7 +182,7 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
     let audio = orig[audio_start.min(orig.len())..].to_vec();
 
     let mut existing: Vec<VorbisPair> = Vec::new();
-    let mut vendor = "tagwash".to_string();
+    let mut vendor = "music-robot".to_string();
     if let Some(vc) = blocks.iter().find(|b| b.ty == 4) {
         existing = parse_vorbis_pairs(&vc.payload);
         vendor = vendor_of(&vc.payload);
@@ -225,7 +225,7 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
         || meta.albums.is_some() || meta.comment.is_some()
         || (meta.pictures.is_some() && !new_pics.is_empty());
     if !vc_done && need_vc {
-        let payload = payload_from(&edit_vorbis_pairs(&existing, meta), "tagwash");
+        let payload = payload_from(&edit_vorbis_pairs(&existing, meta), "music-robot");
         let si_idx = pieces.iter().position(|x| x.ty == 0).map(|i| i + 1).unwrap_or(0);
         pieces.insert(si_idx, Piece { ty: 4, payload });
         vc_done = true;

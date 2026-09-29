@@ -9,7 +9,7 @@ use crate::tag::read::read_tags;
 use crate::tag::write::intent::{is_unset_key, merge_fields, WriteMeta, WritableFields};
 use crate::tag::write::write_tags;
 
-pub const WASH_USAGE: &str = r#"用法: music-tag wash <dir> [--blank | --unset <f1,f2>] [--apply] [--bak] [--ffprobe-check] [--events <file>] [--json]
+pub const WASH_USAGE: &str = r#"用法: music-robot wash <dir> [--blank | --unset <f1,f2>] [--apply] [--bak] [--ffprobe-check] [--events <file>] [--json]
 
 批量清洗（两段式写安全，ARCHITECTURE §11.4）：
   默认 --preview：逐文件输出「将执行的剧本」状态行 + 汇总，不落盘

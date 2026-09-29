@@ -9,7 +9,7 @@ use crate::tag::write::intent::{
     is_unset_key, merge_fields, preview_view, sniff_image_mime, WritableFields,
 };
 
-pub const WRITE_USAGE: &str = r#"用法: music-tag write <file> [字段...] [--preview|--bak|--json]
+pub const WRITE_USAGE: &str = r#"用法: music-robot write <file> [字段...] [--preview|--bak|--json]
 
 修改单个音乐文件 | 局部编辑语义：只动你点名的字段，其余帧（含未知帧/APEv2）
 原样保留；想彻底清空用 blank。ID3v1 仅当原文件存在时同步（点名覆盖+原值继承）。

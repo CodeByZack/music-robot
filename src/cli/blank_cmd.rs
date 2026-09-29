@@ -5,7 +5,7 @@ use crate::tag::read::read_tags;
 use crate::tag::write::intent::{blank_view, diff_fields, format_diff, format_json_diff, format_json_diff_full, WriteMeta};
 use crate::tag::write::write_tags;
 
-pub const BLANK_USAGE: &str = r#"用法: music-tag blank <file> [--preview|--bak|--json]
+pub const BLANK_USAGE: &str = r#"用法: music-robot blank <file> [--preview|--bak|--json]
 
 把文件重建成标准空标签：ID3v2.4（0 帧）/ 空 Vorbis Comment / 空 ID3v1，
 所有标签信息（标题/歌手/封面/歌词/MBID/未知帧/APEv2）全部清空，音频字节不动。

@@ -14,7 +14,7 @@ fn flag_bool(flags: &Flags, key: &str) -> bool {
 use crate::cli::io::CommandIO;
 use crate::tag::read::{read_json, read_json_value, read_tags, warnings_for, AudioMetadata, Warning};
 
-pub const READ_USAGE: &str = r#"用法: music-tag read <file> [--json] [--extract-cover <out>] [--verbose]
+pub const READ_USAGE: &str = r#"用法: music-robot read <file> [--json] [--extract-cover <out>] [--verbose]
 
 查看单个音乐文件的标签（读取层 src/tag/read 同一通道）。
 

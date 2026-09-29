@@ -2,7 +2,7 @@
 //! ⚠️ 每个用例的 fixture 都**独占一个根目录**（按用例名隔离）：
 //!   cargo 默认并行跑用例，若共享同一个 sandbox 目录，多个线程同时 remove_dir_all 会互删，
 //!   表现成诡异的 "AlreadyExists" —— 第一次跑就是这么死的。
-use music_tag::fs::{FsError, PathSandbox};
+use music_robot::fs::{FsError, PathSandbox};
 use std::path::{Path, PathBuf};
 
 /// 建一棵带陷阱的受控目录：库根内 / 库根外 / 逃逸 symlink 各一份。
@@ -89,7 +89,7 @@ fn s05_write_operations_confined_to_root() {
 #[test]
 fn s06_atomic_replace_via_sandbox_keeps_audio_and_cleans_tmp() {
     // 原子写必须走沙箱：tmp 落在同目录（rename 同设备），失败不留残留
-    use music_tag::tag::write::atomic::atomic_replace_fs;
+    use music_robot::tag::write::atomic::atomic_replace_fs;
     let r = mkroot("s06");
     let sb = PathSandbox::new(&r).unwrap();
     let target = Path::new("ok.mp3");
@@ -100,7 +100,7 @@ fn s06_atomic_replace_via_sandbox_keeps_audio_and_cleans_tmp() {
     assert_eq!(sb.read_file(target).unwrap(), before, "校验失败后原内容必须不变");
     let leftovers: Vec<String> = std::fs::read_dir(&r).unwrap().filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.contains("tagwash-tmp")).collect();
+        .filter(|n| n.contains("music-robot-tmp")).collect();
     assert!(leftovers.is_empty(), "不得残留 tmp：{leftovers:?}");
     // 越界路径做原子写也必须被拒
     assert!(atomic_replace_fs(&sb, Path::new("/etc/nope"), b"x".to_vec(), None).is_err(), "库外路径不得原子写");
@@ -109,7 +109,7 @@ fn s06_atomic_replace_via_sandbox_keeps_audio_and_cleans_tmp() {
 #[test]
 fn s07_library_read_respects_sandbox() {
     // 端到端：把沙箱交给 read_tags，越界路径要报错而不是静默读成功
-    use music_tag::tag::read::{read_tags_fs, ReadError};
+    use music_robot::tag::read::{read_tags_fs, ReadError};
     let r = mkroot("s07");
     let sb = PathSandbox::new(&r).unwrap();
     assert!(read_tags_fs(&sb, &r.join("nope.mp3")).is_err());
@@ -143,7 +143,7 @@ fn s08_list_dir_stays_inside_and_marks_directories() {
 #[test]
 fn s09_missing_root_is_an_error_not_open_access() {
     // fail-closed：root 配错/不存在时绝不能退化成"无限制访问"
-    let e = PathSandbox::new(Path::new("/nonexistent/tagwash-sandbox-root-xyz")).err_or_fail();
+    let e = PathSandbox::new(Path::new("/nonexistent/music-robot-sandbox-root-xyz")).err_or_fail();
     assert!(matches!(e, FsError::Io { .. } | FsError::NotADirectory { path: _ }), "应有明确错误，实际 {e:?}");
 }
 

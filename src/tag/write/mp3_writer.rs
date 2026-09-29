@@ -8,8 +8,7 @@ use super::super::read::{find_ape_footer, latin1_encode, id3v1_parse, parse_id3v
 use super::atomic::{atomic_replace, AtomicError};
 use super::id3v2_editor::{edit_id3v2_frames, Id3EditMeta};
 
-/// MP3 写入契约 = 帧编辑元数据 + blank 标记（等价 TS `WriteMeta extends Id3EditMeta`）。
-pub type Mp3WriteMeta = Id3EditMeta;
+/// MP3 写入契约 = Id3EditMeta（Mp3WriteMeta 别名已删除，统一用 Id3EditMeta）。
 
 /// 文本帧（统一 UTF-8, encoding=3）——供空 meta 全量重建复用
 pub fn text_frame(id: &str, text: &str) -> Vec<u8> {
@@ -137,7 +136,7 @@ impl std::fmt::Display for WriteError {
 impl From<ReadError> for WriteError { fn from(e: ReadError) -> Self { WriteError::Read(std::io::Error::other(e.to_string())) } }
 
 /// MP3 写入：局部编辑 ID3v2（未知帧/APE 保留），原子替换 + 裸音频 hash 校验
-pub fn write_mp3_tags(path: &Path, meta: &Mp3WriteMeta) -> Result<(), WriteError> {
+pub fn write_mp3_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
     let orig_buf = std::fs::read(path).map_err(WriteError::Read)?;
     let (start, end) = mp3_audio_region(&orig_buf);
     let audio = orig_buf[start.min(orig_buf.len())..end.min(orig_buf.len())].to_vec();

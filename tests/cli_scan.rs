@@ -1,9 +1,9 @@
 //! scan / doctor / wash 批量命令测试（移植自 tests/cli/scan.test.ts / wash.test.ts / doctor.test.ts）
 use std::path::Path;
 
-use music_tag::cli::io::CollectingIO;
-use music_tag::cli::{run, scan, wash};
-use music_tag::scanner::{inspect_file, rel_path, scan_dir, scan_files, Level};
+use music_robot::cli::io::CollectingIO;
+use music_robot::cli::{run, wash};
+use music_robot::scanner::{inspect_file, rel_path, scan_dir, scan_files, Level};
 
 fn argv(a: &[&str]) -> Vec<String> { a.iter().map(|s| s.to_string()).collect() }
 
@@ -212,7 +212,7 @@ fn mklib2(name: &str, with_edge: bool) -> std::path::PathBuf {
     let out = io.out();
     assert!(out.lines().any(|l| l.contains("→ applied")), "apply 模式应有 applied 状态行：\n{out}");
     // 复核：被处理的文件必须真的空了
-    let m = music_tag::tag::read::read_tags(&base.join("warn-cover.mp3")).unwrap();
+    let m = music_robot::tag::read::read_tags(&base.join("warn-cover.mp3")).unwrap();
     let left = wash::blank_leftovers(&m);
     assert!(left.is_empty(), "blank 后不得有残留字段：{left:?}（title={:?} artists={:?}）", m.title, m.artists);
     // 坏文件必须被跳过
@@ -243,7 +243,7 @@ fn mklib2(name: &str, with_edge: bool) -> std::path::PathBuf {
     // 真 unset：title 必须消失，未点名字段保留
     let io = CollectingIO::new();
     assert_eq!(run(&argv(&["wash", base.to_str().unwrap(), "--unset", "title", "--apply"]), &io), 0);
-    let m = music_tag::tag::read::read_tags(&base.join("warn-cover.mp3")).unwrap();
+    let m = music_robot::tag::read::read_tags(&base.join("warn-cover.mp3")).unwrap();
     assert!(m.title.is_none(), "unset title 后应消失：{:?}", m.title);
     assert!(!m.albums.is_empty(), "未点名的 albums 必须保留：{:?}", m.albums);
     let _ = std::fs::remove_dir_all(&base);

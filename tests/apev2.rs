@@ -1,6 +1,6 @@
 //! APEv2 读侧测试 —— 用**合成字节**构造（TS 仓库无 APE 样本，差分对拍覆盖不到这条路径）。
 //! 手法与 TS roundtrip.test.ts 一致：手工摆规范字节，不使用被测写入器。
-use music_tag::tag::read::apev2::{find_ape_footer, parse_ape_tag};
+use music_robot::tag::read::apev2::{find_ape_footer, parse_ape_tag};
 
 /// 构造一个最小 APEv2 tag（footer-only，无 header），items 为 (key,value) 列表。
 fn build_ape(items: &[(&str, &str)], with_id3v1_tail: bool) -> Vec<u8> {
@@ -13,7 +13,7 @@ fn build_ape(items: &[(&str, &str)], with_id3v1_tail: bool) -> Vec<u8> {
     }
     // ⚠️ size 语义：APEv2 规范要求 "items 区 + footer(32)"，但**参照实现（TS apev2.ts）
     //   按 items-only 定位 tagRegion**（实测：写 items+32 时 TS 返回 null）。
-    //   为保持移植保真，fixture 跟随参照实现。差异已记入 MIGRATION.md「陷阱 3」。
+    //   为保持移植保真，fixture 跟随参照实现。差异已记入 HANDOFF.md §6.4 第 2 条。
     let footer_size = body.len();
     let mut f: Vec<u8> = Vec::new();
     f.extend_from_slice(b"APETAGEX");

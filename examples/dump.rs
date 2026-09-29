@@ -1,4 +1,4 @@
-use music_tag::tag::read::read_tags;
+use music_robot::tag::read::read_tags;
 fn main() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
     let mut fs: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path())

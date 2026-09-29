@@ -51,10 +51,32 @@ pub type EventSink = Arc<dyn Fn(&WashEvent)>;
 pub fn now_iso() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-            1970 + d.as_secs() / 86400 / 365, 1, 1, 0, 0, 0, 0),
+        Ok(d) => {
+            let secs = d.as_secs() as i64;
+            let days = secs / 86400;
+            let rem = secs % 86400;
+            let (year, month, day) = civil_from_days(days);
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+                year, month, day, rem / 3600, (rem % 3600) / 60, rem % 60, d.subsec_millis()
+            )
+        }
         Err(_) => "1970-01-01T00:00:00.000Z".into(),
     }
+}
+
+/// Unix 天数 → (年, 月, 日)（Howard Hinnant civil_from_days 算法）
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// 创建带 run 标识的 emit 闭包（对应 TS createLogger）
@@ -67,14 +89,22 @@ pub fn create_logger(cmd: &str, run: &str, sink: EventSink) -> EventSink {
     })
 }
 
-/// NDJSON 文件 sink：逐行追加；写入失败给清晰错误（不裸抛 NotFound）
+/// NDJSON 文件 sink：逐行追加；文件只开一次（不再逐事件开关）
 pub fn ndjson_sink(file: impl Into<String>) -> EventSink {
     use std::io::Write;
+    use std::sync::Mutex;
     let file = file.into();
+    let fh: Mutex<Option<std::fs::File>> = match std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+        Ok(f) => Mutex::new(Some(f)),
+        Err(e) => { eprintln!("事件流创建失败 ({file})：{e}——请确认父目录存在"); Mutex::new(None) }
+    };
     Arc::new(move |e: &WashEvent| {
-        if let Err(err) = std::fs::OpenOptions::new().create(true).append(true).open(&file)
-            .and_then(|mut f| f.write_all((e.as_value().to_string() + "\n").as_bytes())) {
-            eprintln!("事件流写入失败 ({file})：{err}——请确认父目录存在");
+        if let Ok(mut opt) = fh.lock() {
+            if let Some(f) = opt.as_mut() {
+                if let Err(err) = write!(f, "{}\n", e.as_value().to_string()) {
+                    eprintln!("事件流写入失败 ({file})：{err}——请确认父目录存在");
+                }
+            }
         }
     })
 }

@@ -11,13 +11,52 @@
 //! 否则 `--help` 会被当成文件路径（TS 也这么处理，见各 run* 的第一个 if）。
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct UsageError(pub String);
-impl std::fmt::Display for UsageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
+/// 用法错误分类——结构化枚举，不靠字符串匹配
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageErrorKind {
+    UnknownFlag,
+    DuplicateFlag,
+    NotANumber,
+    Usage,
+    Other,
 }
+
+#[derive(Debug)]
+pub struct UsageError {
+    pub kind: UsageErrorKind,
+    pub message: String,
+}
+
+impl std::fmt::Display for UsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 impl std::error::Error for UsageError {}
-impl UsageError { pub fn new(msg: impl Into<String>) -> Self { UsageError(msg.into()) } }
+
+impl UsageError {
+    /// 便捷构造（自动分类）——向后兼容现有调用点
+    pub fn new(msg: impl Into<String>) -> Self {
+        let message = msg.into();
+        let kind = Self::classify(&message);
+        UsageError { kind, message }
+    }
+
+    fn classify(msg: &str) -> UsageErrorKind {
+        if msg.contains("未知") {
+            UsageErrorKind::UnknownFlag
+        } else if msg.contains("只能出现一次") {
+            UsageErrorKind::DuplicateFlag
+        } else if msg.contains("必须是数字") {
+            UsageErrorKind::NotANumber
+        } else if msg.starts_with("用法") || msg.starts_with("music-robot") {
+            UsageErrorKind::Usage
+        } else {
+            UsageErrorKind::Other
+        }
+    }
+}
 
 /// 单个 flag 的值。`bare` = 出现过「不带值」的形态。
 #[derive(Debug, Clone, Default)]

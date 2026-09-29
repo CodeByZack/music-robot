@@ -2,7 +2,7 @@
 //!
 //! 迁移原则：**断言逐条照搬，不改期望值**。TS 侧每条断言都已按真实样本字节校准过
 //! （见下方注释），若 Rust 实现与期望不符，错的是实现，不是测试。
-use music_tag::tag::read::{gbk_sniff, id3v1_parse, read_tags};
+use music_robot::tag::read::{gbk_sniff, id3v1_parse, read_tags};
 
 /// fixtures/ 是指向 TS 仓库 samples/ 的符号链接，避免复制 65MB 音频。
 fn fixture(name: &str) -> std::path::PathBuf {
@@ -141,7 +141,7 @@ fn t09_txxx_custom_frame() {
 fn t10_mp3_without_tags() {
     // TS 侧用 ffmpeg 现场生成无标签文件；此处同样依赖 ffmpeg，缺失则显式跳过而非假通过。
     if which("ffmpeg").is_none() { eprintln!("skip: 无 ffmpeg"); return }
-    let tmp = std::env::temp_dir().join("rust-music-tag-notag.mp3");
+    let tmp = std::env::temp_dir().join("rust-music-robot-notag.mp3");
     let _ = std::fs::remove_file(&tmp);
     let st = std::process::Command::new("ffmpeg")
         .args(["-y", "-i", fixture("华夏传说 - 凤凰传奇.mp3").to_str().unwrap(),
@@ -156,7 +156,7 @@ fn t10_mp3_without_tags() {
 
 #[test]
 fn t11_magic_first_flac_renamed_as_mp3() {
-    let tmp = std::env::temp_dir().join("rust-music-tag-magic-flac.mp3");
+    let tmp = std::env::temp_dir().join("rust-music-robot-magic-flac.mp3");
     std::fs::copy(fixture("牵丝戏 - 白兀.flac"), &tmp).unwrap();
     let meta = read_tags(&tmp).unwrap();
     assert_eq!(meta.title.as_deref(), Some("牵丝戏"), "扩展名说谎也应读出真实格式的标签");
@@ -166,7 +166,7 @@ fn t11_magic_first_flac_renamed_as_mp3() {
 
 #[test]
 fn t12_decode_uslt_enc2_utf16be_no_bom() {
-    use music_tag::tag::read::id3v2::decode_uslt;
+    use music_robot::tag::read::id3v2::decode_uslt;
     // enc=2 定义即无 BOM 的 UTF-16BE：desc='测试' text='歌词'
     let mut body: Vec<u8> = vec![2];
     body.extend_from_slice(b"eng");
@@ -180,7 +180,7 @@ fn t12_decode_uslt_enc2_utf16be_no_bom() {
 
 #[test]
 fn t13_decode_text_odd_length_utf16be_no_panic() {
-    use music_tag::tag::read::id3v2::decode_text;
+    use music_robot::tag::read::id3v2::decode_text;
     // BE 分支要求偶数长：畸形截断帧不得 panic 炸掉整文件读取
     let _: String = decode_text(&[2, 0x4e]);                  // BE 1B
     let _: String = decode_text(&[2, 0x4e, 0x00, 0x4f]);      // BE 3B
@@ -190,7 +190,7 @@ fn t13_decode_text_odd_length_utf16be_no_panic() {
 #[test]
 fn t14_id3_prefix_with_unknown_container_rejected() {
     // OggS 容器必须拒绝，不得因 .mp3 扩展名走 mp3 分支
-    let tmp = std::env::temp_dir().join("rust-music-tag-id3-ogg.mp3");
+    let tmp = std::env::temp_dir().join("rust-music-robot-id3-ogg.mp3");
     let mut v: Vec<u8> = vec![0; 10];
     v[..3].copy_from_slice(b"ID3"); v[3] = 4; v[4] = 0; v[5] = 0; // tagSize = 0
     v.extend_from_slice(b"OggS");
@@ -218,12 +218,41 @@ fn id3v1_genre_always_at_127_not_padding() {
     let dst = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/id3v1-genre.mp3");
     std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
     std::fs::copy(&src, &dst).unwrap();
-    music_tag::tag::write::write_tags(&dst, &music_tag::tag::write::WriteMeta { blank_all: true, ..Default::default() }).unwrap();
+    music_robot::tag::write::write_tags(&dst, &music_robot::tag::write::WriteMeta { blank_all: true, ..Default::default() }).unwrap();
 
-    let back = music_tag::tag::read::read_tags(&dst).unwrap();
+    let back = music_robot::tag::read::read_tags(&dst).unwrap();
     assert!(back.genres.is_empty(), "blank 后 genres 必须为空，实际 {:?}（ID3v1 genre 字节错读）", back.genres);
     assert!(back.composers.is_empty());
-    let leftover = music_tag::cli::wash::blank_leftovers(&back);
+    let leftover = music_robot::cli::wash::blank_leftovers(&back);
     assert!(leftover.is_empty(), "blank_leftovers 必须干净：{leftover:?}");
     let _ = std::fs::remove_file(&dst);
+}
+
+/// 回归：读出的文本字段一律不得含 NUL。
+///
+/// 背景：ID3v2 的 TXXX 帧解码曾漏掉尾部 NUL 裁剪（`decode_text` 裁了、`decode_txxx` 没裁），
+/// 于是 `album_artist` 读出来是 `"优乐美\0"`。这不只是显示难看 —— 它会写进 `albums` 的
+/// `UNIQUE(name, album_artist)` 唯一键，让同一张专辑分裂成两条记录。
+///
+/// 变异点：把 `decode_txxx` 里的 `trim_trailing_nuls` 去掉 → 本用例必 RED。
+#[test]
+fn text_fields_never_contain_nul() {
+    for s in SAMPLES {
+        let m = read_tags(&fixture(s.file)).unwrap_or_else(|e| panic!("{} 读取失败：{}", s.name, e));
+        let mut fields: Vec<(String, String)> = Vec::new();
+        if let Some(v) = m.title.clone() { fields.push(("title".into(), v)) }
+        if let Some(v) = m.album_artist.clone() { fields.push(("album_artist".into(), v)) }
+        if let Some(v) = m.comment.clone() { fields.push(("comment".into(), v)) }
+        if let Some(v) = m.isrc.clone() { fields.push(("isrc".into(), v)) }
+        for (i, v) in m.artists.iter().enumerate() { fields.push((format!("artists[{i}]"), v.clone())) }
+        for (i, v) in m.albums.iter().enumerate() { fields.push((format!("albums[{i}]"), v.clone())) }
+        for (i, v) in m.genres.iter().enumerate() { fields.push((format!("genres[{i}]"), v.clone())) }
+        for (name, v) in &fields {
+            assert!(
+                !v.contains('\u{0}'),
+                "{} 的 {} 含 NUL：{:?}（字节 {:?}）",
+                s.name, name, v, v.as_bytes()
+            );
+        }
+    }
 }

@@ -1,10 +1,10 @@
 //! read 子命令测试 —— 警告计算 + 格式化 + 端到端（移植自 tests/cli/read-cmd.test.ts）
 //! ⚠️ 全部在内存里调 CLI 函数（不 spawn 子进程）：快得多，且能直接断言退出码。
-use music_tag::cli::args::UsageError;
-use music_tag::cli::io::CollectingIO;
-use music_tag::cli::read_cmd::format_read;
-use music_tag::cli::{run, TOP_USAGE};
-use music_tag::tag::read::{read_tags, warnings_for};
+use music_robot::cli::args::UsageError;
+use music_robot::cli::io::CollectingIO;
+use music_robot::cli::read_cmd::format_read;
+use music_robot::cli::{run, TOP_USAGE};
+use music_robot::tag::read::{read_tags, warnings_for};
 use std::path::Path;
 
 fn fx(n: &str) -> std::path::PathBuf {
@@ -30,9 +30,9 @@ fn argv(a: &[&str]) -> Vec<String> { a.iter().map(|s| s.to_string()).collect() }
     let dst = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/cli-r02.mp3");
     std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
     std::fs::copy(&f, &dst).unwrap();
-    let mut m = music_tag::tag::write::intent::WriteMeta::default();
+    let mut m = music_robot::tag::write::intent::WriteMeta::default();
     m.comment = Some("这是一条完全正常的中文注释".into());
-    music_tag::tag::write::write_tags(&dst, &m).unwrap();
+    music_robot::tag::write::write_tags(&dst, &m).unwrap();
     let meta = read_tags(&dst).unwrap();
     let w = warnings_for(&meta, &std::fs::read(&dst).unwrap());
     assert!(w.iter().all(|x| x.code != "gbk-mojibake"), "正常中文误报 GBK：{w:?}");
@@ -115,9 +115,9 @@ fn argv(a: &[&str]) -> Vec<String> { a.iter().map(|s| s.to_string()).collect() }
     let dst = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/cli-nocover.mp3");
     std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
     std::fs::copy(fx("华夏传说 - 凤凰传奇.mp3"), &dst).unwrap();
-    let mut m = music_tag::tag::write::intent::WriteMeta::default();
+    let mut m = music_robot::tag::write::intent::WriteMeta::default();
     m.unset_fields.push("pictures".to_string());
-    music_tag::tag::write::write_tags(&dst, &m).unwrap();
+    music_robot::tag::write::write_tags(&dst, &m).unwrap();
     let io = CollectingIO::new();
     let code = run(&argv(&["read", "--extract-cover", "/tmp/x.jpg", dst.to_str().unwrap()]), &io);
     assert_eq!(code, 1, "无封面导出应 exit 1");
@@ -131,7 +131,7 @@ fn argv(a: &[&str]) -> Vec<String> { a.iter().map(|s| s.to_string()).collect() }
     assert!(io.out().contains("--extract-cover"), "read -h 必须显示子命令帮助");
     let io = CollectingIO::new();
     assert_eq!(run(&argv(&["-V"]), &io), 0);
-    assert!(io.out().contains("music-tag 0.1.0"));
+    assert!(io.out().contains("music-robot 0.1.0"));
     let io = CollectingIO::new();
     assert_eq!(run(&argv(&["-h"]), &io), 0);
     assert!(io.out() == TOP_USAGE);
@@ -258,7 +258,7 @@ fn e13_scan_doctor_wash_are_wired_not_stubbed() {
 }
 
 #[allow(dead_code)]
-fn _usage_error_type(e: UsageError) -> String { e.0 }
+fn _usage_error_type(e: UsageError) -> String { e.message }
 
 #[test]
 fn e14_boolean_flag_eats_following_positional() {

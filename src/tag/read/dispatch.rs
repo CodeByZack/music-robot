@@ -51,7 +51,7 @@ fn ffprobe_binary() -> Option<std::path::PathBuf> {
     use std::sync::OnceLock;
     static CACHE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     CACHE.get_or_init(|| {
-        if std::env::var_os("TAGWASH_NO_FFPROBE").is_some() { return None }
+        if std::env::var_os("MR_NO_FFPROBE").is_some() { return None }
         for cand in ["/usr/bin/ffprobe", "/usr/local/bin/ffprobe"] {
             let ok = std::process::Command::new(cand).args(["-version"])
                 .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
@@ -256,7 +256,7 @@ pub fn read_flac(path: &Path) -> Result<AudioMetadata> {
                 "TITLE" => { if m.title.is_none() { m.title = Some(p.value) } }
                 "ARTIST" => { if !p.value.is_empty() { m.artists.push(p.value) } }
                 "ALBUM" => { if !p.value.is_empty() { m.albums.push(p.value) } }
-                "ALBUMARTIST" => { if m.album_artist.is_none() { m.album_artist = Some(p.value) } }
+                "ALBUMARTIST" => { if m.album_artist.is_none() { m.album_artist = Some(id3v2::trim_trailing_nuls(&p.value)) } }
                 "TRACKNUMBER" => { if m.track.is_none() { m.track = id3v2::parse_number_pair(&p.value).num } }
                 "TRACKTOTAL" => { if m.track_total.is_none() { m.track_total = id3v2::parse_number_pair(&p.value).num } }
                 "DISCNUMBER" => { if m.disc.is_none() { m.disc = id3v2::parse_number_pair(&p.value).num } }
