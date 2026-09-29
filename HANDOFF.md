@@ -53,10 +53,10 @@ els.filter(e => /^st_\d+_\d+$/.test(e.id) && e.backgroundColor === '#bbf7d0').ma
 1. 从画布读该步卡片（交付 / UT / ⚠ 补充项），**再到相关区块读详细设计** ——
    卡片往往只写一半，真正的规则（比如刮削的 0.80 阈值、去重的胜负规则）藏在别的区块里。
 2. 派一个**后台子代理**实现（`subagent` + `run_in_background: true`）。prompt 里必须写全：
-   构建环境、**可读但不可改**的文件清单、画布规格原文、硬性规范（零 unwrap / 中文注释 /
-   不加依赖 / 不用 `#[allow]`）、测试要求、以及**当前测试基线**（弄红就是回归）。
+   构建环境、**可读但不可改**的文件清单、画布规格原文、硬性规范（**生产路径无可达 unwrap**，
+   口径见 §7.5 / 中文注释 / 不加依赖 / 不用 `#[allow]`）、测试要求、以及**当前测试基线**（弄红就是回归）。
 3. 子代理交付后**自己独立复核**，不要采信它的自述：
-   `cargo check --lib` 零警告 · `cargo test --lib` 对得上基线 · 生产路径 grep 零 unwrap ·
+   `cargo check --lib` 零警告 · `cargo test --lib` 对得上基线 · 生产路径无可达 unwrap（§7.5 有口径与复核命令）·
    关键不变量**自己做一次变异测试**（故意改坏实现，看对应测试是否变红）。
 4. **值得的步骤把服务真跑起来打请求**（见 §9）。这一步抓到过单测全绿但真实存在的漏洞，别省。
 5. 画布标绿 + 更新本文件的进度与基线。
@@ -181,6 +181,9 @@ music-robot/
 ├── plugins/            # example.{js,py,sh}（集成测试素材，永远返回 confidence 0.95）
 │                       # + musicbrainz.js（真实刮削插件，**已入库**）；用户自己的插件被 gitignore
 │                       # ⚠️ 按文件名升序尝试、命中即停 —— example.js 在的话真插件永不执行
+├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
+│                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
+│                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
 ├── scripts/api_test.py # 端到端 API 脚本（起临时服务逐条断言，126 项）
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
 ├── music-server-architecture.excalidraw   # ★ 全部架构设计 + 28 步实施计划
@@ -512,6 +515,33 @@ CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID
 - **IO 错误 ≠ 路径越权**。`FsError::Escape` 和 `FsError::Io` 必须分开、可观测 ——
   服务端要能区分「用户传了坏路径」和「磁盘出问题了」。
 - **生产路径零 `unwrap` / `expect` / `panic!`**；测试里随便用。
+  ⚠️ **2026-09 复核口径：这条指「生产路径无可达 panic」，不是字面零命中。**
+  按下方的命令剔掉 `#[cfg(test)]` 后，`src/` 里仍有 **15 处**常编命中，逐条确认**全部不可失败**：
+  - **11 处是构造上不可失败的惯用法** —— `tag/read/flac.rs`×3、`tag/read/probe.rs`×3 是
+    `slice[..4].try_into().unwrap()`（上一行刚做过长度守卫）；`tag/read/dispatch.rs`×2、
+    `tag/write/flac_writer.rs`×1、`tag/write/intent.rs`×1 是 `is_some()` 守卫之后的解包；
+    `logger.rs`×1 是对 `json!({...})` 字面量取 `as_object_mut()`。
+  - **4 处是 `cli/io.rs` 里 `CollectingIO` 的 `Mutex::lock().unwrap()`** —— **唯一真正可失败**的一类
+    （Mutex 中毒即 panic），且该类型**没有 `#[cfg(test)]` 门控**，是 `pub` 且常编的「测试用」辅助类型。
+    与 §1 警告的「std Mutex 不可重入」同源，动它前先想清楚影响面。
+  - 另有两个文件计数很高但**不算**：`src/server/tests.rs`（39 处）和 `src/watcher/inotify_poc.rs`（6 处）——
+    它们的门控写在**父模块**里（`src/server/mod.rs` 的 `#[cfg(test)] mod tests;`、
+    `src/watcher/mod.rs` 的 `#[cfg(test)] mod inotify_poc;`）。
+    **只在文件内部搜 `#[cfg(test)]` 会把这两个文件误判成生产代码。**
+
+  ```bash
+  # 复核：剔掉每个文件从 #[cfg(test)] 起至文件尾的测试代码，再统计
+  python3 -c "
+  import re,pathlib
+  pat=re.compile(r'\.unwrap\(\)|\.expect\(|panic!\(|unreachable!\(')
+  for p in sorted(pathlib.Path('src').rglob('*.rs')):
+      s=p.read_text(encoding='utf-8',errors='replace'); i=s.find('#[cfg(test)]')
+      n=len(pat.findall(s if i<0 else s[:i]))
+      if n: print(n,p)
+  "
+  # 期望 60 命中 = 真实 15 + server/tests.rs 39 + watcher/inotify_poc.rs 6（后两者即上面的误报）
+  ```
+  ⚠️ `examples/`（`cargo run --example`）不算生产路径，它内部直接用了 `unwrap`，不要照 §7.5 去改它。
 - 面向用户 / 客户端的错误文案**一律中文**；内部细节（服务器路径、SQL、stderr）只进日志。
 
 ### 7.6 服务端读写的唯一入口
