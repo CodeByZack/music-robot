@@ -1,5 +1,12 @@
 target/
 
+# 本机专属的环境文件，不入库 —— 模板是仓库里的 env.example。
+#   env.sh    : 当前这台 NAS 专属（写死了工具链与二进制的绝对路径），对别人没用
+#   env.local : 你从 env.example 复制出来改的那份
+env.sh
+env.local
+.env
+
 # 测试音频样本不入库（64M）——真拷贝放本地，重建方式见 HANDOFF.md §8.3
 /fixtures
 

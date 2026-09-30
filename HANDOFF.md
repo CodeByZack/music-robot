@@ -85,6 +85,7 @@ els.filter(e => /^st_\d+_\d+$/.test(e.id) && e.backgroundColor === '#bbf7d0').ma
 
 ```bash
 # 方式一：项目内（附带 mt 别名）
+# ⚠️ env.sh 是本机专属文件、不入库；新克隆的仓库里没有它，只有 env.example
 cd /vol1/@appshare/dsh/data/music-robot && source env.sh
 mt -h
 
@@ -158,7 +159,8 @@ cargo test
 music-robot/
 ├── Cargo.toml          # 依赖与引入理由都写在注释里（106 个锁包）
 ├── LICENSE-MIT / LICENSE-APACHE   # 双许可 MIT OR Apache-2.0
-├── env.sh              # source 一下就有 cargo（附带 mt 别名）
+├── env.example         # 环境变量示例（cp 成 env.local 改完再 source）
+│                       # ⚠️ env.sh（工具链 + mt 别名）是**本机专属**的，已从版本库移除并 gitignore
 ├── src/
 │   ├── main.rs         # 唯一可执行入口，只做 stdout/stderr 桥接
 │   ├── lib.rs          # 库根（13 个模块）

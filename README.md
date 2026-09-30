@@ -124,6 +124,8 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 | `MR_DATABASE_PATH` | SQLite 路径（支持 `~`） |
 | `MR_FFMPEG_PATH` / `MR_CACHE_DIR` | ffmpeg 与转码缓存 |
 | `MR_PLUGINS_DIR` / `MR_SANDBOX` / `MR_PLUGIN_USER` | 插件目录与沙箱（⚠️ 后两者目前**能读能校验，但尚未真正接进沙箱行为**，沙箱用的是固定默认值） |
+
+完整带注释的模板见 [`env.example`](env.example)：`cp env.example env.local`，改完 `source env.local` 再启动。
 | `MR_LOG_LEVEL` | 日志级别 |
 
 ---
