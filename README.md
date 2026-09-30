@@ -160,10 +160,10 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ```bash
 cargo test --lib            # 库用例    483 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
-python3 scripts/api_test.py # 端到端 API（起临时服务逐条断言，126 项）
+node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，126 项）
 ```
 
-`scripts/api_test.py` 自带两个防呆：**拒绝跑陈旧二进制**（二进制比源码旧就拒绝运行）、**转码缓存目录已隔离**（不会写脏你的 `~/.cache`）。
+`scripts/api_test.mjs` 自带两个防呆：**拒绝跑陈旧二进制**（二进制比源码旧就拒绝运行）、**转码缓存目录已隔离**（不会写脏你的 `~/.cache`）。
 
 > 测试样本 `fixtures/`（65M）不入库。它是真实脏数据样本（广告词 / GBK 乱码 / ID3v1 垃圾尾），重建方式见 [`HANDOFF.md`](HANDOFF.md) §8.3。
 
