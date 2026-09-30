@@ -126,6 +126,9 @@ pub fn apply(cmd: &mut Command, cfg: &SandboxConfig) -> Result<(), SandboxError>
 /// 六条 rlimit 的字节/数量，已做溢出检查。`None` = 不设置。
 #[derive(Debug, Clone, Copy)]
 struct LimitPlan {
+    /// macOS 上整个字段不参与编译：那边 `setrlimit(RLIMIT_DATA)` 必然 EINVAL，
+    /// 唯一读取点已 cfg 掉，字段留着只会报 dead_code。
+    #[cfg(not(target_os = "macos"))]
     mem_bytes: Option<u64>,
     cpu_sec: Option<u64>,
     procs: Option<u64>,
@@ -149,6 +152,7 @@ impl LimitPlan {
             }
         }
         Ok(LimitPlan {
+            #[cfg(not(target_os = "macos"))]
             mem_bytes: mb(cfg.memory_mb, "memory_mb")?,
             cpu_sec: count(cfg.cpu_sec),
             procs: count(cfg.procs),
