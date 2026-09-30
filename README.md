@@ -123,8 +123,9 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 |---|---|
 | `MR_JWT_SECRET` | JWT 签名密钥 |
 | `MR_LIBRARY_ROOTS` | 曲库根目录（`:` 或 `,` 分隔） |
-| `MR_DATABASE_PATH` | SQLite 路径（支持 `~`） |
-| `MR_FFMPEG_PATH` / `MR_CACHE_DIR` | ffmpeg 与转码缓存 |
+| `MR_DATA_DIR` | 数据根：一个变量管住数据库 / 转码缓存 / 日志（默认 `~/.local/share/music-robot`） |
+| `MR_DATABASE_PATH` / `MR_CACHE_DIR` | 单独挪走数据库或缓存（优先于 `MR_DATA_DIR`） |
+| `MR_FFMPEG_PATH` | ffmpeg 可执行文件（走 PATH） |
 | `MR_PLUGINS_DIR` / `MR_SANDBOX` / `MR_PLUGIN_USER` | 插件目录与沙箱（⚠️ 后两者目前**能读能校验，但尚未真正接进沙箱行为**，沙箱用的是固定默认值） |
 
 完整带注释的模板见 [`env.example`](env.example)：`cp env.example env.local`，改完 `source env.local` 再启动。
@@ -162,7 +163,7 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    483 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    485 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
 node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，126 项）
 ```

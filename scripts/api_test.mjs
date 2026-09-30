@@ -264,7 +264,7 @@ async function main() {
   fs.mkdirSync(music, { recursive: true });
   const dbPath = path.join(work, 'music.db');
   const cacheDir = path.join(work, 'transcode-cache');
-  // ⚠️ 必须隔离转码缓存目录！默认是 ~/.cache/music-robot/transcode，
+  // ⚠️ 必须隔离转码缓存目录！默认是 ~/.local/share/music-robot/transcode，
   // 而本脚本用的是**假 ffmpeg**（产物是垃圾字节）。不隔离就会把用户真实的
   // 缓存目录写脏 —— 而且因为缓存键只有 song_id+audio_hash，
   // 之后用真 ffmpeg 也只会命中那份脏缓存。这条踩过一次，务必保留。

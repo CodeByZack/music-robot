@@ -29,9 +29,9 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **483 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **485 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **607 passed / 0 failed / 1 ignored** |
+| 合计 | **609 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **126 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
@@ -348,9 +348,10 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 |---|---|
 | `MR_JWT_SECRET` | `server.jwt_secret` |
 | `MR_LIBRARY_ROOTS` | `storage.library_roots`（`:` 或 `,` 分隔）|
-| `MR_DATABASE_PATH` | `database.path`（支持 `~`）|
+| `MR_DATA_DIR` | **数据根**：一次设好 `database.path` / `audio.cache_dir` / `log.dir` 三项（`<根>/music.db`、`/transcode`、`/logs`）。支持 `~` |
+| `MR_DATABASE_PATH` | `database.path`（支持 `~`）⚠️ 优先于 `MR_DATA_DIR` |
 | `MR_FFMPEG_PATH` | `audio.ffmpeg_path` |
-| `MR_CACHE_DIR` | `audio.cache_dir`（支持 `~`）|
+| `MR_CACHE_DIR` | `audio.cache_dir`（支持 `~`）⚠️ 优先于 `MR_DATA_DIR` |
 | `MR_LOG_LEVEL` | `log.level` |
 | `MR_SANDBOX` | `plugins.sandbox` |
 | `MR_PLUGIN_USER` | `plugins.plugin_user` ⚠️ **见 §6 未决疑点** |
@@ -585,7 +586,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 ### 8.2 测试文件对照（**实测数字**）
 
-库用例（`cargo test --lib`）共 **483 passed / 0 failed / 1 ignored**。集成测试：
+库用例（`cargo test --lib`）共 **485 passed / 0 failed / 1 ignored**。集成测试：
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -604,7 +605,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**126 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
-它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.cache/music-robot/transcode`）。
+它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 
 ### 8.3 测试数据（`fixtures/`）
 

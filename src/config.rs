@@ -42,12 +42,16 @@ use serde_json::{Map, Value};
 pub const SANDBOX_MODES: [&str; 7] =
     ["auto", "none", "posix", "dropped", "bwrap", "systemd", "docker"];
 
-/// 数据库缺省位置（`~` 在 [`Config::defaults`] 里按 `HOME` 展开）。
-const DEFAULT_DATABASE_PATH: &str = "~/.local/share/music-robot/music.db";
-/// 转码缓存缺省目录（`~` 同上展开）。
-const DEFAULT_CACHE_DIR: &str = "~/.cache/music-robot/transcode";
-/// 日志缺省目录（`~` 同上展开）。
-const DEFAULT_LOG_DIR: &str = "~/.local/share/music-robot/logs";
+/// 运行期数据根目录（`~` 在 [`Config::defaults`] 里按 `HOME` 展开）。
+///
+/// 数据库 / 转码缓存 / 日志**都放在它下面**，所以只需要一个 `MR_DATA_DIR`
+/// 就能把这三样一起搬家，不必分别设三个变量。
+const DEFAULT_DATA_DIR: &str = "~/.local/share/music-robot";
+
+/// 数据根下的某一项（`~` 已展开）。`leaf` 是相对路径，如 `music.db` / `transcode`。
+fn data_dir_path(leaf: &str) -> String {
+    format!("{}/{}", expand_tilde(DEFAULT_DATA_DIR), leaf)
+}
 /// 插件目录缺省值。**相对进程 cwd**，所以不做 `~` 展开（也允许用户显式写 `~/plugins`）。
 const DEFAULT_PLUGINS_DIR: &str = "plugins";
 
@@ -318,11 +322,11 @@ impl Config {
                 library_roots: vec!["/music".to_string()],
             },
             database: DatabaseConfig {
-                path: expand_tilde(DEFAULT_DATABASE_PATH),
+                path: data_dir_path("music.db"),
             },
             audio: AudioConfig {
                 transcode: true,
-                cache_dir: expand_tilde(DEFAULT_CACHE_DIR),
+                cache_dir: data_dir_path("transcode"),
                 cache_expiry_days: 30,
                 ffmpeg_path: "ffmpeg".to_string(),
             },
@@ -363,7 +367,7 @@ impl Config {
             },
             log: LogConfig {
                 level: "info".to_string(),
-                dir: expand_tilde(DEFAULT_LOG_DIR),
+                dir: data_dir_path("logs"),
             },
         }
     }
@@ -567,6 +571,14 @@ impl Config {
                 });
             }
             self.storage.library_roots = roots;
+        }
+        // MR_DATA_DIR：一次把数据库 / 转码缓存 / 日志都挪到同一个目录下。
+        // ⚠️ 必须**排在**下面几个更具体的路径变量之前 —— 后处理的会覆盖它。
+        if let Some(x) = env_string(get, "MR_DATA_DIR", "MR_DATA_DIR")? {
+            let base = expand_tilde_with(&x, home.as_deref());
+            self.database.path = format!("{base}/music.db");
+            self.audio.cache_dir = format!("{base}/transcode");
+            self.log.dir = format!("{base}/logs");
         }
         if let Some(x) = env_string(get, "MR_DATABASE_PATH", "database.path")? {
             self.database.path = expand_tilde_with(&x, home.as_deref());
@@ -946,18 +958,15 @@ mod tests {
         assert_eq!(c.storage.kind, "local");
         assert_eq!(c.storage.library_roots, vec!["/music"]);
 
-        let want_db = match real_home() {
-            Some(h) => format!("{h}/.local/share/music-robot/music.db"),
-            None => DEFAULT_DATABASE_PATH.to_string(),
+        // 数据库 / 缓存 / 日志必须同处一个数据根下 —— 这正是「一个 MR_DATA_DIR 就能搬家」的前提
+        let want_data = match real_home() {
+            Some(h) => format!("{h}/.local/share/music-robot"),
+            None => DEFAULT_DATA_DIR.to_string(),
         };
-        assert_eq!(c.database.path, want_db);
+        assert_eq!(c.database.path, format!("{want_data}/music.db"));
 
         assert!(c.audio.transcode);
-        let want_cache = match real_home() {
-            Some(h) => format!("{h}/.cache/music-robot/transcode"),
-            None => DEFAULT_CACHE_DIR.to_string(),
-        };
-        assert_eq!(c.audio.cache_dir, want_cache);
+        assert_eq!(c.audio.cache_dir, format!("{want_data}/transcode"));
         assert_eq!(c.audio.cache_expiry_days, 30);
         assert_eq!(c.audio.ffmpeg_path, "ffmpeg");
 
@@ -979,11 +988,12 @@ mod tests {
         assert_eq!(c.plugins.plugin_user, "music-plugin");
 
         assert_eq!(c.log.level, "info");
-        let want_log = match real_home() {
-            Some(h) => format!("{h}/.local/share/music-robot/logs"),
-            None => DEFAULT_LOG_DIR.to_string(),
-        };
-        assert_eq!(c.log.dir, want_log);
+        assert_eq!(c.log.dir, format!("{want_data}/logs"));
+
+        // 三条路径都落在同一个数据根下（改数据根 = 三者一起搬）
+        for p in [&c.database.path, &c.audio.cache_dir, &c.log.dir] {
+            assert!(p.starts_with(&want_data), "{p} 不在数据根 {want_data} 下");
+        }
 
         // Default 与 defaults() 是同一个东西
         assert_eq!(Config::default(), c);
@@ -1168,6 +1178,32 @@ mod tests {
                 }
             ),
             "实际 {err:?}"
+        );
+    }
+
+    #[test]
+    fn data_dir_moves_all_three_paths_together() {
+        let mut c = Config::defaults();
+        c.apply_env(&env(&[("HOME", "/home/u"), ("MR_DATA_DIR", "~/mr")]))
+            .expect("MR_DATA_DIR 应成功");
+        assert_eq!(c.database.path, "/home/u/mr/music.db");
+        assert_eq!(c.audio.cache_dir, "/home/u/mr/transcode");
+        assert_eq!(c.log.dir, "/home/u/mr/logs");
+    }
+
+    #[test]
+    fn specific_path_vars_still_override_data_dir() {
+        let mut c = Config::defaults();
+        c.apply_env(&env(&[
+            ("MR_DATA_DIR", "/base"),
+            ("MR_CACHE_DIR", "/elsewhere"),
+        ]))
+        .expect("应成功");
+        assert_eq!(c.database.path, "/base/music.db");
+        assert_eq!(c.log.dir, "/base/logs");
+        assert_eq!(
+            c.audio.cache_dir, "/elsewhere",
+            "更具体的 MR_CACHE_DIR 应压过 MR_DATA_DIR"
         );
     }
 
