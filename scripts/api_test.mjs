@@ -363,15 +363,15 @@ async function main() {
       username: 'alice',
       password: 'password123',
     });
-    check('注册首个用户 → 201', st, 201);
+    check('注册首个用户（引导）→ 201', st, 201);
     check('首个用户是 admin', body?.user?.role ?? null, 'admin');
 
+    // 库非空后公开注册必须关闭 —— 否则陌生人自己开个号就能拿走整个曲库
     [st, , body] = await c.json('POST', '/api/auth/register', {
       username: 'bob',
       password: 'password123',
     });
-    check('注册第二个用户 → 201', st, 201);
-    check('第二个用户是 user', body?.user?.role ?? null, 'user');
+    check('库非空后再注册 → 403（引导已完成）', st, 403);
 
     [st, , body] = await c.json('POST', '/api/auth/login', {
       username: 'alice',
@@ -380,6 +380,14 @@ async function main() {
     check('登录 → 200', st, 200);
     c.token = body?.token ?? '';
     checkTrue('登录返回非空 token', c.token.length > 20, `token 太短: ${brief(c.token)}`);
+
+    // 建号改由管理员发起
+    [st, , body] = await c.json('POST', '/api/admin/users', {
+      username: 'bob',
+      password: 'password123',
+    });
+    check('管理员建号 → 201', st, 201);
+    check('建出来的是 user', body?.user?.role ?? null, 'user');
 
     [, , body] = await c2.json('POST', '/api/auth/login', {
       username: 'bob',

@@ -29,10 +29,10 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **485 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **487 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **609 passed / 0 failed / 1 ignored** |
-| 端到端 API 脚本 | `node scripts/api_test.mjs` → **126 通过 / 0 失败** |
+| 合计 | **611 passed / 0 failed / 1 ignored** |
+| 端到端 API 脚本 | `node scripts/api_test.mjs` → **127 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
@@ -186,18 +186,19 @@ music-robot/
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，126 项）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，127 项）
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
 ├── music-server-architecture.excalidraw   # ★ 全部架构设计 + 28 步实施计划
 └── HANDOFF.md          # ← 本文件（**仓库里唯一的文档**）
 ```
 
-### 全部 HTTP 路由（21 条，与 `src/server/routes/mod.rs` 一一对应）
+### 全部 HTTP 路由（**30 条路径 / 38 个操作**，与 `src/server/routes/mod.rs` 一一对应）
 
 | 分组 | 路由 |
 |---|---|
-| 公开 | `GET /healthz` · `POST /api/auth/register` · `POST /api/auth/login` |
-| 认证 | `GET /api/auth/me` · `GET /api/admin/ping`（admin 占位） |
+| 公开 | `GET /healthz` · `POST /api/auth/login` |
+| 引导 | `POST /api/auth/register` —— **仅库空时可用**（初始化出首个 admin），之后一律 403 |
+| 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号，注册关闭后唯一入口）· `GET /api/admin/ping`（admin 占位） |
 | 曲库 | `GET /api/library` · `GET /api/songs/{id}` · `GET /api/albums/{id}` · `GET /api/artists/{name}` · `GET /api/search` |
 | 任务 | `POST/GET /api/scan` · `GET /api/scan/{batch_id}` · `POST/GET /api/scrape` · `GET /api/scrape/{batch_id}` · `GET /api/jobs` |
 | 音频 | `GET /api/stream/{id}`（Range · `?format=mp3` 转码）· `GET /api/songs/{id}/cover` |
@@ -261,7 +262,7 @@ pub trait CommandIO { fn log(&self, m: &str); fn error(&self, m: &str); }
 
 AppState / 统一 ApiError 形状 / build_router / 优雅关闭 · JWT（HS256，拒绝 alg:none）+
 argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
-后台长任务（单例锁，并发触发恰好 1 个成功、其余 409）· 21 条路由（见 §2）·
+后台长任务（单例锁，并发触发恰好 1 个成功、其余 409）· 30 条路径（见 §2）·
 `scripts/api_test.mjs` 端到端覆盖。
 
 ### ❌ 未完成
@@ -586,7 +587,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 ### 8.2 测试文件对照（**实测数字**）
 
-库用例（`cargo test --lib`）共 **485 passed / 0 failed / 1 ignored**。集成测试：
+库用例（`cargo test --lib`）共 **487 passed / 0 failed / 1 ignored**。集成测试：
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -603,7 +604,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 | `tests/plugin_e2e.rs` | 3 | **真拉起 `node` / `python3` / `sh`** 跑插件协议 |
 | **合计** | **124** | |
 
-另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**126 通过 / 0 失败**，
+另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**127 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
 它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 

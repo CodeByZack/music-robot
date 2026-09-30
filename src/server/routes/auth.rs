@@ -2,23 +2,28 @@
 //!
 //! 路径（画布未规定，本步骤定下）：
 //!
-//! * `POST /api/auth/register` —— 注册；**首个用户自动成为 admin**（见下），之后一律 user；
+//! * `POST /api/auth/register` —— **初始化引导**：只在库空时可用，首个用户成为
+//!   admin（见下）；之后一律 403，建号改走 `POST /api/admin/users`；
 //! * `POST /api/auth/login`    —— 登录，返回 Bearer token；
 //! * `GET  /api/auth/me`       —— 返回当前登录用户（验证中间件真的生效）；
+//! * `POST /api/admin/users`   —— 管理员建号（注册关闭后的唯一入口），仅 admin；
 //! * `GET  /api/admin/ping`    —— 仅 admin 可访问的**占位**接口（见下方注释）。
 //!
 //! 响应体一律手写 [`serde_json::Value`]（项目规范：不引 serde derive）。
 //!
-//! ## 首个用户是 admin 的策略与风险
+//! ## 为什么注册只在库空时可用
 //!
 //! 全新部署时库里没有任何用户，如果注册出来的都是普通用户，就没人能进管理端。
 //! 因此「当前用户表为空 → 第一个注册者成为 admin」。
 //!
-//! **风险**：这条规则把「谁先注册」变成了「谁能拿到管理员权限」。如果服务直接
-//! 暴露在公网，攻击者可以在部署方注册之前抢先注册，直接拿到 admin。缓解方式：
-//! 部署时先在本机（或内网）完成首个管理员注册，再对公网开放；或者干脆在公网形态下
-//! 关闭 /api/auth/register（S16+ 的管理端「创建用户」接口接管）。这里选择保留
-//! 注册接口，是为了让单机自部署的开箱体验可用。
+//! 但这同时把「谁先注册」变成了「谁能拿到管理员权限」—— 服务一旦先在公网可见，
+//! 攻击者可以抢在部署方之前注册。所以注册**只承担初始化引导这一次**：
+//! 库非空即 403，之后建号必须由管理员发起（`POST /api/admin/users`）。
+//! 这与 Navidrome（首个 admin 在 UI 引导，其余用户由 `navidrome user create` 建）
+//! 和 Jellyfin（管理员添加用户）的做法一致。
+//!
+//! 早期版本曾把注册一直开着，理由是「单机自部署的开箱体验」；现在由引导 +
+//! 管理端建号覆盖同一个体验，且不留口子。
 
 use std::sync::Arc;
 
@@ -42,6 +47,14 @@ use crate::server::state::AppState;
 /// **用户不存在**与**密码错误**必须返回同一条响应（状态码 + body 完全一致），
 /// 否则攻击者可以靠响应差异枚举出哪些用户名存在。
 const LOGIN_FAILED_MESSAGE: &str = "用户名或密码错误";
+
+/// 库非空时再调 `/api/auth/register` 的对外文案。
+///
+/// 注册是**初始化引导**（bootstrap），不是开放注册：首个管理员建出来后即关闭，
+/// 之后由管理员走 `POST /api/admin/users` 建号。这与 Navidrome / Jellyfin 一致
+/// （首个管理员引导出来，其余用户由管理员创建）。
+const REGISTER_CLOSED_MESSAGE: &str =
+    "注册已关闭：管理员已存在，请由管理员在管理端创建用户";
 
 /// 口令最少字符数（按 Unicode 字符计，不是字节）。
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -117,6 +130,66 @@ fn validate_password(password: &str) -> Result<(), ApiError> {
 ///
 /// argon2 是慢 KDF，计算哈希与写库都放在 spawn_blocking 里（S14 铁律）。
 ///
+/// 建号的共用路径：算哈希 → IMMEDIATE 事务 → 定角色 → 插入 → 读回。
+///
+/// `pick_role` 拿到「库里已有多少用户」，返回该给什么角色（或拒绝）：
+/// 引导注册靠它做「0 个 → admin，否则 403」，管理端建号则直接给固定角色。
+///
+/// ⚠️ **数数与插入必须在同一个 IMMEDIATE 事务里** —— 否则两个并发请求会同时读到 0，
+/// 双双变成 admin。
+async fn create_user(
+    state: &AppState,
+    username: String,
+    password: String,
+    pick_role: impl FnOnce(i64) -> Result<Role, ApiError> + Send + 'static,
+) -> Result<User, ApiError> {
+    let db = Arc::clone(&state.db);
+    tokio::task::spawn_blocking(move || -> Result<User, ApiError> {
+        // 先算哈希（几十毫秒的 CPU 密集操作），再借连接，缩短占着池的时间。
+        let password_hash = hash_password(&password)?;
+        let mut conn = db.acquire()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = users::count(&tx)?;
+        let role = pick_role(existing)?;
+        let new_user = User {
+            id: 0,
+            username,
+            password_hash,
+            role,
+            created_at: 0,
+            last_login: None,
+        };
+        let id = users::insert(&tx, &new_user)?;
+        // 读回数据库里的那一行，保证返回的 role / created_at / id 与库一致。
+        let stored = users::get(&tx, id)?
+            .ok_or_else(|| ApiError::internal("建号后读不回新用户"))?;
+        tx.commit()?;
+        Ok(stored)
+    })
+    .await
+    .map_err(|join| ApiError::internal(format!("建号任务异常退出：{join}")))?
+}
+
+/// 把新用户包成 201 响应，并打一行日志（**只说用户名与角色，绝不打印口令或哈希**）。
+fn created_response(who: &str, created: &User) -> Response {
+    eprintln!(
+        "[server] {}：{}（角色 {}）",
+        who,
+        created.username,
+        created.role.as_str()
+    );
+    (
+        StatusCode::CREATED,
+        Json(json!({ "user": user_json(created) })),
+    )
+        .into_response()
+}
+
+/// `POST /api/auth/register` —— **初始化引导**：只在库里一个用户都没有时可用。
+///
+/// 首个用户成为 admin；此后本接口一律 403（[`REGISTER_CLOSED_MESSAGE`]），
+/// 建号改走 `POST /api/admin/users`。
+///
 /// ⚠️ **注册也要检查密钥是否已配置**。注册本身不需要密钥，但不拦就会给
 /// 「首个注册用户自动成为 admin」留出一个提权窗口：运维漏配 MR_JWT_SECRET 时
 /// 有人抢先注册，等运维补上密钥后那个人直接就是管理员。
@@ -130,46 +203,45 @@ pub async fn register(
     let username = normalize_username(&raw_username)?;
     validate_password(&password)?;
 
-    let db = Arc::clone(&state.db);
-    let created = tokio::task::spawn_blocking(move || -> Result<User, ApiError> {
-        // 先算哈希（几十毫秒的 CPU 密集操作），再借连接，缩短占着池的时间。
-        let password_hash = hash_password(&password)?;
-        let mut conn = db.acquire()?;
-        // IMMEDIATE 事务：先拿写锁再做「数一数是不是第一个用户」，
-        // 避免两个并发注册同时读到 0、都把自己变成 admin。
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = users::count(&tx)?;
-        let role = if existing == 0 { Role::Admin } else { Role::User };
-        let new_user = User {
-            id: 0,
-            username,
-            password_hash,
-            role,
-            created_at: 0,
-            last_login: None,
-        };
-        let id = users::insert(&tx, &new_user)?;
-        // 读回数据库里的那一行，保证返回的 role / created_at / id 与库一致。
-        let stored = users::get(&tx, id)?
-            .ok_or_else(|| ApiError::internal("注册成功后读不回新用户"))?;
-        tx.commit()?;
-        Ok(stored)
+    let created = create_user(&state, username, password, |existing| {
+        if existing == 0 {
+            Ok(Role::Admin)
+        } else {
+            Err(ApiError::forbidden(REGISTER_CLOSED_MESSAGE))
+        }
     })
-    .await
-    .map_err(|join| ApiError::internal(format!("注册任务异常退出：{join}")))??;
+    .await?;
 
-    // 日志里只说「注册了谁、什么角色」，绝不打印口令或哈希。
-    eprintln!(
-        "[server] 新用户注册：{}（角色 {}）",
-        created.username,
-        created.role.as_str()
-    );
+    Ok(created_response("首个管理员注册", &created))
+}
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "user": user_json(&created) })),
-    )
-        .into_response())
+/// `POST /api/admin/users` —— 管理员建号（注册关闭后**唯一**的建号入口）。
+///
+/// 请求体 `{"username": "...", "password": "...", "role": "user"|"admin"}`；
+/// `role` 省略或为 `null` 即 `user`。只有 admin 能调用（非 admin 403、未登录 401）。
+pub async fn admin_create_user(
+    State(state): State<AppState>,
+    AdminUser(_admin): AdminUser,
+    Json(payload): Json<Value>,
+) -> ApiResult<Response> {
+    let (raw_username, password) = read_credentials(&payload)?;
+    let username = normalize_username(&raw_username)?;
+    validate_password(&password)?;
+    let role = match payload.get("role") {
+        None | Some(Value::Null) => Role::User,
+        Some(Value::String(s)) if s == "user" => Role::User,
+        Some(Value::String(s)) if s == "admin" => Role::Admin,
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "role 只能是 \"user\" 或 \"admin\"",
+            ))
+        }
+    };
+
+    // 管理端建号不看「库里已有多少用户」，角色由调用方定。
+    let created = create_user(&state, username, password, move |_existing| Ok(role)).await?;
+
+    Ok(created_response("管理员创建用户", &created))
 }
 
 /// POST /api/auth/login —— 登录，成功返回 Bearer token。
@@ -363,12 +435,45 @@ mod tests {
     }
 
     /// 注册 + 登录，返回 token。
+    ///
+    /// ⚠️ **只对首个用户成立** —— 库非空后 `/api/auth/register` 就是 403 了，
+    /// 第二个用户起一律用 [`admin_create`] + [`login_token`]。
     async fn token_for(state: &AppState, username: &str, password: &str) -> String {
         let (status, body) = register(state, username, password).await;
         assert_eq!(status, StatusCode::CREATED, "注册失败：{body}");
+        login_token(state, username, password).await
+    }
+
+    /// 只登录拿 token（不注册）。
+    async fn login_token(state: &AppState, username: &str, password: &str) -> String {
         let (status, body) = login(state, username, password).await;
         assert_eq!(status, StatusCode::OK, "登录失败：{body}");
         body["token"].as_str().expect("token 是字符串").to_string()
+    }
+
+    fn post_json_with_token(uri: &str, body: Value, token: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::from(body.to_string()))
+            .expect("构造带令牌的 POST 请求")
+    }
+
+    /// 管理员建号，返回 (状态码, body)。`role` 传 `None` 即省略该字段（默认 user）。
+    async fn admin_create(
+        state: &AppState,
+        token: &str,
+        username: &str,
+        password: &str,
+        role: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut body = json!({ "username": username, "password": password });
+        if let Some(r) = role {
+            body["role"] = json!(r);
+        }
+        call(state, post_json_with_token("/api/admin/users", body, token)).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -402,28 +507,99 @@ mod tests {
         assert!(body["user"]["last_login"].as_i64().unwrap_or(0) > 0, "登录后要盖 last_login");
     }
 
-    /// 验证：首个注册者是 admin，之后注册的都是 user。
+    /// 验证：首个注册者是 admin；**库非空后公开注册关闭**，建号改由管理员发起。
     #[tokio::test]
-    async fn first_registered_user_is_admin_then_everyone_else_is_user() {
+    async fn first_registered_user_is_admin_then_registration_closes() {
         let (state, _temp) = test_state("s15-secret");
 
-        let (_, first) = register(&state, "root", "root-password").await;
-        assert_eq!(first["user"]["role"], "admin");
+        let (status, first) = register(&state, "root", "root-password").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(first["user"]["role"], "admin", "首个用户必须是 admin");
 
-        let (_, second) = register(&state, "bob", "bob-password").await;
-        assert_eq!(second["user"]["role"], "user");
+        // 库非空 → 公开注册关闭（这是本次改动的核心）
+        let (status, body) = register(&state, "bob", "bob-password").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "库非空后注册必须关闭：{body}");
+        assert_eq!(body["error"]["code"], "FORBIDDEN");
 
-        let (_, third) = register(&state, "carol", "carol-password").await;
-        assert_eq!(third["user"]["role"], "user");
+        // 建号改走管理端
+        let admin = login_token(&state, "root", "root-password").await;
+        let (status, bob) = admin_create(&state, &admin, "bob", "bob-password", None).await;
+        assert_eq!(status, StatusCode::CREATED, "管理员建号应成功：{bob}");
+        assert_eq!(bob["user"]["role"], "user", "省略 role 默认是 user");
+
+        let (status, carol) = admin_create(
+            &state,
+            &admin,
+            "carol",
+            "carol-password",
+            Some("admin"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "role=admin 应能建出管理员：{carol}");
+        assert_eq!(carol["user"]["role"], "admin");
+    }
+
+    /// 非管理员不能建号；未登录更不能。
+    #[tokio::test]
+    async fn only_admin_can_create_users() {
+        let (state, _temp) = test_state("s15-secret");
+        let admin = token_for(&state, "root", "root-password").await;
+        admin_create(&state, &admin, "bob", "bob-password", None).await;
+        let bob = login_token(&state, "bob", "bob-password").await;
+
+        let (status, body) = admin_create(&state, &bob, "mallory", "mallory-pw", None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "普通用户建号必须 403：{body}");
+
+        // 未登录：中间件先拦，401（不是 403）
+        let (status, _) = call(
+            &state,
+            post_json(
+                "/api/admin/users",
+                json!({ "username": "eve", "password": "eve-password" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    /// `role` 只认 "user" / "admin"，其它一律 400，且**不落库**。
+    #[tokio::test]
+    async fn admin_create_rejects_bad_role() {
+        let (state, _temp) = test_state("s15-secret");
+        let admin = token_for(&state, "root", "root-password").await;
+
+        for bad in ["root", "ADMIN", "", "1"] {
+            let (status, body) = admin_create(&state, &admin, "bob", "bob-password", Some(bad)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "role={bad:?} 应被拒：{body}");
+        }
+        // 非字符串同样拒绝，而不是静默当成 user
+        let (status, _) = call(
+            &state,
+            post_json_with_token(
+                "/api/admin/users",
+                json!({ "username": "bob", "password": "bob-password", "role": 1 }),
+                &admin,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // 上面全部失败 → 库里只该有 root 一个用户
+        let (status, body) = login(&state, "bob", "bob-password").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "被拒的建号不该落库：{body}");
     }
 
     /// 验证：重复用户名返回 409（唯一冲突映射）。
+    ///
+    /// 注册关闭后重名只能通过管理端建号撞出来 —— 顺带把这条路径也覆盖了。
     #[tokio::test]
     async fn duplicate_username_returns_409() {
         let (state, _temp) = test_state("s15-secret");
-        register(&state, "alice", "s3cret-pw").await;
+        let admin = token_for(&state, "root", "root-password").await;
+        let (status, _) = admin_create(&state, &admin, "alice", "s3cret-pw", None).await;
+        assert_eq!(status, StatusCode::CREATED);
 
-        let (status, body) = register(&state, "alice", "another-pw").await;
+        let (status, body) = admin_create(&state, &admin, "alice", "another-pw", None).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body["error"]["code"], "CONFLICT");
     }
@@ -492,7 +668,9 @@ mod tests {
     async fn regular_user_gets_403_on_admin_route_while_admin_gets_200() {
         let (state, _temp) = test_state("s15-secret");
         let admin_token = token_for(&state, "root", "root-password").await;
-        let user_token = token_for(&state, "bob", "bob-password").await;
+        let (status, _) = admin_create(&state, &admin_token, "bob", "bob-password", None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let user_token = login_token(&state, "bob", "bob-password").await;
 
         let (status, body) = call(&state, get_with_token("/api/admin/ping", &user_token)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "普通用户必须是 403：{body}");
@@ -518,8 +696,8 @@ mod tests {
     #[tokio::test]
     async fn token_role_claim_cannot_escalate_privileges() {
         let (state, _temp) = test_state("s15-secret");
-        token_for(&state, "root", "root-password").await; // 让 bob 不是首个用户
-        let (_, body) = register(&state, "bob", "bob-password").await;
+        let admin = token_for(&state, "root", "root-password").await; // 让 bob 不是首个用户
+        let (_, body) = admin_create(&state, &admin, "bob", "bob-password", None).await;
         assert_eq!(body["user"]["role"], "user");
         let bob_id = body["user"]["id"].as_i64().expect("id 是整数");
 
@@ -781,16 +959,15 @@ mod tests {
         assert!(hash.starts_with("$argon2id$"), "必须是 argon2id：{hash}");
     }
 
-    /// 验证：新注册的普通用户立刻就能登录并通过中间件（注册写入的哈希是可校验的）。
+    /// 验证：管理端建出的普通用户立刻就能登录并通过中间件（写入的哈希是可校验的）。
     #[tokio::test]
     async fn registered_user_can_authenticate_immediately() {
         let (state, _temp) = test_state("s15-secret");
-        // 先建首个 admin，让 alice 成为普通用户
-        let (status, _) = register(&state, "root", "root-password").await;
+        // 先建首个 admin，再由他建出普通用户 alice
+        let admin = token_for(&state, "root", "root-password").await;
+        let (status, body) = admin_create(&state, &admin, "alice", "s3cret-pw", None).await;
         assert_eq!(status, StatusCode::CREATED);
-        let (status, body) = register(&state, "alice", "s3cret-pw").await;
-        assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(body["user"]["role"], "user", "第二个用户必须是 user");
+        assert_eq!(body["user"]["role"], "user", "管理端建出来的是普通用户");
 
         let (_, body) = login(&state, "alice", "s3cret-pw").await;
         let token = body["token"].as_str().expect("token").to_string();

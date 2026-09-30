@@ -139,8 +139,9 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 
 | 分组 | 路径 |
 |---|---|
-| 公开 | `GET /healthz` · `POST /api/auth/register` · `POST /api/auth/login` |
-| 认证 | `GET /api/auth/me` · `GET /api/admin/ping` |
+| 公开 | `GET /healthz` · `POST /api/auth/login` |
+| 引导 | `POST /api/auth/register` —— **仅库空时可用**（初始化出首个 admin），之后 403 |
+| 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号）· `GET /api/admin/ping` |
 | 曲库 | `GET /api/library` · `/api/songs/{id}` · `/api/albums/{id}` · `/api/artists/{name}` · `/api/search` |
 | 任务 | `POST\|GET /api/scan` · `GET /api/scan/{batch_id}` · `POST\|GET /api/scrape` · `GET /api/scrape/{batch_id}` · `GET /api/jobs` |
 | 音频 | `GET /api/stream/{id}`（Range · `?format=mp3` 转码）· `GET /api/songs/{id}/cover` |
@@ -163,9 +164,9 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    485 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    487 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
-node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，126 项）
+node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，127 项）
 ```
 
 `scripts/api_test.mjs` 自带两个防呆：**拒绝跑陈旧二进制**（二进制比源码旧就拒绝运行）、**转码缓存目录已隔离**（不会写脏你的 `~/.cache`）。
