@@ -13,7 +13,13 @@ fn fixture(name: &str) -> std::path::PathBuf {
 
 struct Sample { name: &'static str, file: &'static str, duration_s: f64, has_cover: bool }
 
-/// Ground truth：时长取 ffprobe 精确值（与 readTags 内部 round(sec*1000) 完全一致）
+/// Ground truth：时长取 ffprobe 的值（与 readTags 内部 round(sec*1000) 一致）。
+///
+/// ⚠️ **这个值只对生成它的那台机器成立**：MP3 没有权威时长字段，ffprobe 是按码率
+/// *估算*的，不同 ffmpeg 版本能差几十毫秒。实测同一文件、同一段代码：
+/// NAS 的 `8.1.1-mediasrv` 报 216.750，Homebrew 的 ffprobe 报 216.790。
+/// 所以 `t01` 现在对 MP3 用容差比对；FLAC / WAV 的时长由 STREAMINFO / 头字段决定，
+/// 是字节精确值，仍要求完全相等。
 const SAMPLES: &[Sample] = &[
     Sample { name: "华夏传说", file: "华夏传说 - 凤凰传奇.mp3", duration_s: 216.75,      has_cover: false },
     Sample { name: "最美情侣", file: "最美情侣-白小白.mp3",     duration_s: 241.6,       has_cover: true },
@@ -32,7 +38,19 @@ fn t01_basic_read() {
         assert!(m.artists.len() >= 1, "{} 至少一个歌手", s.name);
         assert!(m.albums.len() >= 1, "{} 至少一个专辑", s.name);
         // 与 TS 一致：Math.round(seconds * 1000)
-        assert_eq!(m.duration_ms, (s.duration_s * 1000.0).round() as i64, "{} 时长不符", s.name);
+        let expected = (s.duration_s * 1000.0).round() as i64;
+        if s.file.ends_with(".flac") || s.file.ends_with(".wav") {
+            // 时长由字节决定（FLAC STREAMINFO / WAV 头字段）→ 必须精确相等
+            assert_eq!(m.duration_ms, expected, "{} 时长不符", s.name);
+        } else {
+            // MP3 的时长是 ffprobe 估算的，随 ffmpeg 版本漂移 → 容差 ±1%
+            // （仍能抓住「解析出 0 / 取错字段 / 秒与毫秒搞混」这类真问题）
+            let tol = expected / 100;
+            assert!(
+                (m.duration_ms - expected).abs() <= tol,
+                "{} 时长不符：实际 {}，期望 {}（容差 ±{}）", s.name, m.duration_ms, expected, tol
+            );
+        }
         assert_eq!(m.pictures.len(), if s.has_cover { 1 } else { 0 }, "{} 封面数量不符", s.name);
     }
 }
