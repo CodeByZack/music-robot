@@ -21,8 +21,6 @@
 //! `pre_exec` 回调的契约只能返回 `std::io::Error`，所以回调内任何一步失败都会以
 //! `io::Error` 的形式从 `Command::spawn()` 冒出来（errno 见 `raw_os_error()`）；
 //! [`apply`] 自己的 [`SandboxError`] 只覆盖「还没 fork 就发现配置不合法」这类问题。
-//!
-//! 平台：仅 Linux（依赖 `setsid` / `prctl` / `/proc`）。
 
 use std::io;
 use std::os::unix::process::CommandExt;
@@ -180,40 +178,51 @@ impl LimitPlan {
         //     512 MiB 的 DATA 下 node 插件跑完整请求毫无问题（实测 ok）。
         //
         // 换句话说：对 JS 运行时，AS 既拦不住该拦的（RSS 很小），又卡死无辜的（虚拟预留）。
+        // ⚠️ 每处都要 `as libc::c_uint`：`RLIMIT_*` 常量在 Linux 上是 `c_uint`，
+        //    在 macOS/BSD 上是 `c_int`（见 libc 的 bsd/apple 定义），不转就编不过。
+        //    Linux 侧这个转换是恒等的，行为不变。
         if let Some(v) = self.mem_bytes {
-            set_limit(libc::RLIMIT_DATA, v)?;
+            set_limit(libc::RLIMIT_DATA as libc::c_uint, v)?;
         }
         if let Some(v) = self.cpu_sec {
-            set_limit(libc::RLIMIT_CPU, v)?;
+            set_limit(libc::RLIMIT_CPU as libc::c_uint, v)?;
         }
         if let Some(v) = self.procs {
-            set_limit(libc::RLIMIT_NPROC, v)?;
+            set_limit(libc::RLIMIT_NPROC as libc::c_uint, v)?;
         }
         if let Some(v) = self.file_bytes {
-            set_limit(libc::RLIMIT_FSIZE, v)?;
+            set_limit(libc::RLIMIT_FSIZE as libc::c_uint, v)?;
         }
         if let Some(v) = self.nofile {
-            set_limit(libc::RLIMIT_NOFILE, v)?;
+            set_limit(libc::RLIMIT_NOFILE as libc::c_uint, v)?;
         }
-        set_limit(libc::RLIMIT_CORE, 0)?;
+        set_limit(libc::RLIMIT_CORE as libc::c_uint, 0)?;
 
         // 3) 禁止提权：execve 遇到 setuid 程序也不再给新权限
-        if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1 as libc::c_ulong, 0, 0, 0) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-
         // 4) 父死子死：主服务被 kill -9 时插件不会变成孤儿
-        if unsafe {
-            libc::prctl(
-                libc::PR_SET_PDEATHSIG,
-                libc::SIGKILL as libc::c_ulong,
-                0,
-                0,
-                0,
-            )
-        } != 0
+        //
+        // ⚠️ 这两条是 **Linux 专有**（`prctl`）：macOS 与 Windows 的内核**没有等价能力**
+        //    （macOS 的 Seatbelt / entitlements、Windows 的受限令牌都是另一套东西，且多在
+        //    构建签名期设定），所以非 Linux 上**只能跳过** —— 插件会少这两道防护，不假装有。
+        //    Linux 侧行为完全不变。
+        #[cfg(target_os = "linux")]
         {
-            return Err(io::Error::last_os_error());
+            if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1 as libc::c_ulong, 0, 0, 0) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            if unsafe {
+                libc::prctl(
+                    libc::PR_SET_PDEATHSIG,
+                    libc::SIGKILL as libc::c_ulong,
+                    0,
+                    0,
+                    0,
+                )
+            } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
         }
 
         // 5) 降权：setgroups → setgid → setuid（顺序不能反，反了就再也改不动 gid）
@@ -488,6 +497,8 @@ mod tests {
 
     // ── 真实执行：setsid / no_new_privs ──
 
+    // 靠 /proc/self/stat 读回 pid/pgid —— /proc 是 Linux 专有。
+    #[cfg(target_os = "linux")]
     #[test]
     fn setsid_makes_child_its_own_group_leader() {
         // `exec cat /proc/self/stat` 让 shell 被 cat 覆盖：
@@ -501,6 +512,8 @@ mod tests {
         assert_eq!(pid, pgid, "setsid 后子进程应当自己是组长：{out:?}");
     }
 
+    // prctl(PR_SET_NO_NEW_PRIVS) 是 Linux 专有；非 Linux 上 apply 根本不设它。
+    #[cfg(target_os = "linux")]
     #[test]
     fn no_new_privs_is_set_in_child() {
         let (_, _, out) = run_sh("exec cat /proc/self/status", &generous());
@@ -550,6 +563,9 @@ mod tests {
         assert!(elapsed < Duration::from_secs(10), "回收太慢：{elapsed:?}");
     }
 
+    // 断言 RLIMIT_DATA(堆) 真的卡住 300MB 分配。这条依赖 Linux 的 DATA 语义；
+    // macOS 上 DATA 只覆盖 brk，64 位 malloc 走 mmap，限制未必咬得住（未经实测）。
+    #[cfg(target_os = "linux")]
     #[test]
     fn rlimit_as_blocks_large_allocation() {
         let alloc = "import sys; print('START', flush=True); b = bytearray(300*1024*1024); print('ALLOC_OK', flush=True)";
@@ -613,6 +629,8 @@ mod tests {
     /// 内存上限确实生效：堆上限卡死后，node 必须起不来（而不是把机器吃爆）。
     ///
     /// 与上面那条配对：默认值要「够用」，但也不能「形同虚设」。
+    // 同上：依赖 RLIMIT_DATA 在 Linux 上的语义。
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_tiny_memory_limit_still_bites() {
         if !on_path("node") {
@@ -690,13 +708,16 @@ mod tests {
         );
     }
 
-    /// 从 /proc/self/limits 的某一行取出 (soft, hard)
+    /// 从 /proc/self/limits 的某一行取出 (soft, hard)。Linux 专有，只服务于下面那条用例。
+    #[cfg(target_os = "linux")]
     fn limit_pair(limits: &str, name: &str) -> Option<(String, String)> {
         let line = limits.lines().find(|l| l.starts_with(name))?;
         let mut it = line[name.len()..].split_whitespace();
         Some((it.next()?.to_string(), it.next()?.to_string()))
     }
 
+    // 靠 /proc/self/limits 对账六项 rlimit —— /proc 是 Linux 专有。
+    #[cfg(target_os = "linux")]
     #[test]
     fn all_six_rlimits_are_actually_installed() {
         // 用一组好认的值，直接从子进程的 /proc/self/limits 读回来对账
@@ -769,6 +790,8 @@ mod tests {
         }
     }
 
+    // 断言父死子死。PDEATHSIG 是 Linux 专有；非 Linux 上 apply 不设它，插件会活下来。
+    #[cfg(target_os = "linux")]
     #[test]
     fn pdeathsig_kills_plugin_when_parent_dies() {
         let pidfile = tmp_path("pdeathsig.pid");

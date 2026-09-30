@@ -47,18 +47,16 @@ fn probe_audio(path: &Path, buf: &[u8], fmt: Format, audio_start: usize) -> nati
     }
 }
 
+/// ffprobe 可执行名，交给 `Command` 走 PATH 解析。
+///
+/// 以前这里硬编码 `/usr/bin/ffprobe` 和 `/usr/local/bin/ffprobe` 两个绝对路径并预先探活，
+/// 结果是**非 Linux 平台上静默降级**：macOS 的 Homebrew 装在 `/opt/homebrew/bin`（Apple
+/// Silicon）探不到，Windows 的可执行名还带 `.exe`。现在直接返回裸名字，由 OS 查 PATH
+/// （Windows 会自动补 `.exe`）；真不存在时 `ffprobe_probe` 的 `output()` 会失败并降级，
+/// 不需要预先探活，缓存也就一并去掉了。
 fn ffprobe_binary() -> Option<std::path::PathBuf> {
-    use std::sync::OnceLock;
-    static CACHE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        if std::env::var_os("MR_NO_FFPROBE").is_some() { return None }
-        for cand in ["/usr/bin/ffprobe", "/usr/local/bin/ffprobe"] {
-            let ok = std::process::Command::new(cand).args(["-version"])
-                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
-            if ok { return Some(std::path::PathBuf::from(cand)) }
-        }
-        None
-    }).clone()
+    if std::env::var_os("MR_NO_FFPROBE").is_some() { return None }
+    Some(std::path::PathBuf::from("ffprobe"))
 }
 
 fn ffprobe_probe(bin: &std::path::Path, path: &Path) -> Option<native_probe::NativeProbe> {

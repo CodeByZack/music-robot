@@ -16,14 +16,22 @@
 
 pub mod classify;
 pub mod suppress;
+/// inotify 后端 —— **只有 Linux 有 inotify**。
+/// 其他平台要补监听，得接 `notify` 这类跨平台抽象（见跨平台调研）。
+#[cfg(target_os = "linux")]
 pub mod watch;
 
 #[cfg(test)]
 pub(crate) mod test_support;
 
-#[cfg(test)]
+/// inotify 实证 PoC —— 同样只有 Linux 能编。
+/// ⚠️ 必须带 `target_os`：只写 `#[cfg(test)]` 的话，macOS 上跑 `cargo test` 仍会编译它并失败。
+#[cfg(all(test, target_os = "linux"))]
 mod inotify_poc;
 
-pub use classify::{classify, is_audio_file, watch_kind_from_mask, IgnoreReason, WatchDecision, WatchKind};
+pub use classify::{classify, is_audio_file, IgnoreReason, WatchDecision, WatchKind};
+#[cfg(target_os = "linux")]
+pub use classify::watch_kind_from_mask;
 pub use suppress::{is_our_tmp_file, SelfWriteRegistry, DEFAULT_TTL, TMP_MARKER};
+#[cfg(target_os = "linux")]
 pub use watch::{LibraryWatcher, WatchConfig, WatchError, WatchEvent, WatchPoll};

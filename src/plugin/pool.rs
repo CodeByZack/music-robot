@@ -1417,6 +1417,8 @@ done
 
     // ─────────────────────────── 与沙箱的集成 ───────────────────────────
 
+    // 插件脚本体里读 /proc/self/status 的 NoNewPrivs —— prctl 与 /proc 都是 Linux 专有。
+    #[cfg(target_os = "linux")]
     #[test]
     fn pool_spawns_plugins_under_the_sandbox() {
         let root = tmp_root("sandboxed");

@@ -805,8 +805,12 @@ fn env_string(
 }
 
 /// `MR_LIBRARY_ROOTS` 按 `:` 或 `,` 拆分，丢掉空段与首尾空白。
+///
+/// ⚠️ **Windows 上不能按 `:` 拆** —— 盘符本身就是 `C:`，`C:\Music;D:\Songs` 会被切成
+/// `["C", "\Music;D", "\Songs"]`，路径全废。所以 Windows 只认 `,`。
 fn split_roots(raw: &str) -> Vec<String> {
-    raw.split([':', ','])
+    let seps: &[char] = if cfg!(windows) { &[','] } else { &[':', ','] };
+    raw.split(seps)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())

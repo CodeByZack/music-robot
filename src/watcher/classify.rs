@@ -77,6 +77,9 @@ pub fn is_audio_file(path: &Path) -> bool {
 
 /// 把 inotify 位掩码翻译成语义 kind。多个语义位同时置位时按
 /// Created > Removed > Modified 取优先级（防止一次误判把删除吞成修改）。
+///
+/// 只有 Linux 有 inotify 位掩码，其他平台没有这张表。
+#[cfg(target_os = "linux")]
 pub fn watch_kind_from_mask(mask: u32) -> Option<WatchKind> {
     const CREATED: u32 = libc::IN_CREATE | libc::IN_MOVED_TO;
     const REMOVED: u32 = libc::IN_DELETE | libc::IN_MOVED_FROM | libc::IN_DELETE_SELF;
@@ -269,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn mask_translation() {
         assert_eq!(watch_kind_from_mask(libc::IN_CREATE), Some(WatchKind::Created));
         assert_eq!(watch_kind_from_mask(libc::IN_MOVED_TO), Some(WatchKind::Created));
