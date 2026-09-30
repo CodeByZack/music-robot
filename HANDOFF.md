@@ -186,7 +186,8 @@ music-robot/
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，127 项）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，127 项；非交互，给回归用）
+├── scripts/api_cli.mjs  # 交互式 API 客户端（菜单式，连**已在跑**的服务；只用 node:readline，零依赖）
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
 ├── music-server-architecture.excalidraw   # ★ 全部架构设计 + 28 步实施计划
 └── HANDOFF.md          # ← 本文件（**仓库里唯一的文档**）
@@ -734,7 +735,7 @@ sleep 3 && curl -s -H "Authorization: Bearer $TOK" 'localhost:18099/api/library?
 | 插件目录扫描与加载报告 | `src/plugin/registry.rs` |
 | 服务端读写的唯一入口 | `src/storage.rs` + `src/fs.rs`（见 §7.6） |
 | 转码与缓存清理 | `src/audio/transcode.rs` |
-| 端到端证据 | `scripts/api_test.mjs` |
+| 端到端证据 | `scripts/api_test.mjs`（非交互回归）/ `scripts/api_cli.mjs`（交互式手测） |
 | 本机工作约定（NAS 资源保护 / docs 权限 / 子代理复用） | `$DSH_HOME/AGENTS.md` |
 
 ---
