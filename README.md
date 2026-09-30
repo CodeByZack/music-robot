@@ -73,6 +73,15 @@ HTTP ─┘        ↑
 - 开箱即用的真插件是 `plugins/musicbrainz.js`；`plugins/examples/` 里那三个是**假数据示例**
   （写死「示例歌手」），只给测试当夹具，不参与你的刮削
 
+> ⚠️ **刮削会直接改写你的音乐文件，且没有撤销。**
+> 命中后按插件给的标签**覆盖**原文件（`atomic_replace` 保证「中途失败原文件完好」，
+> 但一旦成功就是新文件了），DB 里的旧值也一起被覆盖。**没有 `.bak`、没有 dry-run、没有确认框**，
+> `POST /api/scrape` 一调就是全库。
+> 先拿几首**副本**试插件，确认它写出来的标签是你想要的，再对真库下手。
+> 每次刮削都会逐曲写日志（`[scrape]`），含**改动明细**：
+> `曲目 3 命中：插件 musicbrainz（confidence 0.92）改动 2 处：歌手「公众号：阿乐资源库」→「白小白」；…`
+> —— 文件被覆盖后，这行日志是唯一能还原「改了什么」的地方，**别关 info 级日志**。
+
 ---
 
 ## 快速开始
@@ -166,7 +175,7 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    493 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    495 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
 node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，133 项）
 node scripts/api_cli.mjs  # 交互式客户端（连已在跑的服务，菜单选功能）

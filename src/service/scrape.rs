@@ -651,11 +651,22 @@ impl ScrapeService {
 
         let mut conn = self.db.acquire()?;
         let tx = conn.transaction()?;
+        // 改前快照：必须赶在 apply_tags_to_song 之前，它是「改了什么」的唯一来源。
+        let before = TagSnapshot::of(&song);
+        let album_before = album_name(&tx, before.album_id);
         apply_tags_to_song(&tx, &mut song, &tags)?;
+        let album_after = album_name(&tx, song.album_id);
         // 歌词只入 DB：Absent = 保留原值，Clear = 清空，Set = 覆盖。
+        let mut extra: Vec<String> = Vec::new();
         match &lyrics {
-            FieldUpdate::Set(text) => song.lyrics = Some(text.clone()),
-            FieldUpdate::Clear => song.lyrics = None,
+            FieldUpdate::Set(text) => {
+                song.lyrics = Some(text.clone());
+                extra.push(format!("歌词「已更新 {} 字」", text.chars().count()));
+            }
+            FieldUpdate::Clear => {
+                song.lyrics = None;
+                extra.push("歌词「已清空」".to_string());
+            }
             FieldUpdate::Absent => {}
         }
         if write_result.is_ok() {
@@ -674,12 +685,41 @@ impl ScrapeService {
         songs::update_scrape_status(&tx, song.id, status, error_text.as_deref())?;
         tx.commit()?;
 
+        // 日志放在 commit 之后：这时说「已落库」才是真的。写回失败的算 error ——
+        // 文件没改成功，用户的曲库和 DB 已经不一致了，这条得看得见。
+        let changes = before.changes(&TagSnapshot::of(&song), album_before, album_after, extra);
+        let detail = if changes.is_empty() {
+            "无字段变化".to_string()
+        } else {
+            format!("改动 {} 处：{}", changes.len(), changes.join("；"))
+        };
         match write_result {
-            Ok(()) => Ok(ScrapeOutcome::Done { id: song.id, plugin, confidence }),
-            Err(e) => Ok(ScrapeOutcome::Failed {
-                id: song.id,
-                error: format!("写回文件标签失败：{e}"),
-            }),
+            Ok(()) => {
+                crate::serverlog::info(
+                    "scrape",
+                    format!(
+                        "曲目 {} 命中：插件 {plugin}（confidence {confidence:.2}）{detail}；{}",
+                        song.id,
+                        path.display()
+                    ),
+                );
+                Ok(ScrapeOutcome::Done { id: song.id, plugin, confidence })
+            }
+            Err(e) => {
+                crate::serverlog::error(
+                    "scrape",
+                    format!(
+                        "曲目 {} 命中但写回文件失败：插件 {plugin}（confidence {confidence:.2}）{detail}；\
+                         {} —— {e}；DB 标签已更新，文件仍是旧值，需重刮",
+                        song.id,
+                        path.display()
+                    ),
+                );
+                Ok(ScrapeOutcome::Failed {
+                    id: song.id,
+                    error: format!("写回文件标签失败：{e}"),
+                })
+            }
         }
     }
 
@@ -781,10 +821,19 @@ impl BatchRunner {
                     Ok(ScrapeOutcome::Done { .. }) => progress.record_done(),
                     Ok(ScrapeOutcome::Failed { id, error }) => {
                         progress.record_failed();
+                        // 逐曲一条：批次汇总只给「失败 N」，不说是哪几首、为什么。
+                        crate::serverlog::warn(
+                            "scrape",
+                            format!("曲目 {id} 未完成刮削：{error}"),
+                        );
                         push_issue(&issues, ScrapeIssue { song_id: id, message: error });
                     }
                     Ok(ScrapeOutcome::SkippedBusy { id }) => {
                         progress.record_skipped();
+                        crate::serverlog::warn(
+                            "scrape",
+                            format!("曲目 {id} 正在处理中（processing），本次跳过"),
+                        );
                         push_issue(
                             &issues,
                             ScrapeIssue {
@@ -795,6 +844,7 @@ impl BatchRunner {
                     }
                     Err(e) => {
                         progress.record_failed();
+                        crate::serverlog::warn("scrape", format!("曲目 {id} 刮削出错：{e}"));
                         push_issue(&issues, ScrapeIssue { song_id: id, message: e.to_string() });
                     }
                 }
@@ -991,6 +1041,87 @@ fn load_cover(work_dir: &Path, cover: &CoverRef) -> Result<Picture, String> {
         description: String::new(),
         data,
     })
+}
+
+/// 刮削**前后**的标签快照，只为日志里那句「到底改了什么」服务。
+///
+/// 为什么必须在这里记：命中后原文件被 `atomic_replace` 直接 rename 覆盖，DB 的旧值也
+/// 被 UPDATE 掉，**事后没有任何地方能还原出改前的样子**。插件写坏了标签（比如把歌手
+/// 全刷成广告词），唯一的线索就是这行日志。
+///
+/// 不含歌词：歌词走 `FieldUpdate` 三分支，在调用处顺手记更准。
+/// 不含专辑名：库里存的是 `album_id`，取名字要多查一次库，放在 [Self::changes] 里按需解析。
+#[derive(Clone, PartialEq, Eq)]
+struct TagSnapshot {
+    title: Option<String>,
+    artists: Option<String>,
+    genres: Option<String>,
+    year: Option<i64>,
+    track: Option<i64>,
+    album_id: Option<i64>,
+}
+
+impl TagSnapshot {
+    fn of(song: &Song) -> Self {
+        TagSnapshot {
+            title: song.title.clone(),
+            artists: song.artists.clone(),
+            genres: song.genres.clone(),
+            year: song.year,
+            track: song.track,
+            album_id: song.album_id,
+        }
+    }
+
+    /// 逐字段比对，**只列出真的变了的**。空快照（没改任何字段）返回空 Vec，
+    /// 调用方据此说「无字段变化」，而不是打一行没有信息量的空改动。
+    fn changes(
+        &self,
+        after: &Self,
+        album_before: Option<String>,
+        album_after: Option<String>,
+        extra: Vec<String>,
+    ) -> Vec<String> {
+        let pairs = [
+            ("标题", self.title.clone(), after.title.clone()),
+            ("歌手", self.artists.clone(), after.artists.clone()),
+            ("风格", self.genres.clone(), after.genres.clone()),
+            ("年份", self.year.map(|y| y.to_string()), after.year.map(|y| y.to_string())),
+            ("轨道", self.track.map(|t| t.to_string()), after.track.map(|t| t.to_string())),
+        ];
+        let mut out: Vec<String> = pairs
+            .into_iter()
+            .filter(|(_, old, new)| old != new)
+            .map(|(name, old, new)| {
+                format!("{name}「{}」→「{}」", show(old.as_deref()), show(new.as_deref()))
+            })
+            .collect();
+        // 专辑比名字而不是比 id：id 变了但名字没变，对用户来说等于没改。
+        if album_before != album_after {
+            out.push(format!(
+                "专辑「{}」→「{}」",
+                show(album_before.as_deref()),
+                show(album_after.as_deref())
+            ));
+        }
+        out.extend(extra);
+        out
+    }
+}
+
+/// 日志里展示空值：`None` 与空串都视作「(空)」，免得打出「歌手「」→「示例歌手」」这种半截话。
+fn show(value: Option<&str>) -> &str {
+    match value {
+        Some(text) if !text.trim().is_empty() => text,
+        _ => "(空)",
+    }
+}
+
+/// 专辑 id → 名字。查不到（或没有专辑）一律 `None`，**绝不因此让刮削失败** ——
+/// 这只是日志的装饰。
+fn album_name(conn: &Connection, album_id: Option<i64>) -> Option<String> {
+    let id = album_id?;
+    albums::get(conn, id).ok().flatten().map(|album| album.name)
 }
 
 /// 把插件的标签写进要落库的 Song。语义与 [build_edit_meta] 完全一致（Absent 不动、
@@ -1873,5 +2004,81 @@ mod tests {
         assert!(ScrapeOutcome::SkippedBusy { id: 4 }.to_string().contains("刮削跳过"));
 
         let _boxed: Box<dyn std::error::Error> = Box::new(ScrapeError::SongNotFound { id: 1 });
+    }
+
+    /// 日志里那句「改动 N 处」的判定逻辑。这条是**唯一**能事后还原「插件改了什么」的地方
+    /// （文件已被 rename 覆盖、DB 旧值已被 UPDATE），所以逐个分支钉住。
+    #[test]
+    fn snapshot_changes_lists_only_real_changes() {
+        let before = TagSnapshot {
+            title: Some("老男孩".to_string()),
+            artists: Some("公众号：阿乐资源库".to_string()),
+            genres: None,
+            year: Some(2011),
+            track: None,
+            album_id: Some(7),
+        };
+        // 只有歌手 + 专辑真的变了；标题/风格/年份/轨道原样。
+        let after = TagSnapshot {
+            title: Some("老男孩".to_string()),
+            artists: Some("示例歌手".to_string()),
+            genres: None,
+            year: Some(2011),
+            track: None,
+            album_id: Some(9),
+        };
+        let changes = before.changes(
+            &after,
+            Some("2015江苏卫视新年演唱会".to_string()),
+            Some("示例专辑".to_string()),
+            vec![],
+        );
+        assert_eq!(
+            changes,
+            vec![
+                "歌手「公众号：阿乐资源库」→「示例歌手」".to_string(),
+                "专辑「2015江苏卫视新年演唱会」→「示例专辑」".to_string(),
+            ],
+            "只该报歌手与专辑，没变的字段一个都不许出现"
+        );
+
+        // 一个字段都没变 → 空 Vec（调用方据此说「无字段变化」，而不是打一行空改动）
+        let same = before.clone();
+        assert!(before
+            .changes(&same, Some("同名".to_string()), Some("同名".to_string()), vec![])
+            .is_empty());
+
+        // 清空（Some → None）与填充（None → Some）都要报，且空值渲染成「(空)」
+        let cleared = TagSnapshot { artists: None, ..after.clone() };
+        assert_eq!(
+            after.changes(&cleared, None, None, vec![]),
+            vec!["歌手「示例歌手」→「(空)」".to_string()]
+        );
+
+        // 专辑「id 变了但名字没变」不报 —— 对用户来说等于没改
+        let renamed_id = TagSnapshot { album_id: Some(99), ..before.clone() };
+        assert!(before
+            .changes(&renamed_id, Some("同名".to_string()), Some("同名".to_string()), vec![])
+            .is_empty());
+
+        // extra（歌词那类非字段改动）原样追加在后面
+        let with_extra =
+            before.changes(&same, None, None, vec!["歌词「已清空」".to_string()]);
+        assert_eq!(with_extra, vec!["歌词「已清空」".to_string()]);
+
+        // 空串也算「空」：插件回了个空字符串，日志不该打出「歌手「」→「x」」
+        assert_eq!(show(Some("")), "(空)");
+        assert_eq!(show(Some("  ")), "(空)");
+        assert_eq!(show(Some("白兀")), "白兀");
+        assert_eq!(show(None), "(空)");
+    }
+
+    /// 专辑名解析失败**不能**让刮削失败 —— 它只是日志的装饰。
+    #[test]
+    fn album_name_is_none_when_missing() {
+        let env = Env::new("scrape-album-name");
+        let conn = env.conn();
+        assert_eq!(album_name(&conn, None), None, "没专辑就是 None，不该去查库");
+        assert_eq!(album_name(&conn, Some(999_999)), None, "查不到的 id 不该报错");
     }
 }

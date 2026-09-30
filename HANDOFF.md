@@ -29,9 +29,9 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **493 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **495 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **617 passed / 0 failed / 1 ignored** |
+| 合计 | **619 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **133 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
@@ -272,6 +272,7 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 | 项目 | 状态 |
 |---|---|
 | **S24–S26 前端**（React + Vite） | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build） |
+| ↳ **刮削页必须带「是否应用到文件」开关** | 🔴 **用户 2026-09-30 明确要求，做页面时别漏**。理由见 §6.3「刮削默认直写原文件」——现在 `POST /api/scrape` 是**全库无差别覆盖**，页面上必须让用户先选「只入库 / 也写文件」再动手 |
 | S27 文件整理 · S28 集成打包 | 未开始 |
 | **provider（下载）插件 kind** | ❌ 未实现 —— 见下面「两个已知缺口」 |
 | `config.ts` 移植 | **用户明确说暂时不做**（配置改由 `src/config.rs` 承担） |
@@ -428,6 +429,16 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
   因此仓库里的示例已退到 **`plugins/examples/`**（registry 只扫一层、不递归，等于自动失效）。
   要用示例跑 e2e 的测试自己去 `plugins/examples/` 取（`tests/plugin_e2e.rs`、`api_test.mjs`）。
   ⚠️ 别把示例挪回 `plugins/` 顶层，那会再次把真插件遮蔽掉。
+- **刮削默认直写原文件，且没有任何回退手段**（2026-09-30 查证）。`commit_hit` 拿 `song.file_path`
+  直接 `write_tags`，`atomic_replace` 只是「copy → 写 tmp → 校验 → rename 覆盖」——
+  中途失败原文件完好，**但 rename 一成功原文件就被换掉了**。而且是**无条件覆盖**不是填空缺
+  （`apply_tags_to_song` 直接赋值）。
+  * 没有 `.bak`、没有 dry-run、没有二次确认；`--preview` / `--bak` **只有 CLI 的 `write` / `blank` 有**
+  * `POST /api/scrape` **连请求体都不收**（`routes/jobs.rs` 只有 `State` + `AdminUser`），一按就是全库
+  * DB 里的旧值也**没留档**（没有标签历史表，`play_history` 是播放记录不是改动记录）
+  * 所以**逐曲日志（§7.7）是唯一的痕迹**，别删。前端做刮削页时必须给开关（见「未完成」表）
+  * 实测对照（同一个文件）：原件 `歌手: 公众号：阿乐资源库 / 专辑: 2015江苏卫视新年演唱会`
+    → 被 example.js 刮完 `歌手: 示例歌手 / 专辑: 示例专辑`。**插件写坏了标签，原值就找不回来了**
 - **`plugins/musicbrainz.js` 曾被 `.gitignore` 挡住**（规则是 `/plugins/*` 只放行 example.*）。
   它是**随仓库发布的真实插件**，已加放行。别再把 `/plugins/*` 理解成「仓库里不放插件」。
 
@@ -563,7 +574,7 @@ CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID
 
 * 行格式：`<UTC ISO8601> <LEVEL> [<target>] <正文>`，例：
   `2026-09-30T13:29:40.700Z INFO  [http] POST /api/auth/register -> 201 (2835ms)`
-* `target` 是短标签，方便 grep：`server` / `db` / `auth` / `http` / `job` / `plugin` / `cache` / `cover` / `stream`
+* `target` 是短标签，方便 grep：`server` / `db` / `auth` / `http` / `job` / `plugin` / `scrape` / `cache` / `cover` / `stream`
 * **同时写文件 + 回显 stderr**。文件：`<log.dir>/music-robot-<UTC 日期>.log`，一天一个
 * `log.level` 是**下限**：`error` < `warn` < `info` < `debug` < `trace`。写错会在启动前报错
 * `log.keep_days`（默认 7）天：启动时清更早的日志；**`0` = 不清理**。
@@ -574,6 +585,18 @@ CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID
 * ⚠️ 日志**写不出去绝不 panic**：目录建不出来只在 stderr 提示一次，服务照跑
 * 请求日志中间件挂在 [`server::run`] 里而**不是** `build_router` —— 测试全走后者，
   挂那里会把每条用例的请求都刷出来
+* **刮削逐曲一条**（`target = scrape`）—— 命中记 `info`，未命中 / 忙跳过 / 出错记 `warn`，
+  写回文件失败记 `error`。命中那条**带改动明细**，例：
+  ```
+  INFO  [scrape] 曲目 3 命中：插件 example-js（confidence 0.95）改动 4 处：歌手「公众号：阿乐资源库」
+        →「示例歌手」；年份「2017」→「2024」；专辑「《最美情侣》」→「示例专辑」；歌词「已更新 14 字」；/music/xxx.mp3
+  WARN  [scrape] 曲目 1 未完成刮削：musicbrainz：插件报错（NOT_FOUND）：MusicBrainz 没有找到匹配的录音
+  ```
+  ⚠️ 这不是锦上添花：刮削**直接覆盖原文件**（见 §6.5），DB 旧值也被 UPDATE 掉，
+  **这行日志是事后唯一能还原「插件改了什么」的地方**。改动明细由 `TagSnapshot` 比对
+  （改前快照必须在 `apply_tags_to_song` **之前**取）+ 歌词的 `FieldUpdate` 分支拼成；
+  专辑比**名字**不比 id（id 变了名字没变 = 用户视角没改）。
+  只列真的变了的字段，一个都没变就写「无字段变化」。
 
 ### 7.6 服务端读写的唯一入口
 
@@ -611,7 +634,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 ### 8.2 测试文件对照（**实测数字**）
 
-库用例（`cargo test --lib`）共 **493 passed / 0 failed / 1 ignored**。集成测试：
+库用例（`cargo test --lib`）共 **495 passed / 0 failed / 1 ignored**。集成测试：
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
