@@ -126,9 +126,6 @@ pub fn apply(cmd: &mut Command, cfg: &SandboxConfig) -> Result<(), SandboxError>
 /// 六条 rlimit 的字节/数量，已做溢出检查。`None` = 不设置。
 #[derive(Debug, Clone, Copy)]
 struct LimitPlan {
-    /// macOS 上整个字段不参与编译：那边 `setrlimit(RLIMIT_DATA)` 必然 EINVAL，
-    /// 唯一读取点已 cfg 掉，字段留着只会报 dead_code。
-    #[cfg(not(target_os = "macos"))]
     mem_bytes: Option<u64>,
     cpu_sec: Option<u64>,
     procs: Option<u64>,
@@ -152,7 +149,6 @@ impl LimitPlan {
             }
         }
         Ok(LimitPlan {
-            #[cfg(not(target_os = "macos"))]
             mem_bytes: mb(cfg.memory_mb, "memory_mb")?,
             cpu_sec: count(cfg.cpu_sec),
             procs: count(cfg.procs),
@@ -185,11 +181,9 @@ impl LimitPlan {
         // ⚠️ 每处都要 `as libc::c_uint`：`RLIMIT_*` 常量在 Linux 上是 `c_uint`，
         //    在 macOS/BSD 上是 `c_int`（见 libc 的 bsd/apple 定义），不转就编不过。
         //    Linux 侧这个转换是恒等的，行为不变。
-        // ⚠️ RLIMIT_DATA 在 macOS 上**根本设不了**：`getrlimit` 报的硬上限是 RLIM_INFINITY，
-        //    可 `setrlimit` 照样回 EINVAL（实测 "current limit exceeds maximum limit"）。
-        //    所以 macOS 上跳过内存这一项 —— 剩下四项（CPU / FSIZE / NOFILE / CORE）
-        //    macOS 都正常。代价：macOS 上插件没有内存刹车（已知且接受）。
-        #[cfg(not(target_os = "macos"))]
+        // 内存这一项在 macOS 上由 set_limit 内部跳过（见那里的说明）。
+        // ⚠️ 这里**不能**加 `#[cfg(not(target_os = "macos"))]`：那样 `mem_bytes` 会变成
+        //    死字段，而且 `memory_mb` 的溢出校验（必须在 fork 前跑）也一起丢了。
         if let Some(v) = self.mem_bytes {
             set_limit(libc::RLIMIT_DATA as libc::c_uint, v)?;
         }
@@ -257,6 +251,16 @@ impl LimitPlan {
 
 /// 设置一条 rlimit，软硬同值（硬限制也压死，否则插件可以自己把软限制调回去）。
 fn set_limit(resource: libc::c_uint, value: u64) -> io::Result<()> {
+    // ⚠️ macOS 上 RLIMIT_DATA **设不了**：`getrlimit` 报的硬上限是 RLIM_INFINITY，
+    //    可 `setrlimit` 照样回 EINVAL（实测 "current limit exceeds maximum limit"）。
+    //    跳过放在这里而不是调用点：调用点 cfg 掉会让 `mem_bytes` 变成死字段，
+    //    还会连 `memory_mb` 的溢出校验一起丢掉。
+    //    代价：macOS 上插件没有内存刹车（已知且接受）；其余四项 macOS 都正常。
+    #[cfg(target_os = "macos")]
+    if resource as libc::c_int == libc::RLIMIT_DATA {
+        return Ok(());
+    }
+
     // 先读当前硬上限，再取 min —— **不能直接把 rlim_max 设成请求值**：
     // 非 root 把 rlim_max 抬到硬上限之上会失败（Linux/BSD 上是 EPERM），
     // 而 macOS 的 RLIMIT_NPROC 硬上限实测只有 4000，我们想设 4096 就直接报
