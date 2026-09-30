@@ -181,9 +181,9 @@ music-robot/
 │   ├── audio/          # stream（Range 解析）/ cover（封面挑选）/ transcode（ffmpeg+缓存+清理）（4 文件）
 │   └── server/         # state / error / auth / jobs / tests / routes/{...}（15 文件）
 ├── tests/              # 11 个文件，124 集成用例（含 plugin_e2e 真拉起 node/python3/sh）
-├── plugins/            # example.{js,py,sh}（集成测试素材，永远返回 confidence 0.95）
-│                       # + musicbrainz.js（真实刮削插件，**已入库**）；用户自己的插件被 gitignore
-│                       # ⚠️ 按文件名升序尝试、命中即停 —— example.js 在的话真插件永不执行
+├── plugins/            # musicbrainz.js（真实刮削插件，**已入库**）；用户自己的插件被 gitignore
+│                       # 只扫这一层、不递归；按文件名升序尝试、命中即停
+│   └── examples/       # example.{js,py,sh}（假数据，给集成测试 / api_test 当夹具，见 §6.3）
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
@@ -423,9 +423,11 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
   实测全失败路径 **2350ms** 返回，远低于清单里的 15s（超了池子会先杀掉插件，用户看到的
   就变成「插件超时」，排查方向直接被带偏）。顺带把 node 的 `e.cause` 拼进错误文案 ——
   光一句 `fetch failed` 没有任何信息量。
-- **示例插件会遮蔽真实插件**：插件按**文件名升序**尝试、命中即停，而 `plugins/example.js`
-  永远返回 confidence 0.95 —— 它在的时候 `musicbrainz.js` **永远不会被执行**。
-  本地调试真插件先把 `plugins/example.*` 挪走（它们同时是 `tests/plugin_e2e.rs` 的素材，别删）。
+- **示例插件会遮蔽真实插件**：插件按**文件名升序**尝试、命中即停，而 `example.js`
+  永远返回 confidence 0.95 —— 它和真插件同目录时，`musicbrainz.js` **永远不会被执行**。
+  因此仓库里的示例已退到 **`plugins/examples/`**（registry 只扫一层、不递归，等于自动失效）。
+  要用示例跑 e2e 的测试自己去 `plugins/examples/` 取（`tests/plugin_e2e.rs`、`api_test.mjs`）。
+  ⚠️ 别把示例挪回 `plugins/` 顶层，那会再次把真插件遮蔽掉。
 - **`plugins/musicbrainz.js` 曾被 `.gitignore` 挡住**（规则是 `/plugins/*` 只放行 example.*）。
   它是**随仓库发布的真实插件**，已加放行。别再把 `/plugins/*` 理解成「仓库里不放插件」。
 
@@ -718,7 +720,7 @@ cp fixtures/*.mp3 "/tmp/srv/music/" 2>/dev/null; cp fixtures/*.flac /tmp/srv/mus
 export MR_DATABASE_PATH=/tmp/srv/music.db
 export MR_LIBRARY_ROOTS=/tmp/srv/music
 export MR_JWT_SECRET=dev-secret
-export MR_PLUGINS_DIR=$PWD/plugins          # 注意 example.js 会遮蔽 musicbrainz.js，见 §6.3
+export MR_PLUGINS_DIR=$PWD/plugins          # 示例已退到 plugins/examples/，不会遮蔽真插件（§6.3）
 
 $B serve --host 127.0.0.1 --port 18099 &
 curl -s localhost:18099/healthz               # 顺带看 plugins 字段：加载了几个、跳过几个

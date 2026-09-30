@@ -8,7 +8,7 @@
 //! 在它们各自的测试里**没有一处被走通**。命令推断错了、插件进程没 flush、
 //! 响应少个字段，单元测试都不会红。
 //!
-//! 这里改用仓库里真实存在的 `plugins/example.js` 与 `plugins/example.py` 把整条链跑实。
+//! 这里改用仓库里真实存在的 `plugins/examples/example.js` 与 `plugins/examples/example.py` 把整条链跑实。
 
 use music_robot::plugin::{
     parse_manifest, DownloadPrefer, DownloadRequest, ErrorCode, PluginRequest, PluginResponse,
@@ -17,9 +17,12 @@ use music_robot::plugin::{
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// 仓库根目录（`CARGO_MANIFEST_DIR`），示例插件就放在它的 `plugins/` 下。
+/// 仓库根目录（`CARGO_MANIFEST_DIR`），示例插件放在 `plugins/examples/` 下。
+///
+/// 注意**不是** `plugins/`：那个目录是给用户放真插件的，仓库里的示例退到子目录，
+/// 免得升序尝试时把真插件（`musicbrainz.js`）永久遮蔽掉。
 fn plugins_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins").join("examples")
 }
 
 /// 测试用临时工作目录，**Drop 时自动清理**（否则每跑一次就在 /tmp 漏一个目录）。

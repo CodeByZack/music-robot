@@ -311,6 +311,14 @@ async function main() {
     }
   };
 
+  // 夹具插件目录：从 plugins/examples/example.js 复制一份到临时目录。
+  // 必须自带，不能直接用仓库 plugins/ —— 那个目录是给用户放真插件的，
+  // 里面有什么（musicbrainz.js 要联网）不该决定本脚本的成败。
+  const pluginsDir = path.join(work, 'plugins');
+  fs.mkdirSync(pluginsDir, { recursive: true });
+  const fixturePlugin = path.join(REPO, 'plugins', 'examples', 'example.js');
+  fs.copyFileSync(fixturePlugin, path.join(pluginsDir, 'example.js'));
+
   const countSongs = () => {
     const db = new DatabaseSync(dbPath);
     try {
@@ -328,6 +336,7 @@ async function main() {
     MR_LIBRARY_ROOTS: music,
     MR_JWT_SECRET: 'api-test-secret',
     MR_FFMPEG_PATH: fakeFfmpeg,
+    MR_PLUGINS_DIR: pluginsDir,
     MR_LOG_LEVEL: process.env.MR_LOG_LEVEL ?? 'warn',
   };
 
@@ -430,8 +439,9 @@ async function main() {
     checkTrue('扫描报告 total > 0', (body?.total ?? 0) > 0, brief(body));
 
     // 扫描入库的歌 scrape_status 都是 pending，正好当刮削队列。
-    // 插件目录用仓库自带的 plugins/：example.js 按文件名升序第一个命中，
-    // 返回 confidence 0.95（> 阈值）且 artist 固定写成「示例歌手」—— 可以当硬断言用。
+    // 插件目录是临时目录里的夹具（plugins/examples/example.js 的副本）：
+    // 它按文件名升序第一个命中，返回 confidence 0.95（> 阈值）且 artist
+    // 固定写成「示例歌手」—— 可以当硬断言用。
     [st, , body] = await c.json('POST', '/api/scrape');
     check('触发刮削 → 202', st, 202);
     const scrapeBatch = body?.batch_id ?? null;

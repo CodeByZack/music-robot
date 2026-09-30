@@ -70,6 +70,8 @@ HTTP ─┘        ↑
 - 协议：stdin/stdout 一行一个 JSON（`protocol: 1`），响应必须原样回显 `action`，诊断信息一律走 stderr
 - 沙箱：`setsid` + 6×`setrlimit` + `NO_NEW_PRIVS` + `PDEATHSIG` + 降权
 - 插件按**文件名升序**尝试、命中即停
+- 开箱即用的真插件是 `plugins/musicbrainz.js`；`plugins/examples/` 里那三个是**假数据示例**
+  （写死「示例歌手」），只给测试当夹具，不参与你的刮削
 
 ---
 

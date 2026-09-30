@@ -137,7 +137,7 @@ fn log_load_report(dir: &Path, report: &LoadReport) {
                 "plugin",
                 format!(
                     "插件目录「{}」里一个可用的刮削插件都没有，POST /api/scrape 会把所有歌标记为 failed。\
-                     请放入 scraper 单文件插件（可参考 plugins/example.js），或改 plugins.dir / MR_PLUGINS_DIR。",
+                     请放入 scraper 单文件插件（可参考 plugins/examples/example.js），或改 plugins.dir / MR_PLUGINS_DIR。",
                     dir.display()
                 ),
             );

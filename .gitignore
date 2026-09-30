@@ -11,15 +11,13 @@ env.local
 /fixtures
 
 # 运行时插件目录：用户放自己的单文件脚本，不进仓库。
-# 但保留三个示例——它们既是插件作者要照抄的模板，也是 tests/plugin_e2e.rs 的测试夹具。
+# registry 只扫这一层、**不递归**，所以 `*` 与 `*/*` 的放行都要写。
 /plugins/*
-!/plugins/example.js
-!/plugins/example.py
-!/plugins/example.sh
-
-# musicbrainz.js 是**随仓库发布的真实刮削插件**（不是用户自己的脚本），必须入库：
-# 它是「刮削到底能不能用」的唯一开箱即用证据，也是 docs/画布之外唯一可运行的参考实现。
-# ⚠️ 它同时是本地调试的陷阱：插件按**文件名升序**尝试、命中即停，而 example.js 永远返回
-#    confidence 0.95 —— example.* 和它在同一个 plugins.dir 里时，它**永远不会被执行**。
-#    想试这个真插件，先把 example.* 挪走（别删，tests/plugin_e2e.rs 要用）。
+!/plugins/examples/
 !/plugins/musicbrainz.js
+
+# 仓库自带的示例插件（假数据）：既是插件作者照抄的模板，也是 tests/plugin_e2e.rs
+# 和 scripts/api_test.mjs 的测试夹具。**放在 examples/ 子目录里**，别挪到 plugins/ 顶层 ——
+# 插件按文件名升序尝试、命中即停，而 example.js 永远返回 confidence 0.95，
+# 一旦和 musicbrainz.js 同层，那个真插件就永远不会被执行。
+!/plugins/examples/*
