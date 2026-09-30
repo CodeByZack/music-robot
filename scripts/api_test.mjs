@@ -405,7 +405,7 @@ async function main() {
     check('管理员访问 admin 路由 → 200', st, 200);
 
     // ───────────────────────── 扫描入库 ─────────────────────────
-    section('2. 扫描入库（S5/S17）');
+    section('2. 扫描入库与刮削（S5 / S13 / S17）');
     [st, , body] = await c.json('POST', '/api/scan');
     check('触发扫描 → 202', st, 202);
     const batch = body?.batch_id ?? null;
@@ -428,6 +428,34 @@ async function main() {
     }
     check('扫描任务最终状态 = done', status, 'done');
     checkTrue('扫描报告 total > 0', (body?.total ?? 0) > 0, brief(body));
+
+    // 扫描入库的歌 scrape_status 都是 pending，正好当刮削队列。
+    // 插件目录用仓库自带的 plugins/：example.js 按文件名升序第一个命中，
+    // 返回 confidence 0.95（> 阈值）且 artist 固定写成「示例歌手」—— 可以当硬断言用。
+    [st, , body] = await c.json('POST', '/api/scrape');
+    check('触发刮削 → 202', st, 202);
+    const scrapeBatch = body?.batch_id ?? null;
+    checkTrue('返回非空 scrape batch_id', Boolean(scrapeBatch), brief(body));
+
+    let scrapeStatus = null;
+    for (let i = 0; i < 150; i += 1) {
+      [st, , body] = await c.json('GET', `/api/scrape/${scrapeBatch}`);
+      scrapeStatus = body?.status ?? null;
+      if (scrapeStatus === 'done' || scrapeStatus === 'failed') break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    check('刮削任务最终状态 = done', scrapeStatus, 'done');
+    checkTrue('刮削报告 total > 0（确实有活可干）', (body?.total ?? 0) > 0, brief(body));
+
+    // 硬证据：标签真的写回文件并重新入库了（不是只把状态改成 done）
+    [st, , body] = await c.json('GET', '/api/library?page_size=200');
+    const doneSongs = (body?.items ?? []).filter((x) => x?.scrape_status === 'done');
+    checkTrue('有歌被标记为 done', doneSongs.length > 0, `done=${doneSongs.length}`);
+    checkTrue(
+      '标签真的写回（出现 example.js 的「示例歌手」）',
+      (body?.items ?? []).some((x) => String(x?.artists ?? '').includes('示例歌手')),
+      brief(body).slice(0, 200),
+    );
 
     // ───────────────────────── 曲库接口 ─────────────────────────
     section('3. 曲库接口（S16）');

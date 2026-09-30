@@ -337,6 +337,27 @@ async function actScan() {
   process.stdout.write(`${X}\n${Y}等超时了，去「任务 › 任务列表」自己看。${X}\n`);
 }
 
+async function actScrape() {
+  if (!needLogin()) return;
+  console.log(`${D}队列 = scrape_status 还是 pending 的歌；插件按文件名升序尝试、命中即停${X}\n`);
+  const [st, , b] = await call('POST', '/api/scrape', null, null, 202);
+  if (st !== 202) return;
+  const batch = b?.batch_id;
+  if (!batch) return;
+  process.stdout.write(`${D}等刮削跑完`);
+  for (let i = 0; i < 240; i += 1) {
+    const [, , snap] = await api.json('GET', `/api/scrape/${batch}`);
+    if (snap?.status === 'done' || snap?.status === 'failed') {
+      process.stdout.write(`${X}\n`);
+      body(200, snap);
+      return;
+    }
+    process.stdout.write('.');
+    await sleep(500);
+  }
+  process.stdout.write(`${X}\n${Y}等超时了，去「任务 › 任务列表」看看。${X}\n`);
+}
+
 async function actLibrary() {
   if (!needLogin()) return;
   const page = await ask('页码', '1');
@@ -558,6 +579,7 @@ const TREE = [
     label: '曲库',
     children: [
       { label: '扫描入库', run: actScan },
+      { label: '刮削（批量补标签）', run: actScrape },
       { label: '曲库列表', run: actLibrary },
       { label: '搜索', run: actSearch },
       { label: '歌曲详情', run: actSongDetail },

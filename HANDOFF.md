@@ -32,7 +32,7 @@
 | 库用例（`cargo test --lib`） | **493 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
 | 合计 | **617 passed / 0 failed / 1 ignored** |
-| 端到端 API 脚本 | `node scripts/api_test.mjs` → **127 通过 / 0 失败** |
+| 端到端 API 脚本 | `node scripts/api_test.mjs` → **133 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
@@ -187,7 +187,7 @@ music-robot/
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，127 项；非交互，给回归用）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，133 项；非交互，给回归用）
 ├── scripts/api_cli.mjs  # 交互式 API 客户端（菜单式，连**已在跑**的服务；只用 node:readline，零依赖）
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
 ├── music-server-architecture.excalidraw   # ★ 全部架构设计 + 28 步实施计划
@@ -626,7 +626,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 | `tests/plugin_e2e.rs` | 3 | **真拉起 `node` / `python3` / `sh`** 跑插件协议 |
 | **合计** | **124** | |
 
-另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**127 通过 / 0 失败**，
+另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**133 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
 它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 
