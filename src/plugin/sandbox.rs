@@ -181,6 +181,11 @@ impl LimitPlan {
         // ⚠️ 每处都要 `as libc::c_uint`：`RLIMIT_*` 常量在 Linux 上是 `c_uint`，
         //    在 macOS/BSD 上是 `c_int`（见 libc 的 bsd/apple 定义），不转就编不过。
         //    Linux 侧这个转换是恒等的，行为不变。
+        // ⚠️ RLIMIT_DATA 在 macOS 上**根本设不了**：`getrlimit` 报的硬上限是 RLIM_INFINITY，
+        //    可 `setrlimit` 照样回 EINVAL（实测 "current limit exceeds maximum limit"）。
+        //    所以 macOS 上跳过内存这一项 —— 剩下四项（CPU / FSIZE / NOFILE / CORE）
+        //    macOS 都正常。代价：macOS 上插件没有内存刹车（已知且接受）。
+        #[cfg(not(target_os = "macos"))]
         if let Some(v) = self.mem_bytes {
             set_limit(libc::RLIMIT_DATA as libc::c_uint, v)?;
         }
@@ -248,10 +253,22 @@ impl LimitPlan {
 
 /// 设置一条 rlimit，软硬同值（硬限制也压死，否则插件可以自己把软限制调回去）。
 fn set_limit(resource: libc::c_uint, value: u64) -> io::Result<()> {
-    let lim = libc::rlimit {
-        rlim_cur: value as libc::rlim_t,
-        rlim_max: value as libc::rlim_t,
-    };
+    // 先读当前硬上限，再取 min —— **不能直接把 rlim_max 设成请求值**：
+    // 非 root 把 rlim_max 抬到硬上限之上会失败（Linux/BSD 上是 EPERM），
+    // 而 macOS 的 RLIMIT_NPROC 硬上限实测只有 4000，我们想设 4096 就直接报
+    // "not allowed to raise maximum limit"。夹到硬上限既保住了限制、又不会失败。
+    let mut cur = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(resource as _, &mut cur) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let want = value as libc::rlim_t;
+    let eff = if cur.rlim_max == libc::RLIM_INFINITY { want } else { want.min(cur.rlim_max) };
+    // 硬上限本身就是 0（理论上不该出现）：宁可不设，也别写 0 进去 ——
+    // 多数资源 `rlim_cur = 0` 的含义是「完全不许用」，比不限制更糟。
+    if eff == 0 && want != 0 {
+        return Ok(());
+    }
+    let lim = libc::rlimit { rlim_cur: eff, rlim_max: eff };
     if unsafe { libc::setrlimit(resource as _, &lim) } != 0 {
         return Err(io::Error::last_os_error());
     }

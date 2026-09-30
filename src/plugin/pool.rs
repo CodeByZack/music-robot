@@ -829,6 +829,8 @@ done
         }
     }
 
+    // 只服务于下面那条 Linux 专有的用例（读 NoNewPrivs）。
+    #[cfg(target_os = "linux")]
     fn resp_source(resp: &PluginResponse) -> Option<String> {
         match resp {
             PluginResponse::ScrapeOk(r) => r.source.clone(),
