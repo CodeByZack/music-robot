@@ -2,14 +2,16 @@
 //!
 //! 清单形如（JS；Python / Shell 把 // 换成 #）：
 //!
-//!     #!/usr/bin/env node
-//!     // @music-robot
-//!     // {
-//!     //   "name": "netease",
-//!     //   "kind": "scraper",
-//!     //   "protocol": 1
-//!     // }
-//!     // @end
+//! ```text
+//! #!/usr/bin/env node
+//! // @music-robot
+//! // {
+//! //   "name": "netease",
+//! //   "kind": "scraper",
+//! //   "protocol": 1
+//! // }
+//! // @end
+//! ```
 //!
 //! 硬约束：**绝不把整个插件读进内存**——插件可能是几百 MB 的资源包。
 //! 这里只读文件头，且同时受「32 行」与「64 KiB」两个上限约束。

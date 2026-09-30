@@ -4,10 +4,12 @@
 //!
 //! 调用方（S5 扫描、S13 刮削）经常要把多个写操作放进**同一个事务**：
 //!
-//!     let tx = conn.transaction()?;
-//!     let album_id = albums::insert(&tx, &album)?;
-//!     let song_id = songs::insert(&tx, &song)?;
-//!     tx.commit()?;
+//! ```ignore
+//! let tx = conn.transaction()?;
+//! let album_id = albums::insert(&tx, &album)?;
+//! let song_id = songs::insert(&tx, &song)?;
+//! tx.commit()?;
+//! ```
 //!
 //! 所以每个 repo 都只接收调用方给的连接：自己绝不借池、不 BEGIN、不 commit。
 //! rusqlite::Transaction 实现了 Deref<Target = Connection>，上面 &tx 会因为

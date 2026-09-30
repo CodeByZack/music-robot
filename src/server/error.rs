@@ -2,7 +2,9 @@
 //!
 //! 服务端所有 handler 的错误都收敛到 ApiError，响应体形状固定为：
 //!
-//!     { "error": { "code": "NOT_FOUND", "message": "请求的接口不存在", "details": null } }
+//! ```json
+//! { "error": { "code": "NOT_FOUND", "message": "请求的接口不存在", "details": null } }
+//! ```
 //!
 //! * code    —— 稳定的机器可读大写串，前端按它分支，不随文案变化；
 //! * message —— 面向用户的中文说明；
