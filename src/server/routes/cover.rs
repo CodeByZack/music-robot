@@ -138,7 +138,10 @@ async fn cover_inner(state: AppState, raw_id: String) -> ApiResult<Response> {
         })
         .await;
         if let Err(error) = backfilled {
-            eprintln!("[server] 封面回填专辑 {album_id} 失败（不影响本次响应）：{error:?}");
+            crate::serverlog::warn(
+                "cover",
+                format!("封面回填专辑 {album_id} 失败（不影响本次响应）：{error:?}"),
+            );
         }
     }
 

@@ -172,11 +172,14 @@ async fn create_user(
 
 /// 把新用户包成 201 响应，并打一行日志（**只说用户名与角色，绝不打印口令或哈希**）。
 fn created_response(who: &str, created: &User) -> Response {
-    eprintln!(
-        "[server] {}：{}（角色 {}）",
-        who,
-        created.username,
-        created.role.as_str()
+    crate::serverlog::info(
+        "auth",
+        format!(
+            "{}：{}（角色 {}）",
+            who,
+            created.username,
+            created.role.as_str()
+        ),
     );
     (
         StatusCode::CREATED,
@@ -207,6 +210,7 @@ pub async fn register(
         if existing == 0 {
             Ok(Role::Admin)
         } else {
+            crate::serverlog::warn("auth", "注册被拒：库非空，引导已完成");
             Err(ApiError::forbidden(REGISTER_CLOSED_MESSAGE))
         }
     })
@@ -285,9 +289,15 @@ pub async fn login(
     .map_err(|join| ApiError::internal(format!("登录任务异常退出：{join}")))??;
 
     let Some(user) = found else {
-        // 不区分「不存在」与「密码错」，也不写任何带用户名的日志。
+        // 不区分「不存在」与「密码错」，也**不写任何带用户名的日志** ——
+        // 响应不泄漏存在性，日志同样不该泄漏（日志会被收集、会被更多人看到）。
+        crate::serverlog::warn("auth", "登录失败（用户名或口令不匹配）");
         return Err(ApiError::unauthorized(LOGIN_FAILED_MESSAGE));
     };
+    crate::serverlog::info(
+        "auth",
+        format!("登录成功：{}（角色 {}）", user.username, user.role.as_str()),
+    );
 
     // 签发用配置里的密钥；密钥为空时这里会返回 500 AUTH_NOT_CONFIGURED（绝不签出可用 token）。
     let token = sign_token(

@@ -43,18 +43,55 @@ pub use error::{ApiError, ApiResult};
 pub use routes::build_router;
 pub use state::AppState;
 
+use std::time::Instant;
+
+use axum::extract::Request;
+use axum::middleware::{self, Next};
+use axum::response::Response;
+
+/// 请求日志中间件：一行一条 `METHOD uri -> 状态码 (耗时)`。
+///
+/// 级别按结果分档：5xx → `error`，4xx → `warn`，其余 → `info`。
+/// `/healthz` 会被探活频繁打到，**降到 debug**，免得刷屏把有用的行冲掉。
+///
+/// ⚠️ **绝不打印请求体，也不打印 Authorization 头** —— 注册 / 登录的 body 里有明文口令，
+/// 令牌进了日志文件就等于长期泄漏。只记方法与路径。
+///
+/// ⚠️ 只在 [`run`] 里挂，**不挂进 `build_router`**：测试全部走 `build_router`，
+/// 挂那里会把每个用例的请求都刷出来。
+async fn access_log(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let start = Instant::now();
+    let resp = next.run(req).await;
+    let status = resp.status().as_u16();
+    let ms = start.elapsed().as_millis();
+    let line = format!("{method} {uri} -> {status} ({ms}ms)");
+
+    if uri.path() == "/healthz" {
+        crate::serverlog::debug("http", line);
+    } else if status >= 500 {
+        crate::serverlog::error("http", line);
+    } else if status >= 400 {
+        crate::serverlog::warn("http", line);
+    } else {
+        crate::serverlog::info("http", line);
+    }
+    resp
+}
+
 /// 启动 HTTP 服务：绑定配置里的 host:port 并跑 axum，直到收到停机信号。
 ///
 /// 返回 std::io::Result：绑定失败 / serve 出错都会如实返回，由调用方决定怎么报。
 pub async fn run(state: AppState) -> std::io::Result<()> {
     let server_cfg = &state.config.server;
     let addr = format!("{}:{}", server_cfg.host, server_cfg.port);
-    let app = build_router(state);
+    let app = build_router(state).layer(middleware::from_fn(access_log));
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    // 端口配 0 时这里打印的是内核实际分配的端口，方便本地起服务时看真实地址。
+    // 端口配 0 时这里打的是内核实际分配的端口，方便本地起服务时看真实地址。
     let local = listener.local_addr()?;
-    eprintln!("[server] music-robot 已监听 http://{local}");
+    crate::serverlog::info("server", format!("已监听 http://{local}"));
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -66,7 +103,7 @@ pub async fn run(state: AppState) -> std::io::Result<()> {
 async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(e) = tokio::signal::ctrl_c().await {
-            eprintln!("[server] 监听 Ctrl-C 失败：{e}");
+            crate::serverlog::error("server", format!("监听 Ctrl-C 失败：{e}"));
             // 永远挂起：宁可关不掉，也不要因为注册失败就误触发停机。
             std::future::pending::<()>().await;
         }
@@ -79,7 +116,7 @@ async fn shutdown_signal() {
                 sig.recv().await;
             }
             Err(e) => {
-                eprintln!("[server] 监听 SIGTERM 失败：{e}");
+                crate::serverlog::error("server", format!("监听 SIGTERM 失败：{e}"));
                 std::future::pending::<()>().await;
             }
         }
@@ -89,7 +126,7 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+        _ = ctrl_c => crate::serverlog::info("server", "收到中断信号，开始优雅关闭"),
+        _ = terminate => crate::serverlog::info("server", "收到终止信号，开始优雅关闭"),
     }
 }

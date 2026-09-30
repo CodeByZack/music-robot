@@ -103,7 +103,7 @@ impl ApiError {
     /// 500：内部错误。完整原因只写日志，对外只给通用中文文案。
     pub fn internal(source: impl std::fmt::Display) -> Self {
         // 日志里保留完整原因，便于运维定位；响应体里一个字都不带。
-        eprintln!("[server] 内部错误：{source}");
+        crate::serverlog::error("http", format!("内部错误：{source}"));
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "INTERNAL",
@@ -207,7 +207,7 @@ impl From<rusqlite::Error> for ApiError {
 /// Json 提取器拒绝请求体：属于客户端问题，但原始文案可能含字段路径，统一换固定中文。
 impl From<JsonRejection> for ApiError {
     fn from(e: JsonRejection) -> Self {
-        eprintln!("[server] 请求体解析失败：{e}");
+        crate::serverlog::warn("http", format!("请求体解析失败：{e}"));
         ApiError::bad_request("请求体不是合法的 JSON")
     }
 }

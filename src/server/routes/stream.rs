@@ -309,7 +309,7 @@ fn map_transcode_error(error: TranscodeError) -> ApiError {
         // 500 分支：internal 会把完整原因（含路径）写进日志，对外只给通用文案。
         TranscodeError::Io { .. } => ApiError::internal(error),
         other => {
-            eprintln!("[server] 音频转码失败：{other}");
+            crate::serverlog::error("stream", format!("音频转码失败：{other}"));
             ApiError::service_unavailable("音频转码暂时不可用（ffmpeg 缺失或执行失败）")
         }
     }

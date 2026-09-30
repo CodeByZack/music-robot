@@ -1,5 +1,6 @@
 pub mod config;
 pub mod logger;
+pub mod serverlog;
 pub mod scanner;
 pub mod watcher;
 pub mod cli;

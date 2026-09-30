@@ -129,7 +129,7 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 | `MR_PLUGINS_DIR` / `MR_SANDBOX` / `MR_PLUGIN_USER` | 插件目录与沙箱（⚠️ 后两者目前**能读能校验，但尚未真正接进沙箱行为**，沙箱用的是固定默认值） |
 
 完整带注释的模板见 [`env.example`](env.example)：`cp env.example env.local`，改完 `source env.local` 再启动。
-| `MR_LOG_LEVEL` | 日志级别 |
+| `MR_LOG_LEVEL` | 日志级别 `error`/`warn`/`info`/`debug`/`trace`（写错启动即报错）|
 
 ---
 
@@ -164,7 +164,7 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    487 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    493 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
 node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，127 项）
 node scripts/api_cli.mjs  # 交互式客户端（连已在跑的服务，菜单选功能）

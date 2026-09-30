@@ -102,7 +102,7 @@ impl AppState {
     /// 失败一律折叠成 503 + 通用中文：不把连接池 / SQLite 的原始报错透给客户端。
     pub fn probe_db(&self) -> Result<(), ApiError> {
         if let Err(detail) = self.probe_db_inner() {
-            eprintln!("[server] 健康检查：数据库探活失败：{detail}");
+            crate::serverlog::warn("db", format!("健康检查：数据库探活失败：{detail}"));
             return Err(ApiError::service_unavailable("数据库暂时不可用"));
         }
         Ok(())
@@ -133,26 +133,35 @@ fn load_plugin_registry(config: &Config) -> PluginRegistry {
 fn log_load_report(dir: &Path, report: &LoadReport) {
     if report.loaded.is_empty() {
         if dir.is_dir() {
-            eprintln!(
-                "[plugins] 警告：插件目录「{}」里一个可用的刮削插件都没有，POST /api/scrape 会把所有歌标记为 failed。\
-                 请放入 scraper 单文件插件（可参考 plugins/example.js），或改 plugins.dir / MR_PLUGINS_DIR。",
-                dir.display()
+            crate::serverlog::warn(
+                "plugin",
+                format!(
+                    "插件目录「{}」里一个可用的刮削插件都没有，POST /api/scrape 会把所有歌标记为 failed。\
+                     请放入 scraper 单文件插件（可参考 plugins/example.js），或改 plugins.dir / MR_PLUGINS_DIR。",
+                    dir.display()
+                ),
             );
         } else {
-            eprintln!(
-                "[plugins] 警告：插件目录「{}」不存在，没有任何刮削插件，POST /api/scrape 会把所有歌标记为 failed。\
-                 请把插件放进去，或改 plugins.dir / MR_PLUGINS_DIR 指向正确目录。",
-                dir.display()
+            crate::serverlog::warn(
+                "plugin",
+                format!(
+                    "插件目录「{}」不存在，没有任何刮削插件，POST /api/scrape 会把所有歌标记为 failed。\
+                     请把插件放进去，或改 plugins.dir / MR_PLUGINS_DIR 指向正确目录。",
+                    dir.display()
+                ),
             );
         }
     } else {
-        eprintln!(
-            "[plugins] 已加载 {} 个刮削插件（按文件名升序尝试，命中即停）：{}",
-            report.loaded.len(),
-            report.loaded.join(" / ")
+        crate::serverlog::info(
+            "plugin",
+            format!(
+                "已加载 {} 个刮削插件（按文件名升序尝试、命中即停）：{}",
+                report.loaded.len(),
+                report.loaded.join(" / ")
+            ),
         );
     }
     for (file, reason) in &report.skipped {
-        eprintln!("[plugins] 跳过「{file}」：{reason}");
+        crate::serverlog::warn("plugin", format!("跳过「{file}」：{reason}"));
     }
 }

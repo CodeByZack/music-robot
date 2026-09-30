@@ -29,9 +29,9 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **487 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **493 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **611 passed / 0 failed / 1 ignored** |
+| 合计 | **617 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **127 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
@@ -170,7 +170,8 @@ music-robot/
 │   ├── cli/            # 7 个子命令 read/write/blank/scan/doctor/wash/serve + args/io（10 文件）
 │   ├── fs.rs           # PathSandbox 路径沙箱（服务端隔离的底层）
 │   ├── scanner.rs      # 递归枚举 + 四分级 + 流式 AudioWalker/WalkStats
-│   ├── logger.rs       # 事件流 + NDJSON sink
+│   ├── logger.rs       # CLI wash 事件流 + NDJSON sink（**不是**服务端日志）
+│   ├── serverlog.rs    # 服务端日志：分级 + 按天写文件 + 保留清理（全自研）
 │   ├── storage.rs      # StorageBackend trait + FileStorage（多根隔离，内部复用 PathSandbox）
 │   ├── config.rs       # 配置模块（默认值逐项对齐画布；MR_* 环境变量；含 config 段）
 │   ├── db/             # pool / migrations（v1–v3）/ models / repos/（8 个 repo）（13 文件）
@@ -354,7 +355,7 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 | `MR_DATABASE_PATH` | `database.path`（支持 `~`）⚠️ 优先于 `MR_DATA_DIR` |
 | `MR_FFMPEG_PATH` | `audio.ffmpeg_path` |
 | `MR_CACHE_DIR` | `audio.cache_dir`（支持 `~`）⚠️ 优先于 `MR_DATA_DIR` |
-| `MR_LOG_LEVEL` | `log.level` |
+| `MR_LOG_LEVEL` | `log.level`（`error`/`warn`/`info`/`debug`/`trace`；写错会在启动前报错）|
 | `MR_SANDBOX` | `plugins.sandbox` |
 | `MR_PLUGIN_USER` | `plugins.plugin_user` ⚠️ **见 §6 未决疑点** |
 | `MR_PLUGINS_DIR` | `plugins.dir`（支持 `~`）|
@@ -406,6 +407,8 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 
 ### 6.3 2026-09 收尾轮：修掉的空配置项 + 踩到的坑
 
+- **`log.dir` / `log.level` 以前也是死的**（能读能校验、全代码零引用，服务端**一条请求日志都没有**）。
+  现已接线：见 §7.7「服务端日志」。
 - **`cache_expiry_days` 以前是个骗人的配置项** —— `src/config.rs` 里能读能校验，
   但**没有任何代码执行它**。现在 `audio::transcode::prune_cache` 在 **`serve` 启动时**
   清一次过期缓存（`src/cli/serve.rs`）。删除判据**故意极严**：只删文件名严格匹配
@@ -552,6 +555,24 @@ CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID
   ⚠️ `examples/`（`cargo run --example`）不算生产路径，它内部直接用了 `unwrap`，不要照 §7.5 去改它。
 - 面向用户 / 客户端的错误文案**一律中文**；内部细节（服务器路径、SQL、stderr）只进日志。
 
+### 7.7 服务端日志（`src/serverlog.rs`）
+
+**别和 `src/logger.rs` 搞混**：那个是 CLI `wash` 的**事件流**（`WashEvent` + NDJSON sink，给 `--events` 用）。
+
+* 行格式：`<UTC ISO8601> <LEVEL> [<target>] <正文>`，例：
+  `2026-09-30T13:29:40.700Z INFO  [http] POST /api/auth/register -> 201 (2835ms)`
+* `target` 是短标签，方便 grep：`server` / `db` / `auth` / `http` / `job` / `plugin` / `cache` / `cover` / `stream`
+* **同时写文件 + 回显 stderr**。文件：`<log.dir>/music-robot-<UTC 日期>.log`，一天一个
+* `log.level` 是**下限**：`error` < `warn` < `info` < `debug` < `trace`。写错会在启动前报错
+* `log.keep_days`（默认 7）天：启动时清更早的日志；**`0` = 不清理**。
+  只删 `music-robot-<日期>.log` 形状的**普通文件**（`log.dir` 是用户配的，可能指向已有别的东西的目录）
+* **请求日志按结果分档**：5xx → `error`，4xx → `warn`，其余 → `info`；`/healthz` 探活频繁 → 降到 `debug`
+* ⚠️ **绝不记请求体与 Authorization 头** —— 注册/登录的 body 里有明文口令，令牌进日志文件等于长期泄漏
+* ⚠️ **登录失败不记用户名**（与「响应不泄漏存在性」同一口径：日志会被收集、会被更多人看到）
+* ⚠️ 日志**写不出去绝不 panic**：目录建不出来只在 stderr 提示一次，服务照跑
+* 请求日志中间件挂在 [`server::run`] 里而**不是** `build_router` —— 测试全走后者，
+  挂那里会把每条用例的请求都刷出来
+
 ### 7.6 服务端读写的唯一入口
 
 **handler 里绝不要直接 `std::fs::read`**。正确姿势是走 `StorageBackend`（`FileStorage`），
@@ -588,7 +609,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 ### 8.2 测试文件对照（**实测数字**）
 
-库用例（`cargo test --lib`）共 **487 passed / 0 failed / 1 ignored**。集成测试：
+库用例（`cargo test --lib`）共 **493 passed / 0 failed / 1 ignored**。集成测试：
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -735,6 +756,7 @@ sleep 3 && curl -s -H "Authorization: Bearer $TOK" 'localhost:18099/api/library?
 | 插件目录扫描与加载报告 | `src/plugin/registry.rs` |
 | 服务端读写的唯一入口 | `src/storage.rs` + `src/fs.rs`（见 §7.6） |
 | 转码与缓存清理 | `src/audio/transcode.rs` |
+| 服务端日志（分级 / 落盘 / 清理） | `src/serverlog.rs`（约定见 §7.7）|
 | 端到端证据 | `scripts/api_test.mjs`（非交互回归）/ `scripts/api_cli.mjs`（交互式手测） |
 | 本机工作约定（NAS 资源保护 / docs 权限 / 子代理复用） | `$DSH_HOME/AGENTS.md` |
 

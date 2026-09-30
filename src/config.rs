@@ -219,6 +219,8 @@ pub struct LogConfig {
     pub level: String,
     /// 日志目录（`~` 已展开）
     pub dir: String,
+    /// 日志保留天数。按 UTC 日期一天一个文件，启动时清掉更早的；`0` = 不清理
+    pub keep_days: u64,
 }
 
 /// 配置错误。
@@ -368,6 +370,7 @@ impl Config {
             log: LogConfig {
                 level: "info".to_string(),
                 dir: data_dir_path("logs"),
+                keep_days: 7,
             },
         }
     }
@@ -533,6 +536,9 @@ impl Config {
             if let Some(x) = str_at(seg, "dir", "log.dir")? {
                 cfg.log.dir = expand_tilde(&x);
             }
+            if let Some(x) = u64_at(seg, "keep_days", "log.keep_days")? {
+                cfg.log.keep_days = x;
+            }
         }
 
         Ok(cfg)
@@ -655,6 +661,15 @@ impl Config {
                 field: "plugins.sandbox",
                 value: self.plugins.sandbox.clone(),
                 allowed: SANDBOX_MODES.join(" / "),
+            });
+        }
+        // 日志级别写错要在**启动前**报出来 —— 否则服务照跑，但日志静默按默认级别过滤，
+        // 用户以为开了 debug 却什么都看不到。
+        if crate::serverlog::Level::parse(&self.log.level).is_none() {
+            return Err(ConfigError::BadValue {
+                field: "log.level",
+                value: self.log.level.clone(),
+                allowed: crate::serverlog::LEVELS.join(" / "),
             });
         }
         Ok(())

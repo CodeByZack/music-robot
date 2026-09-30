@@ -343,6 +343,10 @@ impl JobGuard {
     where
         F: FnOnce() -> JobOutcome,
     {
+        crate::serverlog::info(
+            "job",
+            format!("{} {} 开始", self.kind.as_str(), self.batch_id),
+        );
         match catch_unwind(AssertUnwindSafe(work)) {
             Ok(outcome) => self.finish(outcome),
             Err(_) => self.finish(JobOutcome::failed(
@@ -353,6 +357,31 @@ impl JobGuard {
 
     /// 显式收尾，然后消费掉 guard（Drop 看到 finished 就不再重复处理）。
     fn finish(mut self, outcome: JobOutcome) {
+        // 日志在这里打：outcome 已经定下来，且下面要把它 move 走。
+        match outcome.status {
+            JobStatus::Done => crate::serverlog::info(
+                "job",
+                format!(
+                    "{} {} 完成：遍历 {}，成功 {}，失败 {}，跳过 {}",
+                    self.kind.as_str(),
+                    self.batch_id,
+                    outcome.counters.total,
+                    outcome.counters.done,
+                    outcome.counters.failed,
+                    outcome.counters.skipped
+                ),
+            ),
+            JobStatus::Failed => crate::serverlog::error(
+                "job",
+                format!(
+                    "{} {} 失败：{}",
+                    self.kind.as_str(),
+                    self.batch_id,
+                    outcome.message.as_deref().unwrap_or("(无说明)")
+                ),
+            ),
+            JobStatus::Running => {}
+        }
         self.registry.mark_finished(&self.batch_id, self.kind, outcome);
         self.finished = true;
     }
@@ -364,6 +393,10 @@ impl Drop for JobGuard {
             return;
         }
         // 没走 finish（提前 return / panic 展开）也要释放锁，否则这类任务永久锁死。
+        crate::serverlog::error(
+            "job",
+            format!("{} {} 异常退出（未走正常收尾），已释放独占锁", self.kind.as_str(), self.batch_id),
+        );
         self.registry.mark_finished(
             &self.batch_id,
             self.kind,

@@ -89,7 +89,34 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         return Ok(1);
     }
 
-    // ── 2) 启动维护：清一次过期的转码缓存 ──
+    // ── 2) 日志：先初始化，之后所有输出都走它（写文件 + 回显 stderr）──
+    // 级别已在 validate 里校验过，解析不会失败；仍不 unwrap，退回 info 兜底。
+    let log_level = crate::serverlog::Level::parse(&cfg.log.level)
+        .unwrap_or(crate::serverlog::Level::Info);
+    match crate::serverlog::init(Path::new(&cfg.log.dir), log_level, cfg.log.keep_days) {
+        Ok(path) => crate::serverlog::info("server", format!("日志写入 {}", path.display())),
+        Err(e) => io.error(&format!(
+            "日志目录不可用（{}）：{e} —— 日志只回显终端，不落盘",
+            cfg.log.dir
+        )),
+    }
+    crate::serverlog::info(
+        "server",
+        format!("music-robot v{} 启动", env!("CARGO_PKG_VERSION")),
+    );
+    crate::serverlog::info(
+        "server",
+        format!(
+            "配置：曲库根 {:?} · 数据库 {} · 缓存 {} · 插件目录 {} · 日志级别 {}",
+            cfg.storage.library_roots,
+            cfg.database.path,
+            cfg.audio.cache_dir,
+            cfg.plugins.dir,
+            cfg.log.level
+        ),
+    );
+
+    // ── 3) 启动维护：清一次过期的转码缓存 ──
     // 只在这一刻清，**不是**每次转码都清、也没有定时任务：清理是尽力而为的磁盘治理，
     // 常驻期反复扫目录只会白耗 IO。删除判据（为什么不会误删用户文件）见
     // crate::audio::transcode::prune_cache。
@@ -99,13 +126,16 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         std::time::SystemTime::now(),
     );
     if pruned.removed > 0 || pruned.failed > 0 {
-        io.log(&format!(
-            "转码缓存清理：删除 {} 个过期文件，保留 {} 个，{} 个删不掉（目录 {}）",
-            pruned.removed, pruned.kept, pruned.failed, cfg.audio.cache_dir
-        ));
+        crate::serverlog::info(
+            "cache",
+            format!(
+                "转码缓存清理：删除 {} 个过期文件，保留 {} 个，{} 个删不掉（目录 {}）",
+                pruned.removed, pruned.kept, pruned.failed, cfg.audio.cache_dir
+            ),
+        );
     }
 
-    // ── 3) 数据库 ──
+    // ── 4) 数据库 ──
     // 先把父目录建出来：默认路径是 ~/.local/share/music-robot/music.db，
     // 首次部署时那个目录并不存在，SQLite 不会替我们建，直接开库会失败。
     if let Some(parent) = Path::new(&cfg.database.path).parent() {
@@ -136,12 +166,15 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         match migrations::apply(&mut conn) {
             Ok(report) => {
                 if report.changed() {
-                    io.log(&format!(
-                        "数据库迁移：v{} → v{}（应用 {} 条）",
-                        report.from_version,
-                        report.to_version,
-                        report.applied.len()
-                    ));
+                    crate::serverlog::info(
+                        "db",
+                        format!(
+                            "数据库迁移：v{} → v{}（应用 {} 条）",
+                            report.from_version,
+                            report.to_version,
+                            report.applied.len()
+                        ),
+                    );
                 }
             }
             Err(e) => {
@@ -151,7 +184,7 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         }
     }
 
-    // ── 4) 起服务（异步只活在这一层里面）──
+    // ── 5) 起服务（异步只活在这一层里面）──
     let state = AppState::new(Arc::new(pool), Arc::new(cfg));
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -162,7 +195,7 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
     };
     match rt.block_on(server::run(state)) {
         Ok(()) => {
-            io.log("服务已停止");
+            crate::serverlog::info("server", "服务已停止");
             Ok(0)
         }
         Err(e) => {

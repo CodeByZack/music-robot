@@ -108,7 +108,7 @@ impl<S: Send + Sync> FromRequestParts<S> for QueryParams {
         let Query(map) = Query::<HashMap<String, String>>::from_request_parts(parts, state)
             .await
             .map_err(|rejection| {
-                eprintln!("[server] 查询串解析失败：{rejection}");
+                crate::serverlog::debug("http", format!("查询串解析失败：{rejection}"));
                 ApiError::bad_request("查询参数格式不正确")
             })?;
         Ok(QueryParams(map))
