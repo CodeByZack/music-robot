@@ -33,7 +33,7 @@
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
 | 合计 | **607 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **126 通过 / 0 失败** |
-| `Cargo.lock` 包数 | **106** |
+| `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
 ### 怎么继续下一步
@@ -157,7 +157,7 @@ cargo test
 
 ```
 music-robot/
-├── Cargo.toml          # 依赖与引入理由都写在注释里（106 个锁包）
+├── Cargo.toml          # 依赖与引入理由都写在注释里（107 个锁包）
 ├── LICENSE-MIT / LICENSE-APACHE   # 双许可 MIT OR Apache-2.0
 ├── env.example         # 环境变量示例（cp 成 env.local 改完再 source）
 │                       # ⚠️ env.sh（工具链 + mt 别名）是**本机专属**的，已从版本库移除并 gitignore
@@ -327,6 +327,7 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 | `encoding_rs` | GB18030 码表（平台能力补位，非标签逻辑外包）| 标签层 |
 | `sha2` | 裸音频完整性 hash（**不能用 `DefaultHasher`**，它不保证跨版本稳定）| 标签层 |
 | `serde_json` | 手写 `Value`（**不用 serde derive**）：插件协议 / 服务端 JSON / CLI `--json` | 全层 |
+| `dotenvy` | 读 `.env`（dotenv 风格）。**唯一理由是别让用户为了跑起来先学 source/export**；只在 `serve` 启动时读一次，且**不覆盖已存在的变量**（真环境变量优先）。零传递依赖 | 服务端 |
 | `libc` | 沙箱的 `setsid` / `setrlimit` / `prctl` / `kill`。**绝不用它做标签逻辑** | 插件层 |
 | `rusqlite`（bundled） | 服务端唯一存储依赖。bundled 是因为本机只有 `libsqlite3` 运行时、无开发库无 pkg-config | 服务端 |
 | `tokio`（不用 full） | 异步运行时 | 服务端 |
@@ -356,7 +357,9 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 | `MR_PLUGINS_DIR` | `plugins.dir`（支持 `~`）|
 
 变量**未设置** = 不动；设置成**空白串** = `Empty` 错误（几乎必然是部署脚本漏填，早失败好过静默用半截配置）。
-加载顺序：内置默认值 → 配置文件 → 环境变量 → 命令行（后者覆盖前者）。
+加载顺序：内置默认值 → 配置文件 → **`.env`（dotenvy，serve 启动时读）** → 环境变量 → 命令行（后者覆盖前者）。
+⚠️ `.env` 是**兜底**：dotenvy 不覆盖已存在的变量，所以真环境变量总能压过它 —— 临时覆盖不用改文件。
+模板见仓库根的 `env.example`（`cp env.example .env`）。
 
 许可证：**`MIT OR Apache-2.0`**。
 

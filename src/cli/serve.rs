@@ -62,6 +62,12 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         },
         None => Config::defaults(),
     };
+    // `.env` 兜底：dotenvy 从当前目录**及其父目录**找 `.env` 并注入进程环境，
+    // 且**不覆盖已存在的变量** —— 正好就是「真环境变量优先」的语义。
+    // 找不到 `.env` 是常态（全新克隆就没有），不算错误。
+    if let Ok(path) = dotenvy::dotenv() {
+        io.log(&format!("已加载 .env：{}", path.display()));
+    }
     if let Err(e) = cfg.apply_env(&|k| std::env::var(k).ok()) {
         io.error(&format!("环境变量配置有误：{e}"));
         return Ok(1);

@@ -16,6 +16,12 @@ sha2 = "0.11.0"
 # CLI 的 --json 输出、插件协议的 JSON Lines 编解码、服务端所有请求/响应体、配置解析。
 # 与 encoding_rs/sha2 同类——平台能力补位（Node 侧是运行时内置 JSON），不是标签逻辑外包。
 serde_json = "1"
+# dotenvy：读 `.env`（dotenv 风格）。**引入它的唯一理由**是「别让用户为了跑起来
+# 先学一遍 source / export」—— JS 生态里加载 .env 是默认习惯，Rust 没有这个约定。
+# 它是 dotenv 的活跃维护分支（0.15.7，MIT，Rust 1.56.1+）。
+# ⚠️ 只在 `serve` 启动时读一次，且 dotenvy **不覆盖已存在的变量** → 真环境变量优先；
+#    `.env` 找不到是常态，不报错。CLI 其余子命令与标签层都不碰它。
+dotenvy = "0.15.7"
 # libc：只为进程沙箱的四个系统调用兜底——setsid / setrlimit / prctl / kill。
 # 已经是 Cargo.lock 里的传递依赖，加为直接依赖不会新增任何编译。
 # ⚠️ 绝不用它做标签逻辑。（tokio / axum 见文件末尾 —— 那是服务端运行时，与标签层无关。）
