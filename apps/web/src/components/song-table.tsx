@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Song } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
 import { usePlayer } from '@/lib/player.tsx';
+import { useWriteFiles } from '@/lib/scrape-prefs.ts';
 
 /** 毫秒 → `3:58`。 */
 export function mmss(ms: number | null | undefined): string {
@@ -68,10 +69,95 @@ function useFavorites() {
 }
 
 /**
- * 曲目表 —— 音乐库 / 收藏 / 歌单详情 / 歌手详情都用它。
+ * 单曲重新刮削的状态机。刮削是**后台任务**（POST 起 job → 轮询 batch），
+ * 所以每行自己记自己的状态，别用一个全局 spinner —— 同时点三行时那个 spinner 会骗人。
+ */
+type ScrapeState = { phase: 'running' } | { phase: 'ok' } | { phase: 'err'; message: string };
+
+/** 轮询到任务离开 running 为止。单曲刮削通常 1~3 秒，超时给 60 秒兜底。 */
+async function awaitScrape(batchId: string): Promise<{ failed: number; message: string | null }> {
+  for (let i = 0; i < 80; i++) {
+    const job = await api.jobs.scrape(batchId);
+    if (job.status !== 'running') return { failed: job.failed, message: job.message };
+    await new Promise((r) => setTimeout(r, 750));
+  }
+  return { failed: 1, message: '刮削超时（等了 60 秒还没结束）' };
+}
+
+/**
+ * 单曲重刮那颗按钮。四态：待点 / 刮削中 / 成功 / 失败。
  *
- * 抽出来是因为**四处的列、交互、脏标签标记必须完全一致**；
- * 抄四遍迟早漂移。（也顺手把「点行播放」这件事收在一处。）
+ * 提示语必须写清楚**这一下会不会动原文件** —— 它跟着设置页那个开关走，
+ * 用户没理由记得住开关当时是开是关。
+ */
+function ScrapeButton({
+  state,
+  writeFiles,
+  onClick,
+}: {
+  state: ScrapeState | undefined;
+  writeFiles: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const effect = writeFiles ? '会写回原文件（不可撤销）' : '只更新数据库，不碰文件';
+  const title =
+    state?.phase === 'running'
+      ? '刮削中…'
+      : state?.phase === 'ok'
+        ? `刮削完成（${effect}）`
+        : state?.phase === 'err'
+          ? `刮削失败：${state.message}`
+          : `重新刮削这首歌 · ${effect}`;
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={state?.phase === 'running'}
+      title={title}
+      className={[
+        'inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-surface-hover',
+        state?.phase === 'err' ? 'text-accent' : state?.phase === 'ok' ? 'text-ink-2' : 'text-ink-4',
+        state?.phase === 'running' ? 'cursor-wait' : '',
+      ].join(' ')}
+    >
+      {state?.phase === 'ok' ? (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+          <path d="m3.5 8.4 3 3 6-6.4" />
+        </svg>
+      ) : state?.phase === 'err' ? (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+          <path d="M8 2.6 14.2 13H1.8z" />
+          <path d="M8 6.6v3M8 11.4v.1" />
+        </svg>
+      ) : (
+        // 待点 / 刮削中共用同一个回转箭头，转起来就是「在跑」
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={state?.phase === 'running' ? 'animate-spin' : ''}
+        >
+          <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+          <path d="M13.4 2.6v3h-3" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/**
+ * 曲目表 —— 音乐库 / 收藏 / 歌单详情 / 歌手详情 / 首页都用它。
+ *
+ * 抽出来是因为**这些地方的列、交互、脏标签标记必须完全一致**；
+ * 抄几遍迟早漂移。（也顺手把「点行播放」和「单曲重刮」这两件事收在一处。）
+ *
+ * 重刮成功后**只重取这一行**（见 patched）—— 不要求页面提供 reload 回调，
+ * 六个调用点一个都不用改；而且「脏标签」徽标会当场消失，用户看得见效果。
  */
 export default function SongTable({
   songs,
@@ -83,6 +169,31 @@ export default function SongTable({
   const player = usePlayer();
   const playingId = player.song?.id ?? null;
   const fav = useFavorites();
+  const writeFiles = useWriteFiles();
+
+  const [scrape, setScrape] = useState<Map<number, ScrapeState>>(() => new Map());
+  // 重刮后的新数据。页面传进来的 songs 是旧的，这里按 id 覆盖。
+  const [patched, setPatched] = useState<Map<number, Song>>(() => new Map());
+
+  async function rescrape(song: Song, e: React.MouseEvent) {
+    e.stopPropagation(); // 别冒泡到行上 —— 那是「播放」
+    setScrape((m) => new Map(m).set(song.id, { phase: 'running' }));
+    try {
+      // write_files 跟着设置页那个开关走（见 lib/scrape-prefs.ts），默认只入库。
+      const acc = await api.jobs.startScrape({ song_ids: [song.id], write_files: writeFiles });
+      const res = await awaitScrape(acc.batch_id);
+      if (res.failed > 0) throw new Error(res.message ?? '刮削失败');
+      setScrape((m) => new Map(m).set(song.id, { phase: 'ok' }));
+      const fresh = await api.library.song(song.id);
+      setPatched((m) => new Map(m).set(song.id, fresh.song));
+    } catch (err) {
+      setScrape((m) =>
+        new Map(m).set(song.id, { phase: 'err', message: err instanceof Error ? err.message : String(err) }),
+      );
+    }
+  }
+
+  const rows = songs.map((s) => patched.get(s.id) ?? s);
 
   if (songs.length === 0) {
     return <p className="py-8 text-[13px] text-ink-3">这里还没有歌。</p>;
@@ -104,6 +215,7 @@ export default function SongTable({
             专辑
           </th>
           <th className="w-[42px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
+          <th className="w-[38px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
           <th className="w-[62px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
             时长
           </th>
@@ -113,7 +225,7 @@ export default function SongTable({
         </tr>
       </thead>
       <tbody>
-        {songs.map((s, i) => (
+        {rows.map((s, i) => (
           <tr
             key={`${s.id}-${i}`}
             onClick={() => player.playList(songs, i)}
@@ -169,6 +281,13 @@ export default function SongTable({
                   <path d="M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z" />
                 </svg>
               </button>
+            </td>
+            <td className="border-b border-line-weak px-3 text-center max-[640px]:hidden">
+              <ScrapeButton
+                state={scrape.get(s.id)}
+                writeFiles={writeFiles}
+                onClick={(e) => void rescrape(s, e)}
+              />
             </td>
             <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">
               {mmss(s.duration_ms)}

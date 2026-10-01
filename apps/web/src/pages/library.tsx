@@ -22,7 +22,9 @@ export default function LibraryPage() {
 
   return (
     <>
-      <header className="flex h-[58px] shrink-0 items-center gap-3 px-[22px] max-[900px]:px-[14px]">
+      {/* 右边留出 54px 给外壳那颗设置齿轮（它绝对定位在右上角）——
+          窄屏时搜索框是 flex-1，不留就会被齿轮压住右端。 */}
+      <header className="flex h-[58px] shrink-0 items-center gap-3 px-[22px] pr-[54px] max-[900px]:px-[14px] max-[900px]:pr-[54px]">
         <div className="flex h-9 max-w-[480px] flex-1 items-center gap-[9px] rounded-full bg-surface px-[14px] text-[13px] text-ink-4">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
             <circle cx="7" cy="7" r="4.6" />

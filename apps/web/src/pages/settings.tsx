@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RESUME_KEY_PREFIX, type Job } from '@music-robot/core';
+import { setWriteFiles as setWriteFilesPref, useWriteFiles } from '@/lib/scrape-prefs.ts';
 import { api } from '@/lib/client.ts';
 import { useAsync } from '@/lib/use-async.tsx';
 import { messageOf, useSession } from '@/lib/session.tsx';
@@ -71,7 +72,9 @@ export default function SettingsPage() {
   const [scrapeJob, setScrapeJob] = useJobPoll();
   // 默认 **false = 只入库**。危险的那一档必须用户显式打开，
   // 而不是默认打开再让人去关 —— 刮削不可撤销，默认值就是安全边界。
-  const [writeFiles, setWriteFiles] = useState(false);
+  // 这一档是**全局共享**的：曲目表里每行「重新刮削」读的是同一个值（lib/scrape-prefs.ts），
+  // 否则两处语义不同，用户没法解释。
+  const writeFiles = useWriteFiles();
   const [ack, setAck] = useState(false); // 打开写入后还要再确认一次
   const [err, setErr] = useState<string | null>(null);
   const settings = useAsync(useCallback(() => api.settings.get(), []));
@@ -126,7 +129,7 @@ export default function SettingsPage() {
         <label className="flex cursor-pointer items-center gap-3">
           <span
             onClick={() => {
-              setWriteFiles((v) => !v);
+              setWriteFilesPref(!writeFiles);
               setAck(false); // 换档位就把确认清掉，别让上一次的勾选顺延到更危险的那档
             }}
             className={[
