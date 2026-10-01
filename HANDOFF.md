@@ -275,7 +275,7 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 
 | 项目 | 状态 |
 |---|---|
-| **S24–S26 前端** | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build）。**技术选型见 §6.6**：画布写的是 React + Vite，用户 2026-10-01 提出改用 **Expo**（为将来移动端共用代码），调研结论是「Expo 壳可以用，但 PC 页面别用 react-native-web 组件写」 |
+| **S24–S26 前端** | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build）。**选型已定：Expo 壳 + Web 写 React DOM**，见 §6.6（画布 S24 写的 Vite+React 已过时） |
 | ↳ **刮削页必须带「是否应用到文件」开关** | 🔴 **用户 2026-09-30 明确要求，做页面时别漏**。理由见 §6.3「刮削默认直写原文件」——现在 `POST /api/scrape` 是**全库无差别覆盖**，页面上必须让用户先选「只入库 / 也写文件」再动手 |
 | S27 文件整理 · S28 集成打包 | 未开始 |
 | **provider（下载）插件 kind** | ❌ 未实现 —— 见下面「两个已知缺口」 |
@@ -531,6 +531,10 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 **结论：Expo 这个壳可以用，但 `react-native-web`（RNW）那一层组件不该用来写 PC 主界面。**
 推荐 **Expo 单仓库 + Web 端直接写 React DOM**。
 
+> ✅ **2026-10-01 用户已拍板：走这条（方案 B）。** 24 个 Expo skill 全留在 `.dsh/skills/`（用户选择不精简）。
+> ⚠️ 画布 S24 卡片仍写着 `Vite + React + 路由 + axios 拦截器`，**已过时但尚未改**（改画布要用户点头）。
+> 动手时按本节的形态与 5 条硬规则来，别照画布那句选型。
+
 #### 证据（都是官方原文或源码，不是二手经验）
 
 - 📗[Expo 官方](https://docs.expo.dev/workflow/web/)逐字：
@@ -562,6 +566,13 @@ apps/web/                  # Expo 项目（唯一前端）
   app/(library)/index.web.tsx   # PC：真 <table> + 虚拟滚动
 packages/core/             # 100% 共用：API client / 类型 / 播放队列状态机 / hooks
 ```
+
+**S24 的交付物（按本方案改写，替代画布里那句「Vite + React + axios 拦截器」）**：
+`npx create-expo-app`（TypeScript + Expo Router）→ `packages/core` 放 API client / 类型 / 鉴权；
+`app/_layout.web.tsx` 写 PC 外壳（`<div>` + CSS grid 侧边栏），不要用 `<Tabs>`；
+UI 组件库用 **Ant Design**（纯 React DOM 库，与「Web 写 DOM」这条路线天然兼容；
+反过来说，全用 RNW 组件的话 antd 根本用不上）。
+测试仍是 Vitest（`expo` 侧用 jest-expo 也行，但 Web 逻辑层用 Vitest 更省事）。
 
 硬规则（不管最后选哪个方案都成立）：
 1. **PC 页面不用 `<View>/<Text>` 拼布局**，直接 `<div>` + CSS；`className` 在 RNW 组件上
