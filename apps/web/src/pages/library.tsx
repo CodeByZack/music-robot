@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Song } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
+import { usePlayer } from '@/lib/player.tsx';
 import { messageOf } from '@/lib/session.tsx';
 
 /** 毫秒 → `3:58`。 */
@@ -27,7 +28,8 @@ export default function LibraryPage() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [playing, setPlaying] = useState<number | null>(null);
+  const player = usePlayer();
+  const playingId = player.song?.id ?? null;
 
   useEffect(() => {
     let alive = true;
@@ -117,11 +119,11 @@ export default function LibraryPage() {
               {shown.map((s, i) => (
                 <tr
                   key={s.id}
-                  onClick={() => setPlaying(s.id)}
+                  onClick={() => player.playList(shown, i)}
                   className={[
                     'h-[46px] cursor-pointer transition-colors hover:bg-surface-hover',
                     i % 2 === 1 ? 'bg-white/[.017]' : '',
-                    playing === s.id ? 'bg-accent-soft' : '',
+                    playingId === s.id ? 'bg-accent-soft' : '',
                   ].join(' ')}
                 >
                   <td className="border-b border-line-weak px-3 text-xs text-ink-4 tabular-nums max-[640px]:hidden">
@@ -136,7 +138,7 @@ export default function LibraryPage() {
                         <div
                           className={[
                             'overflow-hidden font-medium text-ellipsis whitespace-nowrap',
-                            playing === s.id ? 'text-accent' : '',
+                            playingId === s.id ? 'text-accent' : '',
                           ].join(' ')}
                         >
                           {s.title ?? '（无标题）'}

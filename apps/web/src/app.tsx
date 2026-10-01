@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router';
+import PlayerBar from '@/components/player-bar.tsx';
 import { Shell } from '@/components/shell.tsx';
 import LibraryPage from '@/pages/library.tsx';
 import LoginPage from '@/pages/login.tsx';
+import { PlayerProvider } from '@/lib/player.tsx';
 import { SessionProvider, useSession } from '@/lib/session.tsx';
 
 /** 还没做的页面先用它占位 —— 比空白页好，也比假装做好了诚实。 */
@@ -29,8 +31,9 @@ function Gate() {
   if (!user) return <LoginPage />;
 
   return (
-    <Shell>
-      <Routes>
+    <PlayerProvider>
+      <Shell>
+        <Routes>
         <Route path="/" element={<Todo what="首页" />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/albums" element={<Todo what="专辑" />} />
@@ -38,9 +41,11 @@ function Gate() {
         <Route path="/playlists" element={<Todo what="歌单" />} />
         <Route path="/favorites" element={<Todo what="收藏" />} />
         <Route path="/settings" element={<Todo what="设置" />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Shell>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <PlayerBar />
+      </Shell>
+    </PlayerProvider>
   );
 }
 

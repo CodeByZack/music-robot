@@ -87,7 +87,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+      <main className="relative flex min-w-0 flex-1 flex-col">{children}</main>
     </div>
   );
 }

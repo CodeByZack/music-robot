@@ -37,10 +37,29 @@ pnpm --filter @music-robot/web dev             # http://127.0.0.1:5173
 
 ## 现状（2026-10-01）
 
-**已跑通**：登录 → 自动恢复登录（令牌存 localStorage）→ 音乐库列表（真数据，
-含脏标签识别）。侧边栏 7 项里除音乐库外都是占位页。
+**已跑通**：登录 → 自动恢复登录（令牌存 localStorage）→ 音乐库列表（真数据，含脏标签识别）
+→ **点行真的出声**（底部悬浮播放条 / 上一首下一首 / 进度可拖 / 四种播放模式）。
 
-**还没做**：底部悬浮播放条、专辑/歌手/歌单/收藏/设置页、shadcn 组件。
+**还没做**：专辑/歌手/歌单/收藏/设置页（占位）、正在播放大页、shadcn 组件。
+
+## ⚠️ 一个必须知道的后端问题：媒体端点没法带令牌
+
+`/api/stream/{id}` 和 `/api/songs/{id}/cover` 都在 `require_auth` 后面，
+但 **`<audio src>` / `<img src>` 发的是裸 GET，带不了 `Authorization` 头**。实测：
+
+    裸 GET /api/stream/6      → 401
+    带令牌 /api/stream/6      → 200
+    裸 GET /api/songs/6/cover → 401
+
+现在的前端绕法（`lib/client.ts` 的 `resolveMediaUrl`）：带令牌 fetch 成 blob 再喂给 `<audio>`。
+代价是**整个文件下完才开始播**、没有真正的流式 Range、blob 占内存。
+
+**正确的修法是后端给媒体类端点另开一条鉴权通道**（二选一）：
+① 登录时下发 `HttpOnly; SameSite=Lax; Path=/api` 的 cookie，媒体端点认 cookie；
+② 发短时效的签名 URL（`?t=<ticket>`）。
+
+别把 JWT 直接放进查询串 —— 它会进 nginx 与反代的访问日志。
+后端改完，把 `resolveMediaUrl` 换成 `async (p) => p` 即可，其余代码不用动。
 
 ⚠️ **曲库列表没有「专辑」列**：`/api/library` 只返回 `album_id`，**不返回专辑名**。
 要显示得二选一 —— 再拉一次 `/api/albums` 在客户端 join，或改后端加上。
