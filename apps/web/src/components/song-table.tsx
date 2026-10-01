@@ -100,6 +100,9 @@ export default function SongTable({
           <th className="border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4">
             歌曲 / 歌手
           </th>
+          <th className="border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[900px]:hidden">
+            专辑
+          </th>
           <th className="w-[42px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
           <th className="w-[62px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
             时长
@@ -149,6 +152,9 @@ export default function SongTable({
                   </div>
                 </span>
               </div>
+            </td>
+            <td className="overflow-hidden border-b border-line-weak px-3 text-ellipsis whitespace-nowrap text-ink-3 max-[900px]:hidden">
+              {s.album ?? '—'}
             </td>
             <td className="border-b border-line-weak px-3 text-center max-[640px]:hidden">
               <button

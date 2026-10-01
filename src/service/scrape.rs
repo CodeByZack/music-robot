@@ -464,7 +464,21 @@ impl ScrapeService {
     /// 全部未命中则置 failed 并写 scrape_error。
     ///
     /// 已经是 processing 的行直接返回 [ScrapeOutcome::SkippedBusy]，不重复处理。
+    /// 刮削一首，**写回文件**（与历史行为一致，也是绝大多数场景）。
     pub fn scrape_song(&self, song_id: i64) -> Result<ScrapeOutcome, ScrapeError> {
+        self.scrape_song_with(song_id, true)
+    }
+
+    /// 刮削一首。`write_files = false` 时**只更新数据库、绝不碰原文件**。
+    ///
+    /// 为什么要有这个档位：刮削是**不可撤销**的（原文件被 rename 覆盖、DB 旧值被 UPDATE）。
+    /// 用户明确要求界面上能选「只入库 / 也写文件」，所以在触发那一刻就要定下来，
+    /// 而不是等服务端自己决定。
+    pub fn scrape_song_with(
+        &self,
+        song_id: i64,
+        write_files: bool,
+    ) -> Result<ScrapeOutcome, ScrapeError> {
         // ① 读歌 + 原子占位。插件调用期间**不持有**库连接（插件调用可能几十秒）。
         let song = {
             let conn = self.db.acquire()?;
@@ -510,7 +524,7 @@ impl ScrapeService {
         // ③ 落地。
         match hit {
             Some(found) => {
-                let result = self.commit_hit(song, found);
+                let result = self.commit_hit(song, found, write_files);
                 if let Err(e) = &result {
                     // 尽力把状态落成 failed，别让这首歌永远卡在 processing。
                     let _ = self.set_status(song_id, ScrapeStatus::Failed, Some(&e.to_string()));
@@ -641,13 +655,24 @@ impl ScrapeService {
     ///
     /// 文件写失败**不丢刮削成果**：DB 的标签 / 歌词照常写入，状态置 failed 并在
     /// scrape_error 里说明原因，等用户手动重刮。file_size / file_mtime 只在写成功后刷新。
-    fn commit_hit(&self, mut song: Song, hit: ScrapedHit) -> Result<ScrapeOutcome, ScrapeError> {
+    fn commit_hit(
+        &self,
+        mut song: Song,
+        hit: ScrapedHit,
+        write_files: bool,
+    ) -> Result<ScrapeOutcome, ScrapeError> {
         let ScrapedHit { plugin, confidence, tags, lyrics, cover_pictures } = hit;
         let path = PathBuf::from(&song.file_path);
-        let meta = build_edit_meta(&tags, cover_pictures);
-        // 自写抑制：必须**先登记再写**，否则监听器会把这次写回当成新文件。
-        self.self_write.note_write(&path);
-        let write_result = write_tags(&path, &meta);
+        // 只入库模式：**一个字节都不写**。连 note_write 都不登记 —— 没写就没有自写事件，
+        // 登记了反而会让监听器误以为这个文件刚被我们改过。
+        let write_result = if write_files {
+            let meta = build_edit_meta(&tags, cover_pictures);
+            // 自写抑制：必须**先登记再写**，否则监听器会把这次写回当成新文件。
+            self.self_write.note_write(&path);
+            write_tags(&path, &meta)
+        } else {
+            Ok(())
+        };
 
         let mut conn = self.db.acquire()?;
         let tx = conn.transaction()?;
@@ -695,12 +720,17 @@ impl ScrapeService {
         };
         match write_result {
             Ok(()) => {
+                // ⚠️ 只入库模式必须写明白 —— 否则日志看着像写了文件，事后无从分辨
+                let where_to = if write_files {
+                    format!("；{}", path.display())
+                } else {
+                    "；**只入库，未写文件**".to_string()
+                };
                 crate::serverlog::info(
                     "scrape",
                     format!(
-                        "曲目 {} 命中：插件 {plugin}（confidence {confidence:.2}）{detail}；{}",
+                        "曲目 {} 命中：插件 {plugin}（confidence {confidence:.2}）{detail}{where_to}",
                         song.id,
-                        path.display()
                     ),
                 );
                 Ok(ScrapeOutcome::Done { id: song.id, plugin, confidence })
@@ -768,33 +798,33 @@ impl BatchRunner {
     /// 跑一批：取 scrape_status = 'pending' 的曲目（最多 batch_size 首）。
     ///
     /// failed 的行**不会**被这里取到 —— 失败不自动重试。
-    pub fn run(&self) -> Result<BatchReport, ScrapeError> {
+    pub fn run(&self, write_files: bool) -> Result<BatchReport, ScrapeError> {
         let limit = self.service.cfg.batch_size.max(1) as usize;
         let ids = {
             let conn = self.service.db.acquire()?;
             queue_ids(&conn, ScrapeStatus::Pending, limit)?
         };
-        self.process(ids)
+        self.process(ids, write_files)
     }
 
     /// 批量重刮失败项：取 scrape_status = 'failed' 的曲目（最多 batch_size 首）。
-    pub fn run_failed(&self) -> Result<BatchReport, ScrapeError> {
+    pub fn run_failed(&self, write_files: bool) -> Result<BatchReport, ScrapeError> {
         let limit = self.service.cfg.batch_size.max(1) as usize;
         let ids = {
             let conn = self.service.db.acquire()?;
             queue_ids(&conn, ScrapeStatus::Failed, limit)?
         };
-        self.process(ids)
+        self.process(ids, write_files)
     }
 
     /// 显式重刮指定曲目（单曲重刮 / 手工挑出来的集合）。
-    pub fn run_ids(&self, ids: &[i64]) -> Result<BatchReport, ScrapeError> {
-        self.process(ids.to_vec())
+    pub fn run_ids(&self, ids: &[i64], write_files: bool) -> Result<BatchReport, ScrapeError> {
+        self.process(ids.to_vec(), write_files)
     }
 
     /// 多线程消费一个 id 队列。WorkerPool 同步且带内部背压，这里是真并发
     /// （每个线程各借各的 worker），不是「假并发」。
-    fn process(&self, ids: Vec<i64>) -> Result<BatchReport, ScrapeError> {
+    fn process(&self, ids: Vec<i64>, write_files: bool) -> Result<BatchReport, ScrapeError> {
         let total = ids.len();
         self.progress.reset(total);
         if total == 0 {
@@ -817,7 +847,7 @@ impl BatchRunner {
                     Err(poisoned) => poisoned.into_inner().pop_front(),
                 };
                 let Some(id) = next else { break };
-                match service.scrape_song(id) {
+                match service.scrape_song_with(id, write_files) {
                     Ok(ScrapeOutcome::Done { .. }) => progress.record_done(),
                     Ok(ScrapeOutcome::Failed { id, error }) => {
                         progress.record_failed();
@@ -1850,11 +1880,11 @@ mod tests {
         ));
 
         let runner = BatchRunner::new(Arc::clone(&service));
-        let batch = runner.run().expect("普通批次");
+        let batch = runner.run(true).expect("普通批次");
         assert_eq!(batch.total, 0, "failed 的歌不该出现在 pending 队列里");
         assert_eq!(calls(&env, "notfound"), 1, "失败不自动重试：不该有第二次调用");
 
-        let retry = runner.run_failed().expect("重刮失败项");
+        let retry = runner.run_failed(true).expect("重刮失败项");
         assert_eq!(retry.total, 1, "批量失败项重刮必须取到这首歌");
         assert_eq!(retry.failed, 1);
         assert_eq!(calls(&env, "notfound"), 2, "显式重新提交才允许再次调用插件");
@@ -1869,7 +1899,7 @@ mod tests {
         let service = env.service(vec![plugin(&env, "hit", &body_hit("0.90", "{\"title\":\"Batch\"}"))]);
         let runner = BatchRunner::new(Arc::clone(&service));
 
-        let report = runner.run().expect("批次");
+        let report = runner.run(true).expect("批次");
         assert_eq!(report.total, 2);
         assert_eq!(report.done, 2);
         assert_eq!(report.failed, 0);
@@ -1885,7 +1915,7 @@ mod tests {
             let row = songs::get(&conn, song.id, false).expect("查").expect("行");
             assert_eq!(row.scrape_status, ScrapeStatus::Done);
         }
-        assert_eq!(runner.run().expect("空批次").total, 0, "跑完 pending 队列就空了");
+        assert_eq!(runner.run(true).expect("空批次").total, 0, "跑完 pending 队列就空了");
     }
 
     // ── 10. 缺省 = 不修改，null = 清除 ─────────────────────────────────────
@@ -2080,5 +2110,66 @@ mod tests {
         let conn = env.conn();
         assert_eq!(album_name(&conn, None), None, "没专辑就是 None，不该去查库");
         assert_eq!(album_name(&conn, Some(999_999)), None, "查不到的 id 不该报错");
+    }
+
+    // ─────────────────── 只入库不写文件（write_files = false）───────────────────
+
+    /// 「只入库」必须**一个字节都不动**原文件，但 DB 要更新。
+    ///
+    /// 这个档位是用户明确要求的：刮削不可撤销（原文件被 rename 覆盖、DB 旧值被 UPDATE），
+    /// 所以界面上要能选「只入库 / 也写文件」。
+    #[test]
+    fn dry_run_updates_the_database_and_leaves_the_file_byte_identical() {
+        let env = Env::new("scrape-dry-run");
+        let song = env.seed_one();
+        let service = env.service(vec![plugin(
+            &env,
+            "dryhit",
+            &body_hit("0.95", "{\"title\":\"Dry Run Title\",\"artist\":\"Dry Artist\"}"),
+        )]);
+
+        let path = PathBuf::from(&song.file_path);
+        let before = std::fs::read(&path).expect("读原文件");
+
+        let outcome = service.scrape_song_with(song.id, false).expect("刮削");
+        assert!(outcome.is_done(), "只入库也算成功：{outcome:?}");
+
+        let after = std::fs::read(&path).expect("再读原文件");
+        assert_eq!(before, after, "只入库模式**绝不能**改动原文件 —— 一个字节都不行");
+
+        // 但 DB 必须更新，否则这个档位毫无意义
+        let conn = env.conn();
+        let row = songs::get(&conn, song.id, false).expect("查库").expect("有这行");
+        assert_eq!(row.scrape_status, ScrapeStatus::Done);
+        assert_eq!(row.title.as_deref(), Some("Dry Run Title"), "标签应当进了库");
+        assert_eq!(row.artists.as_deref(), Some("Dry Artist"));
+    }
+
+    /// 对照组：默认模式必须**真的**写回文件。
+    ///
+    /// ⚠️ 少了这一条，上面那条测试可能因为「写文件功能整体坏掉」而假通过 ——
+    /// 一条只断言「没变」的测试，证明不了「该变的时候会变」。
+    #[test]
+    fn write_files_true_still_rewrites_the_file() {
+        let env = Env::new("scrape-write-files");
+        let song = env.seed_one();
+        let service = env.service(vec![plugin(
+            &env,
+            "realhit",
+            &body_hit("0.95", "{\"title\":\"Written Title\",\"artist\":\"Written Artist\"}"),
+        )]);
+
+        let path = PathBuf::from(&song.file_path);
+        let before = std::fs::read(&path).expect("读原文件");
+
+        let outcome = service.scrape_song_with(song.id, true).expect("刮削");
+        assert!(outcome.is_done(), "{outcome:?}");
+
+        let after = std::fs::read(&path).expect("再读原文件");
+        assert_ne!(before, after, "默认模式必须真的写回文件，否则上面那条测试证明不了任何事");
+
+        // 写进去的确实是插件给的标签（不是「文件变了但内容不对」）
+        let tags = crate::tag::read::read_tags(&path).expect("重新读标签");
+        assert_eq!(tags.title.as_deref(), Some("Written Title"));
     }
 }

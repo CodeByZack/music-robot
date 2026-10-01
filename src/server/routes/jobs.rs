@@ -100,7 +100,7 @@ pub async fn start_scrape(
     _admin: AdminUser,
     body: Option<Json<Value>>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    let queue = parse_scrape_body(body.as_ref().map(|Json(value)| value))?;
+    let ScrapeIntent { queue, write_files } = parse_scrape_body(body.as_ref().map(|Json(value)| value))?;
     // 实时进度源：内部读的是 BatchRunner 的原子计数，轮询时不会阻塞。
     let live: Arc<dyn ProgressSource> = Arc::new(RunnerProgress(Arc::clone(&state.scrape)));
     let guard = state
@@ -115,9 +115,9 @@ pub async fn start_scrape(
         .spawn(move || {
             guard.run_catching_panic(move || {
                 let report = match &queue {
-                    ScrapeQueue::Pending => runner.run(),
-                    ScrapeQueue::Failed => runner.run_failed(),
-                    ScrapeQueue::Ids(ids) => runner.run_ids(ids),
+                    ScrapeQueue::Pending => runner.run(write_files),
+                    ScrapeQueue::Failed => runner.run_failed(write_files),
+                    ScrapeQueue::Ids(ids) => runner.run_ids(ids, write_files),
                 };
                 match report {
                     Ok(report) => {
@@ -192,6 +192,14 @@ enum ScrapeQueue {
     Ids(Vec<i64>),
 }
 
+/// 一次刮削请求的完整意图：刮谁 + 要不要写文件。
+#[derive(Debug, PartialEq, Eq)]
+struct ScrapeIntent {
+    queue: ScrapeQueue,
+    /// `false` = **只入库，绝不碰原文件**。缺省 `true`，与历史行为一致。
+    write_files: bool,
+}
+
 /// 解析 `POST /api/scrape` 的可选请求体。
 ///
 /// **不给请求体 = pending 队列**，与加这个参数之前的行为一模一样，老客户端不受影响。
@@ -199,20 +207,28 @@ enum ScrapeQueue {
 /// 字段名写错一律 400，**绝不静默退化成「刮全库」**—— 刮削会覆盖原文件，
 /// 一个拼错的 `mode` 悄悄变成全库重刮，代价太大。（画布区块 ⑦ 的安全不变式同理：
 /// 宁可报错，也不要做用户没要求的破坏性操作。）
-fn parse_scrape_body(body: Option<&Value>) -> Result<ScrapeQueue, ApiError> {
+fn parse_scrape_body(body: Option<&Value>) -> Result<ScrapeIntent, ApiError> {
     let Some(body) = body else {
-        return Ok(ScrapeQueue::Pending);
+        return Ok(ScrapeIntent { queue: ScrapeQueue::Pending, write_files: true });
     };
     let obj = body
         .as_object()
         .ok_or_else(|| ApiError::bad_request("请求体必须是 JSON 对象"))?;
     for key in obj.keys() {
-        if key != "mode" && key != "song_ids" {
+        if key != "mode" && key != "song_ids" && key != "write_files" {
             return Err(ApiError::bad_request(format!(
-                "不认识的字段「{key}」；POST /api/scrape 只支持 mode 与 song_ids"
+                "不认识的字段「{key}」；POST /api/scrape 只支持 mode、song_ids 与 write_files"
             )));
         }
     }
+
+    // `write_files: false` = 只入库不写文件。**必须是布尔**，不收 "false" 这种字符串 ——
+    // 一个拼错的取值如果被当成 true，就是「以为没写、其实覆盖了原文件」。
+    let write_files = match obj.get("write_files") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(ApiError::bad_request("write_files 必须是布尔值")),
+    };
 
     let ids = match obj.get("song_ids") {
         None | Some(Value::Null) => None,
@@ -247,16 +263,20 @@ fn parse_scrape_body(body: Option<&Value>) -> Result<ScrapeQueue, ApiError> {
     };
 
     // song_ids 优先：它是更具体的指定，同时给 mode 时以 ids 为准。
-    if let Some(ids) = ids {
-        return Ok(ScrapeQueue::Ids(ids));
-    }
-    match mode {
-        None | Some("pending") => Ok(ScrapeQueue::Pending),
-        Some("failed") => Ok(ScrapeQueue::Failed),
-        Some(other) => Err(ApiError::bad_request(format!(
-            "mode 只支持 \"pending\" 或 \"failed\"，收到「{other}」"
-        ))),
-    }
+    let queue = if let Some(ids) = ids {
+        ScrapeQueue::Ids(ids)
+    } else {
+        match mode {
+            None | Some("pending") => ScrapeQueue::Pending,
+            Some("failed") => ScrapeQueue::Failed,
+            Some(other) => {
+                return Err(ApiError::bad_request(format!(
+                    "mode 只支持 \"pending\" 或 \"failed\"，收到「{other}」"
+                )))
+            }
+        }
+    };
+    Ok(ScrapeIntent { queue, write_files })
 }
 
 /// 202 响应体：只要触发成功，至少这几个字段是确定的。
@@ -751,39 +771,65 @@ mod tests {
     /// 纯解析：字段白名单、类型、边界。老客户端**不发 body** 必须还是 pending 队列。
     #[test]
     fn parse_scrape_body_covers_every_branch() {
-        assert_eq!(parse_scrape_body(None).expect("无 body"), ScrapeQueue::Pending);
+        assert_eq!(parse_scrape_body(None).expect("无 body").queue, ScrapeQueue::Pending);
         assert_eq!(
-            parse_scrape_body(Some(&json!({}))).expect("空对象"),
+            parse_scrape_body(Some(&json!({}))).expect("空对象").queue,
             ScrapeQueue::Pending
         );
         assert_eq!(
-            parse_scrape_body(Some(&json!({"mode": "pending"}))).expect("显式 pending"),
+            parse_scrape_body(Some(&json!({ "mode": "pending" }))).expect("显式 pending").queue,
             ScrapeQueue::Pending
         );
         assert_eq!(
-            parse_scrape_body(Some(&json!({"mode": "failed"}))).expect("失败项"),
+            parse_scrape_body(Some(&json!({ "mode": "failed" }))).expect("失败项").queue,
             ScrapeQueue::Failed
         );
         assert_eq!(
-            parse_scrape_body(Some(&json!({"song_ids": [3, 1]}))).expect("指定曲目"),
+            parse_scrape_body(Some(&json!({ "song_ids": [3, 1] }))).expect("指定曲目").queue,
             ScrapeQueue::Ids(vec![3, 1])
         );
 
         // 单曲重刮：这是「已经 done 的歌怎么再刮一遍」的唯一入口
         assert_eq!(
-            parse_scrape_body(Some(&json!({"song_ids": [7]}))).expect("单曲"),
+            parse_scrape_body(Some(&json!({ "song_ids": [7] }))).expect("单曲").queue,
             ScrapeQueue::Ids(vec![7])
         );
         // song_ids 更具体，同时给 mode 时以它为准
         assert_eq!(
-            parse_scrape_body(Some(&json!({"mode": "failed", "song_ids": [7]}))).expect("id 优先"),
+            parse_scrape_body(Some(&json!({ "mode": "failed", "song_ids": [7] })))
+                .expect("id 优先")
+                .queue,
             ScrapeQueue::Ids(vec![7])
         );
         // null 视同没给
         assert_eq!(
-            parse_scrape_body(Some(&json!({"mode": null, "song_ids": null}))).expect("null"),
+            parse_scrape_body(Some(&json!({ "mode": null, "song_ids": null }))).expect("null").queue,
             ScrapeQueue::Pending
         );
+
+        // ── write_files：只入库不写文件 ──────────────────────────────
+        // 缺省必须是 **true**（与历史行为一致；改了会悄悄改变所有老客户端的行为）
+        assert!(
+            parse_scrape_body(Some(&json!({}))).expect("省略").write_files,
+            "write_files 缺省必须是 true"
+        );
+        assert!(parse_scrape_body(None).expect("无 body").write_files);
+        assert!(
+            !parse_scrape_body(Some(&json!({ "write_files": false }))).expect("显式 false").write_files
+        );
+        assert!(
+            parse_scrape_body(Some(&json!({ "write_files": true }))).expect("显式 true").write_files
+        );
+        // null 视同没给 → true
+        assert!(parse_scrape_body(Some(&json!({ "write_files": null }))).expect("null").write_files);
+        // ⚠️ 字符串 / 数字一律 400。一个拼错的取值若被当成 true，
+        //    就是「以为没写、其实覆盖了原文件」—— 这种错不能靠约定防，要靠类型。
+        for bad in [json!({"write_files": "false"}), json!({"write_files": 0}), json!({"write_files": 1})] {
+            assert!(
+                parse_scrape_body(Some(&bad)).is_err(),
+                "write_files 非布尔必须 400：{bad}"
+            );
+        }
 
         // 以下每条都必须**报错**。刮削会覆盖原文件，拼错字段名静默退化成
         // 「刮全库 pending」的代价太大 —— 宁可 400。

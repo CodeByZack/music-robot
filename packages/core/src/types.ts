@@ -32,6 +32,11 @@ export interface LoginResponse {
 export interface Song {
   id: number;
   album_id: number | null;
+  /**
+   * **专辑名**（不是列，是后端在出口处补的）。
+   * 只在列表 / 详情 / 搜索 / 历史的响应里有；写回时后端忽略它。
+   */
+  album?: string | null;
   title: string | null;
   artists: string | null;
   album_artist: string | null;
@@ -67,12 +72,24 @@ export interface AlbumSummary {
   updated_at?: number;
 }
 
-export interface ArtistSummary {
-  id: number;
+/**
+ * 歌手列表的一行。
+ *
+ * ⚠️ **没有 id** —— 后端把「歌手」当作 `songs.artists` 这个整串，
+ * 详情接口的路径参数就是这个**名字**（`/api/artists/{name}`），要 encodeURIComponent。
+ * 按曲目数降序。
+ */
+export interface ArtistRow {
   name: string;
   song_count: number;
   album_count: number;
 }
+
+/**
+ * 歌手详情的 `artist` 字段是**字符串**（就是名字本身），不是上面那个结构。
+ * 别想当然 —— 这里曾经写错过。
+ */
+export type ArtistName = string;
 
 /** 分页列表的统一外壳（`paginated_json` 产出）。 */
 export interface Page<T> {
@@ -103,6 +120,8 @@ export interface HistoryEntry {
   song_id: number;
   played_at: number;
   duration_listened_ms: number | null;
+  /** 曲目摘要。**后端已经带上了**，不用前端再拿一次；软删的曲目这里是 null。 */
+  song?: Song | null;
 }
 
 export interface HistoryPage {
@@ -154,6 +173,13 @@ export interface Job {
 export interface ScrapeRequest {
   mode?: 'pending' | 'failed';
   song_ids?: number[];
+  /**
+   * `false` = **只入库，绝不碰原文件**。缺省 `true`（与历史行为一致）。
+   *
+   * 必须是布尔：传 `"false"` 这种字符串后端会 400 —— 一个拼错的取值若被当成 true，
+   * 就是「以为没写、其实覆盖了原文件」。
+   */
+  write_files?: boolean;
 }
 
 export interface JobAccepted {

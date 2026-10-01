@@ -346,12 +346,116 @@ pub async fn library(
     })
     .await?;
 
-    let items = result
-        .songs
+    // 走 songs_json：顺手补上专辑名（列表要显示它，而 songs 表只有 album_id）
+    let (items, total) = run_db(Arc::clone(&state.db), move |conn| {
+        Ok((songs_json(conn, &result.songs, false), result.total))
+    })
+    .await?;
+    Ok(Json(paginated_json(items, page, page_size, total)))
+}
+
+/// 一次把这批曲目用到的专辑名查出来（**一条 SQL，不是 N+1**）。
+///
+/// 为什么需要：`songs` 表只有 `album_id`，而列表要显示专辑名。
+/// 不把名字塞进 `Song` 结构体（那会波及 scanner 等所有构造点），
+/// 而是在出口处补一次批量查询。
+fn album_names_for(conn: &Connection, songs: &[Song]) -> HashMap<i64, String> {
+    let mut ids: Vec<i64> = songs.iter().filter_map(|s| s.album_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut map = HashMap::new();
+    for id in ids {
+        if let Ok(Some(album)) = albums::get(conn, id) {
+            map.insert(id, album.name);
+        }
+    }
+    map
+}
+
+/// 曲目数组 → 对外 JSON，顺带补上 `album`（专辑名，可能没有）。
+///
+/// **所有列表型接口都该走这里**，否则「有没有专辑名」会在各接口之间漂移。
+pub(crate) fn songs_json(conn: &Connection, songs: &[Song], with_lyrics: bool) -> Vec<Value> {
+    let names = album_names_for(conn, songs);
+    songs
         .iter()
-        .map(|song| song_json(song, false))
-        .collect();
-    Ok(Json(paginated_json(items, page, page_size, result.total)))
+        .map(|song| {
+            let mut value = song_json(song, with_lyrics);
+            let album = song
+                .album_id
+                .and_then(|id| names.get(&id))
+                .map(|name| Value::String(name.clone()))
+                .unwrap_or(Value::Null);
+            if let Some(object) = value.as_object_mut() {
+                let _ = object.insert("album".to_string(), album);
+            }
+            value
+        })
+        .collect()
+}
+
+/// GET /api/albums —— 专辑列表（分页）。
+pub async fn albums_list(
+    _auth: AuthUser,
+    State(state): State<AppState>,
+    params: QueryParams,
+) -> ApiResult<Json<Value>> {
+    let page = parse_page_param(params.0.get("page"), 1, None, "page")?;
+    let page_size = parse_page_param(
+        params.0.get("page_size"),
+        DEFAULT_PAGE_SIZE,
+        Some(MAX_PAGE_SIZE),
+        "page_size",
+    )?;
+    let offset = (page - 1).saturating_mul(page_size);
+
+    let (items, total) = run_db(Arc::clone(&state.db), move |conn| {
+        let rows = albums::list_with_song_count(conn, page_size, offset)?;
+        let total = albums::count(conn)?;
+        Ok((
+            rows.into_iter().map(|s| album_summary_json(&s)).collect::<Vec<_>>(),
+            total,
+        ))
+    })
+    .await?;
+    Ok(Json(paginated_json(items, page, page_size, total)))
+}
+
+/// GET /api/artists —— 歌手列表（分页，按曲目数降序）。
+///
+/// 「歌手」在后端就是 `songs.artists` 整串，与详情接口的精确匹配口径一致
+/// （原因见 [`crate::db::repos::songs::ArtistSummary`] 的注释）。
+pub async fn artists_list(
+    _auth: AuthUser,
+    State(state): State<AppState>,
+    params: QueryParams,
+) -> ApiResult<Json<Value>> {
+    let page = parse_page_param(params.0.get("page"), 1, None, "page")?;
+    let page_size = parse_page_param(
+        params.0.get("page_size"),
+        DEFAULT_PAGE_SIZE,
+        Some(MAX_PAGE_SIZE),
+        "page_size",
+    )?;
+    let offset = (page - 1).saturating_mul(page_size);
+
+    let (items, total) = run_db(Arc::clone(&state.db), move |conn| {
+        let rows = songs::list_artists(conn, page_size, offset)?;
+        let total = songs::count_artists(conn)?;
+        let items = rows
+            .into_iter()
+            .map(|a| {
+                json!({
+                    "name": a.name,
+                    "song_count": a.song_count,
+                    "album_count": a.album_count,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok((items, total))
+    })
+    .await?;
+    Ok(Json(paginated_json(items, page, page_size, total)))
 }
 
 /// GET /api/songs/:id —— 单曲详情（**唯一**带 lyrics 的接口）。
@@ -367,7 +471,15 @@ pub async fn song(
     .await?;
 
     match found {
-        Some(song) => Ok(Json(json!({ "song": song_json(&song, true) }))),
+        // 详情同样补专辑名、同样带 lyrics（这是唯一带歌词的接口）
+        Some(song) => {
+            let (value, _) = run_db(Arc::clone(&state.db), move |conn| {
+                let mut v = songs_json(conn, std::slice::from_ref(&song), true);
+                Ok((v.pop().unwrap_or(Value::Null), ()))
+            })
+            .await?;
+            Ok(Json(json!({ "song": value })))
+        }
         None => Err(ApiError::not_found("请求的歌曲不存在")),
     }
 }
@@ -413,10 +525,12 @@ pub async fn album(
             track.id,
         )
     });
-    let songs: Vec<Value> = tracks
-        .iter()
-        .map(|track| song_json(track, false))
-        .collect();
+    // 出口统一走 songs_json：专辑名一并带上，口径与其它列表接口一致
+    // （否则这里的「专辑」列会显示成 —，看着像坏了）
+    let songs = run_db(Arc::clone(&state.db), move |conn| {
+        Ok(songs_json(conn, &tracks, false))
+    })
+    .await?;
     Ok(Json(json!({
         "album": album_json(&album),
         "songs": songs,
@@ -451,7 +565,7 @@ pub async fn artists(
     }
 
     let lookup = name.clone();
-    let (page, album_rows) = run_db(Arc::clone(&state.db), move |conn| {
+    let (songs, album_rows) = run_db(Arc::clone(&state.db), move |conn| {
         let page = songs::list_page(
             conn,
             SongFilter {
@@ -465,15 +579,12 @@ pub async fn artists(
             false,
         )?;
         let album_rows = albums::list_with_song_count(conn, i64::MAX, 0)?;
-        Ok((page, album_rows))
+        // 出口统一走 songs_json —— 顺手补专辑名，与列表接口口径一致
+        let songs = songs_json(conn, &page.songs, false);
+        Ok((songs, album_rows))
     })
     .await?;
 
-    let songs: Vec<Value> = page
-        .songs
-        .iter()
-        .map(|song| song_json(song, false))
-        .collect();
     let albums: Vec<Value> = album_rows
         .into_iter()
         .filter(|summary| summary.album_artist == name)
@@ -527,11 +638,10 @@ pub async fn search(
     })
     .await?;
 
-    let items = result
-        .songs
-        .iter()
-        .map(|song| song_json(song, false))
-        .collect();
+    let items = run_db(Arc::clone(&state.db), move |conn| {
+        Ok(songs_json(conn, &result.songs, false))
+    })
+    .await?;
     let mut body = paginated_json(items, page, page_size, result.total);
     if let Some(object) = body.as_object_mut() {
         let _ = object.insert("q".to_string(), Value::String(echo));

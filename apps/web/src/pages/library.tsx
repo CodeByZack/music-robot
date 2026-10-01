@@ -5,10 +5,8 @@ import { api } from '@/lib/client.ts';
 import { ErrorNote, LoadingNote, useAsync } from '@/lib/use-async.tsx';
 
 /**
- * ⚠️ 这里**没有「专辑」列**，故意的。
- * `/api/library` 的曲目 JSON 只给 `album_id`，**不给专辑名**（见后端 `song_json`）。
- * 要显示得二选一：① 再拉一次专辑数据在客户端 join；② 后端加上专辑名。
- * 在没决定之前，宁可不显示，也不摆一列 `—` 占位。
+ * 专辑列由 `SongTable` 提供 —— 后端现在在出口处补了 `album`（专辑名）。
+ * 以前 `/api/library` 只给 `album_id`，所以那列是缺的。
  */
 export default function LibraryPage() {
   const [query, setQuery] = useState('');

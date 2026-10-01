@@ -28,14 +28,10 @@ export default function HomePage() {
   const history = useCallback(() => api.history.list({ limit: 20 }), []);
   const rec = useAsync<Page<Song>>(recent);
   const hist = useAsync<HistoryPage>(history);
-  // 历史只给 song_id，要显示标题就得再拿一次曲目。
-  // ⚠️ 这是**绕法**：后端没有「历史 + 曲目」的联合端点，只能把库拉回来按 id 对上。
-  //    库大于 page_size 时会漏 —— 已在 HANDOFF 记为待确认问题。
-  const all = useAsync<Page<Song>>(useCallback(() => api.library.list({ page_size: 200 }), []));
-
-  const byId = new Map((all.data?.items ?? []).map((s) => [s.id, s]));
+  // 后端在历史里已经带了曲目摘要（`song` 字段），不用再拉一遍库做 join。
+  // 软删的曲目后端给 null，这里过滤掉。
   const recentPlayed = (hist.data?.items ?? [])
-    .map((h) => byId.get(h.song_id))
+    .map((h) => h.song)
     .filter((s): s is Song => Boolean(s));
 
   return (
@@ -76,7 +72,7 @@ export default function HomePage() {
       {rec.loading ? <LoadingNote /> : <SongTable songs={(rec.data?.items ?? []).slice(0, 6)} />}
 
       <h2 className="mt-7 mb-3 text-base leading-6 font-medium">最近播放</h2>
-      {hist.loading || all.loading ? (
+      {hist.loading ? (
         <LoadingNote />
       ) : recentPlayed.length === 0 ? (
         <p className="py-6 text-[13px] text-ink-3">
@@ -88,7 +84,7 @@ export default function HomePage() {
           <div className="mt-3 space-y-1 text-xs text-ink-4">
             {(hist.data?.items ?? []).slice(0, 3).map((h) => (
               <div key={h.id}>
-                {byId.get(h.song_id)?.title ?? `曲目 ${h.song_id}`} · {hoursAgo(h.played_at)}
+                {h.song?.title ?? `曲目 ${h.song_id}`} · {hoursAgo(h.played_at)}
               </div>
             ))}
           </div>

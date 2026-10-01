@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import PlayerBar from '@/components/player-bar.tsx';
 import { Shell } from '@/components/shell.tsx';
+import AlbumPage from '@/pages/album.tsx';
 import AlbumsPage from '@/pages/albums.tsx';
+import ArtistPage from '@/pages/artist.tsx';
 import ArtistsPage from '@/pages/artists.tsx';
 import FavoritesPage from '@/pages/favorites.tsx';
 import HomePage from '@/pages/home.tsx';
@@ -36,7 +38,9 @@ function Gate() {
           <Route path="/" element={<HomePage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/albums" element={<AlbumsPage />} />
+          <Route path="/albums/:id" element={<AlbumPage />} />
           <Route path="/artists" element={<ArtistsPage />} />
+          <Route path="/artists/:name" element={<ArtistPage />} />
           <Route path="/playlists" element={<PlaylistsPage />} />
           <Route path="/playlists/:id" element={<PlaylistPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />

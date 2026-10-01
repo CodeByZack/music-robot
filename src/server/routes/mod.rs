@@ -106,7 +106,10 @@ pub fn build_router(state: AppState) -> AppRouter {
         // 路径参数用 axum 0.8 的花括号写法（旧写法 :id 在 matchit 0.8 下会 panic）。
         .route("/api/library", get(library::library))
         .route("/api/songs/{id}", get(library::song))
+        // 列表与详情并存：/api/albums 与 /api/albums/{id}、/api/artists 与 /api/artists/{name}
+        .route("/api/albums", get(library::albums_list))
         .route("/api/albums/{id}", get(library::album))
+        .route("/api/artists", get(library::artists_list))
         .route("/api/artists/{name}", get(library::artists))
         .route("/api/search", get(library::search))
         // ── S17 扫描 / 刮削 API ───────────────────────────────────────────

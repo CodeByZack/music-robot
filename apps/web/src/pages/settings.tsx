@@ -69,14 +69,20 @@ export default function SettingsPage() {
   const { user, logout } = useSession();
   const [scanJob, setScanJob] = useJobPoll();
   const [scrapeJob, setScrapeJob] = useJobPoll();
-  const [ack, setAck] = useState(false); // 二次确认：承认会覆盖原文件
+  // 默认 **false = 只入库**。危险的那一档必须用户显式打开，
+  // 而不是默认打开再让人去关 —— 刮削不可撤销，默认值就是安全边界。
+  const [writeFiles, setWriteFiles] = useState(false);
+  const [ack, setAck] = useState(false); // 打开写入后还要再确认一次
   const [err, setErr] = useState<string | null>(null);
   const settings = useAsync(useCallback(() => api.settings.get(), []));
 
   async function start(kind: 'scan' | 'scrape') {
     setErr(null);
     try {
-      const acc = kind === 'scan' ? await api.jobs.startScan() : await api.jobs.startScrape();
+      const acc =
+        kind === 'scan'
+          ? await api.jobs.startScan()
+          : await api.jobs.startScrape({ write_files: writeFiles });
       const job: Job = {
         batch_id: acc.batch_id,
         kind: acc.kind,
@@ -114,30 +120,66 @@ export default function SettingsPage() {
       {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-[12.5px] text-accent">{err}</p>}
 
       <Panel title="刮削">
-        <div className="mb-4 flex items-start gap-3 leading-[18px]">
-          <input
-            id="ack"
-            type="checkbox"
-            checked={ack}
-            onChange={(e) => setAck(e.target.checked)}
-            className="mt-0.5 shrink-0 accent-accent"
-          />
-          <label htmlFor="ack" className="cursor-pointer text-[13px]">
-            我确认要写入音乐文件
-            <span className="mt-1 block text-xs text-ink-3">
-              刮削会<b className="text-accent">直接覆盖原文件的标签</b>，没有备份、不能撤销。
-              后端目前<b>没有「只入库不写文件」的档位</b>（服务端还没这个能力），
-              所以这里只能做二次确认，拦不住写入本身。
+        {/* 这个开关现在**真的有用** —— 后端 POST /api/scrape 支持 write_files。
+            以前只能在界面上拦一道，拦不住写入本身。 */}
+        <label className="flex cursor-pointer items-center gap-3">
+          <span
+            onClick={() => {
+              setWriteFiles((v) => !v);
+              setAck(false); // 换档位就把确认清掉，别让上一次的勾选顺延到更危险的那档
+            }}
+            className={[
+              'relative h-[23px] w-10 shrink-0 rounded-full transition-colors',
+              writeFiles ? 'bg-accent' : 'bg-white/16',
+            ].join(' ')}
+          >
+            <span
+              className={[
+                'absolute top-[3px] left-[3px] size-[17px] rounded-full bg-ink transition-transform',
+                writeFiles ? 'translate-x-[17px]' : '',
+              ].join(' ')}
+            />
+          </span>
+          <span className="min-w-0">
+            <span className="text-[13.5px]">把刮削结果写入音乐文件</span>
+            <br />
+            <span className="text-xs text-ink-3">
+              {writeFiles
+                ? '会直接覆盖原文件标签，没有备份、不能撤销'
+                : '只更新数据库，一个字节都不碰你的文件'}
             </span>
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-2.5">
+          </span>
+        </label>
+
+        {writeFiles && (
+          <>
+            <div className="mt-3.5 flex items-start gap-3 rounded-md bg-accent-soft px-[14px] py-3 leading-[18px] text-accent">
+              <input
+                id="ack"
+                type="checkbox"
+                checked={ack}
+                onChange={(e) => setAck(e.target.checked)}
+                className="mt-0.5 shrink-0 accent-accent"
+              />
+              <label htmlFor="ack" className="cursor-pointer text-[12.5px]">
+                我确认要覆盖原文件。建议先关掉这个开关跑一次「只入库」看看结果，
+                确认插件写出来的标签是你要的，再打开它。
+              </label>
+            </div>
+          </>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-2.5">
           <button
             onClick={() => start('scrape')}
-            disabled={!ack || scrapeJob?.status === 'running'}
+            disabled={(writeFiles && !ack) || scrapeJob?.status === 'running'}
             className="h-[34px] rounded-full bg-accent px-4 text-[13px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {scrapeJob?.status === 'running' ? '刮削中…' : '开始刮削'}
+            {scrapeJob?.status === 'running'
+              ? '刮削中…'
+              : writeFiles
+                ? '开始刮削并写入文件'
+                : '开始刮削（只入库）'}
           </button>
         </div>
         {scrapeJob && <Progress job={scrapeJob} />}

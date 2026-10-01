@@ -521,6 +521,43 @@ async function main() {
     [st, , body] = await c.json('POST', '/api/scrape', { mode: 'failed' });
     check('重刮失败项 mode=failed → 202', st, 202);
 
+    // ── 只入库不写文件（write_files: false）──────────────────────────
+    // 这条档位是用户明确要求的：刮削不可撤销，界面上要能选「只入库 / 也写文件」。
+    {
+      const target = (body?.items ?? [])[0]?.id ?? rescrapeId;
+      // 先记下文件大小，跑完必须一模一样
+      const [beforeSt, beforeHd] = await c.req('GET', `/api/stream/${target}`, null, { Range: 'bytes=0-0' });
+      check('取刮削前文件大小 → 206', beforeSt, 206);
+      const sizeBefore = beforeHd['content-range'];
+
+      const [drySt, , dryBody] = await c.json('POST', '/api/scrape', {
+        song_ids: [target],
+        write_files: false,
+      });
+      check('只入库模式触发 → 202', drySt, 202);
+      const dryBatch = dryBody?.batch_id ?? null;
+      let dryStatus = null;
+      for (let i = 0; i < 120; i += 1) {
+        [st, , body] = await c.json('GET', `/api/scrape/${dryBatch}`);
+        dryStatus = body?.status ?? null;
+        if (dryStatus === 'done' || dryStatus === 'failed') break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      check('只入库批次跑完 = done', dryStatus, 'done');
+
+      const [afterSt, afterHd] = await c.req('GET', `/api/stream/${target}`, null, { Range: 'bytes=0-0' });
+      check('取刮削后文件大小 → 206', afterSt, 206);
+      check(
+        '⭐ 只入库模式：文件大小一个字节都没变',
+        afterHd['content-range'],
+        sizeBefore,
+      );
+    }
+
+    // 类型写错必须 400 —— 一个拼错的取值若被当成 true，就是「以为没写、其实覆盖了原文件」
+    [st, , body] = await c.json('POST', '/api/scrape', { write_files: 'false' });
+    check('write_files 传字符串 → 400（不能当 true）', st, 400);
+
     // 非法 body 必须 400，绝不能静默退化成「刮全库」
     [st, , body] = await c.json('POST', '/api/scrape', { mode: 'everything' });
     check('未知 mode → 400（不静默刮全库）', st, 400);
@@ -587,6 +624,19 @@ async function main() {
 
       const jobs = await core.jobs.list();
       checkTrue('core: jobs.list 返回 items', Array.isArray(jobs.items), brief(jobs));
+
+      const albumsPage = await core.albums.list({ page_size: 5 });
+      checkTrue('core: albums.list 返回 items/total', Array.isArray(albumsPage.items) && typeof albumsPage.total === 'number', brief(albumsPage));
+
+      const artistsPage = await core.artists.list({ page_size: 5 });
+      checkTrue('core: artists.list 返回 items/total', Array.isArray(artistsPage.items), brief(artistsPage));
+
+      // 列表里的曲目应当带专辑名（后端在出口补的）
+      checkTrue(
+        'core: library.list 的曲目带 album 字段',
+        'album' in (lib.items[0] ?? {}),
+        brief(lib.items[0]),
+      );
     } catch (e) {
       // ⚠️ 必须包住：core 的 api 层要是把路径/方法写错，抛出来会把**后面一百多条断言
       //    全带不跑**，报错还只是一个异常栈。改成记一条失败断言继续跑。

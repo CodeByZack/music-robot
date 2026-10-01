@@ -88,7 +88,7 @@
 //! rusqlite 全是同步阻塞调用，统一用 library::run_db 包进 spawn_blocking
 //! （S14 铁律），绝不在 async 上下文里直接碰连接池。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -414,18 +414,29 @@ pub async fn recent_history(
     let (items, total) = run_db(Arc::clone(&state.db), move |conn| {
         let rows = history::recent(conn, user_id, limit, offset)?;
         let total = history::count_by_user(conn, user_id)?;
-        let mut items = Vec::with_capacity(rows.len());
-        for row in rows {
-            let song = match songs::get(conn, row.song_id, false)? {
-                Some(song) => song_json(&song, false),
-                None => Value::Null,
-            };
-            let mut item = history_json(&row);
-            if let Some(object) = item.as_object_mut() {
-                let _ = object.insert("song".to_string(), song);
-            }
-            items.push(item);
+
+        // 一次把这批历史涉及的曲目全取回来（原来是逐行 songs::get —— N+1），
+        // 并且走 library::songs_json，这样**专辑名也一起补上**，与列表接口口径一致。
+        let ids: Vec<i64> = rows.iter().map(|row| row.song_id).collect();
+        let found = songs::get_many(conn, &ids)?;
+        let values = super::library::songs_json(conn, &found, false);
+        let mut by_id: HashMap<i64, Value> = HashMap::with_capacity(found.len());
+        for (song, value) in found.iter().zip(values) {
+            by_id.insert(song.id, value);
         }
+
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|row| {
+                let mut item = history_json(row);
+                if let Some(object) = item.as_object_mut() {
+                    // 曲目可能已被软删：那时给 null，而不是把这条历史抹掉
+                    let song = by_id.get(&row.song_id).cloned().unwrap_or(Value::Null);
+                    let _ = object.insert("song".to_string(), song);
+                }
+                item
+            })
+            .collect();
         Ok((items, total))
     })
     .await?;

@@ -19,6 +19,82 @@ use crate::db::models::{ScrapeStatus, Song};
 
 use super::RepoResult;
 
+/// 歌手列表的一行 —— 「歌手」在后端就是 `songs.artists` 这个**整串**。
+///
+/// ⚠️ 为什么按整串分组、而不是按 ` / ` 拆开：歌手详情（`GET /api/artists/{name}`）
+/// 用的就是 `artists = ?` 的**精确匹配**。拆开分组的话，列表里点「银临」会进到
+/// 一个详情页里又找不到歌 —— 列表与详情口径必须一致。
+/// 这是既有设计，不是这里偷懒。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtistSummary {
+    /// 歌手串（就是 `songs.artists`）
+    pub name: String,
+    /// 该歌手的曲目数
+    pub song_count: i64,
+    /// 该歌手出现过的专辑数（去重）
+    pub album_count: i64,
+}
+
+/// 歌手列表，按曲目数降序（同数目按名字，保证分页稳定）。
+pub fn list_artists(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> RepoResult<Vec<ArtistSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT artists AS name,
+                COUNT(*) AS song_count,
+                COUNT(DISTINCT album_id) AS album_count
+           FROM songs
+          WHERE deleted_at IS NULL AND artists IS NOT NULL AND TRIM(artists) <> ''
+          GROUP BY artists
+          ORDER BY song_count DESC, name
+          LIMIT ?1 OFFSET ?2",
+    )?;
+    let mut rows = stmt.query(params![limit, offset])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(ArtistSummary {
+            name: row.get("name")?,
+            song_count: row.get("song_count")?,
+            album_count: row.get("album_count")?,
+        });
+    }
+    Ok(out)
+}
+
+/// 歌手总数（去重后的 `artists` 串数量）。
+pub fn count_artists(conn: &Connection) -> RepoResult<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(DISTINCT artists) FROM songs
+          WHERE deleted_at IS NULL AND artists IS NOT NULL AND TRIM(artists) <> ''",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// 按 id 批量取曲目。给「历史 + 曲目摘要」这类**一次拿一批**的场景用，
+/// 避免每条历史各打一次查询。
+pub fn get_many(conn: &Connection, ids: &[i64]) -> RepoResult<Vec<Song>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // 用占位符拼 IN —— 参数照旧走绑定，不把值拼进 SQL
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT {COLUMNS} FROM songs WHERE deleted_at IS NULL AND id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(ids))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(row_to_song(row)?);
+    }
+    Ok(out)
+}
+
 /// 查询 / 返回统一使用的列清单，与 [row_to_song] 一一对应。
 const COLUMNS: &str = "id, file_path, album_id, title, artists, album_artist, year, genres, \
      track, disc, duration_ms, bitrate_bps, format, audio_hash, file_size, file_mtime, \

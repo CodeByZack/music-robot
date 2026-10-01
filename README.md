@@ -182,9 +182,9 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    508 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    510 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
-node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，162 项）
+node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，171 项）
 node scripts/api_cli.mjs  # 交互式客户端（连已在跑的服务，菜单选功能）
 ```
 

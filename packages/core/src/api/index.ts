@@ -2,7 +2,8 @@ import type { Http } from '../http.ts';
 import type {
   Album,
   AlbumSummary,
-  ArtistSummary,
+  ArtistName,
+  ArtistRow,
   HistoryEntry,
   HistoryPage,
   Job,
@@ -58,17 +59,23 @@ export function createApi(http: Http) {
       coverUrl: (id: number) => `/api/songs/${id}/cover`,
     },
 
-    // ⚠️ 没有 `albums.list` / `artists.list` —— 后端**没有**这两个列表端点，
-    //    只有 `/api/albums/{id}` 与 `/api/artists/{name}`。
-    //    所以「专辑页 / 歌手页」目前做不出来，见 HANDOFF 的待确认问题。
     albums: {
+      /** 分页列表。每项带现算的 `song_count`，按 `name, album_artist` 排。 */
+      list: (params: { page?: number; page_size?: number } = {}) =>
+        http.get<Page<AlbumSummary>>(`/api/albums${qs(params)}`),
       get: (id: number) => http.get<{ album: Album; songs: Song[] }>(`/api/albums/${id}`),
     },
 
     artists: {
-      /** ⚠️ 参数是**歌手名**，不是 id（路由是 `/api/artists/{name}`）。 */
+      /** 分页列表，按曲目数降序。 */
+      list: (params: { page?: number; page_size?: number } = {}) =>
+        http.get<Page<ArtistRow>>(`/api/artists${qs(params)}`),
+      /**
+       * 详情。⚠️ 参数是**歌手名**不是 id（路由是 `/api/artists/{name}`），
+       * 且响应里的 `artist` 就是那个**字符串**名字，不是结构体。
+       */
       get: (name: string) =>
-        http.get<{ artist: ArtistSummary; songs: Song[]; albums: AlbumSummary[] }>(
+        http.get<{ artist: ArtistName; songs: Song[]; albums: AlbumSummary[] }>(
           `/api/artists/${encodeURIComponent(name)}`,
         ),
     },
