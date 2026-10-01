@@ -113,6 +113,12 @@
 
 ### 1.7 FlashList（Shopify）vs @tanstack/react-virtual ✅
 
+> **后记（2026-10-01，实测后改主意）**：本节结论是「读文档得出的」，实际铺页面时没照做。
+> `@tanstack/react-table` 装上了但一行没用 —— 四个页面共用一个手写的 `song-table.tsx`
+> （184 行，含表头排序的位子都没留，因为后端接口本来就带分页与排序参数）。
+> **已从 `apps/web/package.json` 卸掉**。什么时候再装：出现「列显隐 / 多列排序 / 万行虚拟滚动」
+> 这类真需求时。下面几行文字保留原样，当研究记录看，**不要再当结论引用**。
+
 | 维度 | @shopify/flash-list | @tanstack/react-virtual |
 |---|---|---|
 | 是什么 | RN 高性能虚拟列表，v2 针对新架构重写 | Web 端无头虚拟化原语（不是组件，是 hook） |

@@ -29576,7 +29576,7 @@
       "width": 1640,
       "height": 72,
       "strokeColor": "#0e7490",
-      "backgroundColor": "#cffafe",
+      "backgroundColor": "#bbf7d0",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -29584,7 +29584,7 @@
       "opacity": 100,
       "angle": 0,
       "seed": 3100115,
-      "version": 1,
+      "version": 2,
       "versionNonce": 3100116,
       "isDeleted": false,
       "groupIds": [],
@@ -29598,7 +29598,8 @@
         "type": 3
       },
       "link": null,
-      "locked": false
+      "locked": false,
+      "updated": 1790839329175
     },
     {
       "type": "text",
@@ -29607,8 +29608,8 @@
       "y": 2521,
       "width": 1612,
       "height": 60,
-      "text": "S24 · 前端骨架\n交付：Vite + React + 路由 + axios 拦截器\nUT（Vitest）：登录态存取 · 401 自动跳登录 · 请求头带 token",
-      "originalText": "S24 · 前端骨架\n交付：Vite + React + 路由 + axios 拦截器\nUT（Vitest）：登录态存取 · 401 自动跳登录 · 请求头带 token",
+      "text": "S24 · 前端骨架\n交付：Vite + React + react-router + 共用 API 客户端（packages/core/http.ts，手写 fetch，无 axios）\nUT（node:test，在 core 侧）：401 → 跳登录 · 非 JSON 错误体保状态码 · 超时中止 · 媒体 cookie",
+      "originalText": "S24 · 前端骨架\n交付：Vite + React + react-router + 共用 API 客户端（packages/core/http.ts，手写 fetch，无 axios）\nUT（node:test，在 core 侧）：401 → 跳登录 · 非 JSON 错误体保状态码 · 超时中止 · 媒体 cookie",
       "fontSize": 9.5,
       "fontFamily": 3,
       "textAlign": "left",

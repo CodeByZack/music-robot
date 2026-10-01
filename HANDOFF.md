@@ -17,12 +17,13 @@
 
 **`music-robot` —— 自托管的音乐服务器**（Rust）。标签读写层**全自研**，服务端跑在 axum + tokio 上。
 
-- **后端已全部完成**：画布 28 步里的 **S1–S23 共 23 步**。能力覆盖：
+- **后端已全部完成**：画布 28 步里的 **S1–S23 共 23 步**；**S24 前端骨架** 2026-10-02 也跑通了。能力覆盖：
   曲库扫描入库 + 多根去重 · 标签读写（CLI）· JWT 认证 · 分页查询与搜索 · 扫描 / 刮削任务 ·
   HTTP Range 流式播放 · ffmpeg 按需转码 + 缓存 · 封面 · 播放列表 · 播放历史 / 收藏 / 设置 ·
   点歌请求 · **刮削插件子系统**。
-- **未完成**：S24–S26 前端（React + Vite）· S27 文件整理 · S28 集成打包；
-  外加一个**明确的能力缺口**：`provider`（下载）插件 kind 未实现（见 §3「两个已知缺口」）。
+- **前端**：S24 骨架 + 12 个页面已跑通真数据（Vite + React DOM + react-router，表格 / 组件全手写
+  Tailwind，**没引 UI 库**）；还剩 S25–S26 的收尾 · S27 文件整理 · S28 集成打包。
+- **明确的能力缺口**：`provider`（下载）插件 kind 未实现（见 §3「两个已知缺口」）。
 
 ### 关键数字（**最新实测，别照抄旧数字**）
 
@@ -33,8 +34,9 @@
 | 集成用例（`tests/`，11 个文件） | **125 passed / 0 failed** |
 | 合计 | **635 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **171 通过 / 0 失败** |
+| core 单测（`packages/core`，node:test） | **34 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
-| 画布进度 | **23/28** |
+| 画布进度 | **24/28** |
 
 ### 怎么继续下一步
 
@@ -48,7 +50,7 @@ els.filter(e => /^st_\d+_\d+$/.test(e.id) && e.backgroundColor === '#bbf7d0').ma
 
 > ⚠️ 画布里 `st_X_Y_t` 是**卡片的文字元素**、`st_phN` 是**阶段标题**，都不是步骤，别数错。
 
-**每步的固定流程**（本项目已按这个跑完了 23 步）：
+**每步的固定流程**（本项目已按这个跑完了 24 步）：
 
 1. 从画布读该步卡片（交付 / UT / ⚠ 补充项），**再到相关区块读详细设计** ——
    卡片往往只写一半，真正的规则（比如刮削的 0.80 阈值、去重的胜负规则）藏在别的区块里。
@@ -275,8 +277,9 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 
 | 项目 | 状态 |
 |---|---|
-| **S24–S26 前端** | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build）。**选型已定：Expo 壳 + Web 写 React DOM**，见 §6.6（画布 S24 写的 Vite+React 已过时） |
-| ↳ **刮削页必须带「是否应用到文件」开关** | 🔴 **用户 2026-09-30 明确要求，做页面时别漏**。理由见 §6.3「刮削默认直写原文件」——现在 `POST /api/scrape` 是**全库无差别覆盖**，页面上必须让用户先选「只入库 / 也写文件」再动手 |
+| **S24 前端骨架** | ✅ **已完成**（2026-10-02）。Vite + React DOM + react-router，12 个页面跑真数据。**选型：Expo 壳 + Web 写 React DOM**，见 §6.6；画布 S24 卡片上的 `axios 拦截器` 已改成实际的「手写 fetch 客户端（`packages/core/http.ts`）」 |
+| ↳ **刮削页的「是否应用到文件」开关** | ✅ 已做 —— 设置页默认**关**（只入库），打开后还要再勾一次确认；`POST /api/scrape` 的 `write_files` 见 §3「铺页面时撞到的问题 D」 |
+| S25–S26 前端收尾 | 剩 shadcn/ui（现全手写 Tailwind）；断点续播已接，见 §3「E」 |
 | S27 文件整理 · S28 集成打包 | 未开始 |
 | **provider（下载）插件 kind** | ❌ 未实现 —— 见下面「两个已知缺口」 |
 | `config.ts` 移植 | **用户明确说暂时不做**（配置改由 `src/config.rs` 承担） |
@@ -357,9 +360,33 @@ Set-Cookie: mr_media=<jwt>; HttpOnly; SameSite=Lax; Path=/api; Max-Age=<token_ex
 - 日志会明确写「**只入库，未写文件**」，事后不会看混
 - 前端设置页的开关**默认关**（安全的一档），打开后还要再勾一次确认
 
-#### E ⏳ 仍在：播放队列 / 进度刷新即丢
+#### E ✅ 播放进度（断点续播）—— 2026-10-02 已接
 
-`settings` 里能存 `resume:<song_id>`，但前端还没接。设置页已如实标「未实现」。
+后端 `settings` 表本来就存得下 `resume:<song_id>`（画布 S21 的 UT 就是它），缺的只是前端。
+现在三处：`packages/core/src/resume.ts`（纯判断：键怎么拼、值算不算数、什么时候删键，11 个单测）、
+`apps/web/src/lib/resume.ts`（宿主侧：读写 settings + 15 秒节流）、`lib/player.tsx`（接线）。
+
+**为什么 `audio.load()` 改成等 `loadedmetadata` 才 resolve**：`seekMs` 里有
+`if (Number.isFinite(el.duration))` 的保护，src 刚设上时 `duration` 还是 `NaN`，
+于是断点续播的 seek 被**静默丢掉** —— 不报错、不出声，只是永远从头播。
+这类「有保护所以不报错的失效」是最贵的，改动理由就写在那段代码上方。
+
+**节流策略**：`timeupdate` 是 4Hz 的，不能照着它写 NAS 的 sqlite。
+播放中每 15 秒一次；暂停 / 换歌 / 卸载走 `saveNow()` 不节流（否则会丢掉上一首的收尾位置）。
+不挂 `pagehide` —— 最坏丢 15 秒，不值得为它加一层。
+
+**听完了自动删键**：播完时 `position ≈ duration`，`writeResumeMs` 判为「听完了」返回 `null`
+→ PUT `{"resume:42": null}`。所以「自动下一首」不需要给 `ended` 单开分支。
+
+**收尾落盘读的是「最后一次 `timeupdate` 记下的位置」，不是去读 audio 元素**：
+Provider 卸载时事件 effect 的 cleanup 先跑（`audio.destroy()` 会把 `src` 清掉、`currentTime` 归零），
+换歌 effect 的 cleanup 再去读元素就会读到 0 —— 断点于是被当成「刚开始」**删掉**。
+用 `lastPosRef` 存最后一帧位置，顺手也去掉这次多余的读。
+
+真机实测（CDP，单标签页，`/tmp/proto/resume4.mjs` + `resume5.mjs`）：暂停后落盘 `resume:6=65914`；
+**换歌**（点第二首）也会把第一首的 `resume:6=65758` 立刻写下；
+刷新页面再点同一首，从 **1:07** 起播（断点 65758ms）；播放中不碰任何按钮，18 秒后键自己变成 `80844`；
+拖到 99% 播完自动切下一首后该键被清空，而下一首从它自己的断点接着播。0 JS 异常。
 
 #### F ✅ core API 层补上真机测试
 
@@ -741,7 +768,7 @@ npm registry 与 GitHub API）。**结论：这些 RN 组件库对 PC 端零价�
 
 | 需求 | 用什么 |
 |---|---|
-| DataGrid | `@tanstack/react-table`（9.2.4）+ shadcn 的 `data-table` |
+| DataGrid | **暂时不用库**。四个页面共用一个手写的 `components/song-table.tsx`（184 行）。真要排序 / 列显隐 / 虚拟化再上 `@tanstack/react-table` + shadcn `data-table` —— 2026-10-01 曾装过又卸掉，见 `docs/expo-rn-ui-libs-research.md` §1.7 后记 |
 | 虚拟滚动 | `@tanstack/react-virtual`（3.14.13）—— 不要用 FlashList，官方不承诺 web |
 | 右键菜单 | Radix `ContextMenu` |
 | 拖拽 | `@dnd-kit/core`（DOM 原生 drag 语义，RNW 给不了） |

@@ -61,14 +61,40 @@ export function createAudioAdapter({ resolveSrc }: AudioAdapterOptions): AudioAd
   el.addEventListener('playing', emit('playing'));
   el.addEventListener('pause', emit('paused'));
 
+  /**
+   * 换上 src 并**等到 metadata 就绪**才 resolve。
+   *
+   * 为什么必须等：`seekMs` 只在 `duration` 已知时才生效（见那边的保护），
+   * 而设完 src 立刻 seek 时 duration 还是 NaN —— 断点续播会被**静默丢掉**，
+   * 不报错、不出声，只是每次都从头播。
+   */
+  const swap = (src: string) =>
+    new Promise<void>((resolve, reject) => {
+      const done = () => {
+        cleanup();
+        resolve();
+      };
+      const fail = () => {
+        cleanup();
+        reject(new Error('音频加载失败'));
+      };
+      const cleanup = () => {
+        el.removeEventListener('loadedmetadata', done);
+        el.removeEventListener('error', fail);
+      };
+      el.addEventListener('loadedmetadata', done);
+      el.addEventListener('error', fail);
+      el.src = src;
+      el.load();
+    });
+
   return {
     async load(path) {
       const gen = ++generation;
       try {
         const src = await resolveSrc(path);
         if (gen !== generation) return; // 期间已经换歌，丢弃
-        el.src = src;
-        el.load();
+        await swap(src);
       } catch (e) {
         if (gen === generation) emit('error')();
         throw e;

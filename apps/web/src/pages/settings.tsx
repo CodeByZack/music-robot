@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Job } from '@music-robot/core';
+import { RESUME_KEY_PREFIX, type Job } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
 import { useAsync } from '@/lib/use-async.tsx';
 import { messageOf, useSession } from '@/lib/session.tsx';
@@ -107,6 +107,7 @@ export default function SettingsPage() {
 
   const vol = settings.data?.settings.volume;
   const mode = settings.data?.settings.play_mode;
+  const resumeCount = Object.keys(settings.data?.settings ?? {}).filter((k) => k.startsWith(RESUME_KEY_PREFIX)).length;
 
   return (
     <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
@@ -211,9 +212,9 @@ export default function SettingsPage() {
         </Row>
         <Row
           label="断点续播"
-          hint="后端已支持（settings 里存 resume:<song_id>），但**前端还没接** —— 播放器目前不记录位置，刷新页面播放状态即丢"
+          hint={`位置存在 settings 的 ${RESUME_KEY_PREFIX}<song_id> 键里（这个数只反映加载时读到几条）。暂停 / 换歌立刻落盘，播放中每 15 秒一次；快听完时自动清掉，下次从头播`}
         >
-          <span className="text-xs text-ink-4">未实现</span>
+          <span className="text-xs text-ink-3">已记住 {resumeCount} 首</span>
         </Row>
       </Panel>
 

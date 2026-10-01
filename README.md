@@ -15,21 +15,21 @@ HTTP ─┘        ↑
 
 ---
 
-## ⚠️ 项目状态：后端完成，前端未开始
+## ⚠️ 项目状态：后端完成，前端骨架已跑通
 
-28 步实施计划与全部架构设计记录在画布 **[`music-server-architecture.excalidraw`](music-server-architecture.excalidraw)**（用 [Excalidraw](https://excalidraw.com) 打开）。当前进度 **23/28**。
+28 步实施计划与全部架构设计记录在画布 **[`music-server-architecture.excalidraw`](music-server-architecture.excalidraw)**（用 [Excalidraw](https://excalidraw.com) 打开）。当前进度 **24/28**。
 
 | 层 | 状态 |
 |---|---|
 | 标签引擎（读 / 写）· CLI（7 个子命令） | ✅ |
 | 扫描入库 · 多根去重 · 路径沙箱 | ✅ |
 | 插件宿主（清单 / 协议 / 进程池 / 沙箱） | ✅ |
-| HTTP 服务（**29 条路径 / 37 个操作**） | ✅ |
+| HTTP 服务（**33 条路径 / 41 个操作**） | ✅ |
 | 认证（JWT HS256 + argon2id）· 后台长任务 | ✅ |
 | 流式播放（Range）· 按需转码 · 封面 | ✅ |
 | 歌单 · 播放历史 · 收藏 · 设置 | ✅ |
 | 点歌请求 | ✅ |
-| **Web 前端（React + Vite）** | ❌ 未开始 |
+| **Web 前端（Vite + React，12 个页面跑真数据）** | ✅ S24 骨架完成，S25–S26 收尾中 |
 | 文件整理 · 集成打包 | ❌ 未开始 |
 
 ### 两个已知缺口（不是 bug）

@@ -25,6 +25,8 @@ export {
 } from './player-queue.ts';
 export type { PlayMode, QueueState } from './player-queue.ts';
 
+export { readResumeMs, resumeKey, writeResumeMs, RESUME_KEY_PREFIX } from './resume.ts';
+
 export { createApi } from './api/index.ts';
 export type { Api } from './api/index.ts';
 

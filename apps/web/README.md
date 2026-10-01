@@ -1,14 +1,13 @@
 # apps/web —— PC 端（主界面）
 
-Vite + React + TS + Tailwind v4 + shadcn/ui + `@tanstack/react-table` + React Router。
+Vite + React + TS + Tailwind v4 + React Router。表格是手写的（`components/song-table.tsx`，184 行，四个页面共用）—— **没有引 `@tanstack/react-table`**，理由见 `../../docs/expo-rn-ui-libs-research.md` §1.7。
 
 ```
 src/
 ├─ adapters/      core 的宿主实现：token-store.web.ts / audio.web.ts
-├─ components/ui/ shadcn 拷进来的（按需加，别一次拷一片）
-├─ components/app/ 本项目自己的组合件：app-shell / song-table / player-bar
-├─ pages/         11 个页面，对着后端 33 条路由
-└─ lib/utils.ts   shadcn 的 cn()
+├─ components/    本项目自己的组合件：shell / player-bar / song-table
+├─ pages/         12 个页面，对着后端 33 条路径 / 41 个操作
+└─ lib/           client / session / player / resume / use-async
 design/           设计产物（不是应用代码）
    prototype.html   主页面原型：**单文件、可交互、双击就能开**（不需要服务器）
                      首页 / 音乐库 / 专辑 / 歌手 / 歌单 / 收藏 / 设置 / 正在播放 + 登录页
@@ -23,7 +22,7 @@ design/           设计产物（不是应用代码）
 
 1. **业务逻辑写进 `packages/core/`，不要写在这里。** 这里只放 UI 与适配器。
 2. `adapters/` 是 core 唯一碰宿主的地方（`token-store.web.ts` / `audio.web.ts`）。
-3. `components/ui/` 是 shadcn 的，手改前想清楚 —— 以后要跟上游更新。
+3. 组件全部手写 Tailwind，**没有 shadcn/ui**（也没引别的 UI 库）。要用 shadcn 再按需拷，别一次拷一片。
 
 ## 跑起来
 
@@ -46,7 +45,7 @@ pnpm --filter @music-robot/web dev             # http://127.0.0.1:5173
 设置页的刮削开关是**真的**：默认关 = 只入库（`write_files: false`，一个字节都不碰原文件），
 打开后还要再勾一次确认。后端能力见 HANDOFF「铺页面时撞到的问题 D」。
 
-还没做：断点续播（设置页已如实标「未实现」）、shadcn 组件（现在都是手写 Tailwind）。
+还没做：shadcn 组件（现在都是手写 Tailwind）。断点续播已接（见 `lib/resume.ts`）。
 
 ## 媒体鉴权：cookie 通道（后端已解决）
 

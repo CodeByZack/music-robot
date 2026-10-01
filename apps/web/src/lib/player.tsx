@@ -21,6 +21,7 @@ import {
 } from '@music-robot/core';
 import { createAudioAdapter, type AudioAdapter } from '@/adapters/audio.web.ts';
 import { api, resolveMediaUrl } from '@/lib/client.ts';
+import { createResumeStore, type ResumeStore } from '@/lib/resume.ts';
 
 interface PlayerValue {
   queue: QueueState;
@@ -51,6 +52,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   if (!audioRef.current) audioRef.current = createAudioAdapter({ resolveSrc: resolveMediaUrl });
   const audio = audioRef.current;
 
+  const resumeRef = useRef<ResumeStore | null>(null);
+  if (!resumeRef.current) resumeRef.current = createResumeStore();
+  const resume = resumeRef.current;
+
   const [queue, setQueue] = useState<QueueState>(() => createQueue([]));
   const [songs, setSongs] = useState<Map<number, Song>>(() => new Map());
   const [playing, setPlaying] = useState(false);
@@ -62,11 +67,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef(queue);
   queueRef.current = queue;
 
+  /**
+   * 最后一次 `timeupdate` 记下的位置。收尾落盘用它，**不去读 audio 元素**。
+   *
+   * 原因是卸载顺序：Provider 卸载时上面那个事件 effect 的 cleanup 先跑，
+   * 里面 `audio.destroy()` 会把 `src` 清掉、`currentTime` 归零；
+   * 等换歌 effect 的 cleanup 再去读元素，读到的就是 0 ——
+   * 于是「断点」被当成「刚开始」而**删掉**，用户下次发现进度没了。
+   */
+  const lastPosRef = useRef<{ id: number; ms: number; dur: number } | null>(null);
+
   useEffect(() => {
     const offs = [
       audio.on('time', () => {
-        setPositionMs(audio.currentMs());
-        setDurationMs(audio.durationMs());
+        const ms = audio.currentMs();
+        const dur = audio.durationMs();
+        setPositionMs(ms);
+        setDurationMs(dur);
+        const id = currentId(queueRef.current);
+        if (id == null) return;
+        lastPosRef.current = { id, ms, dur };
+        // 边播边记断点（save 内部节流成 15 秒一次）。
+        // 不用给 pagehide 挂钩子 —— 最坏也就丢这 15 秒。
+        resume.save(id, ms, dur);
       }),
       audio.on('playing', () => setPlaying(true)),
       audio.on('paused', () => setPlaying(false)),
@@ -77,7 +100,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       offs.forEach((off) => off());
       audio.destroy();
     };
-  }, [audio]);
+  }, [audio, resume]);
 
   const currentTrackId = currentId(queue);
 
@@ -93,12 +116,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (currentTrackId == null) return;
     let alive = true;
     setPositionMs(0);
-    // 必须**先 await load 再 play**：blob 绕法下 src 是异步才设上的，
+    // 必须**先 await load 再 play**：src 是异步才设上的，
     // 提前 play() 会静默无效（踩过一次，现象是 readyState=4 但 paused=true）。
     void (async () => {
       try {
-        await audio.load(`/api/stream/${currentTrackId}`);
+        // 取断点跟拉流并行，别让 settings 那一次请求压在播放启动的关键路径上。
+        // load() resolve 时 metadata 已就绪，所以这里 seek 一定生效。
+        const [at] = await Promise.all([resume.get(currentTrackId), audio.load(`/api/stream/${currentTrackId}`)]);
         if (!alive) return;
+        if (at != null) {
+          audio.seekMs(at);
+          setPositionMs(at);
+        }
         await audio.play();
         // 记一条播放历史。失败不打断播放 —— 历史是锦上添花，不该影响听歌。
         void api.history.record(currentTrackId).catch(() => {});
@@ -108,8 +137,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       alive = false;
+      // 换歌 / 卸载时把这一首的收尾位置写掉。**用最后一次 timeupdate 记下的值**（见 lastPosRef）：
+      // 播完自动下一首时那里是 position ≈ duration，core 会判定「听完了」从而删键，下次从头播。
+      // id 对不上说明这一首还没出过声（刚点就换），没什么可记的。
+      const last = lastPosRef.current;
+      if (last !== null && last.id === currentTrackId) resume.saveNow(last.id, last.ms, last.dur);
     };
-  }, [audio, currentTrackId]);
+  }, [audio, resume, currentTrackId]);
 
   const playList = useCallback((list: Song[], index: number) => {
     const map = new Map(list.map((s) => [s.id, s]));
@@ -125,11 +159,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggle = useCallback(() => {
-    if (currentId(queueRef.current) == null) return;
+    const id = currentId(queueRef.current);
+    if (id == null) return;
     if (audioRef.current === null) return;
-    if (playing) audio.pause();
-    else void audio.play().catch(() => setPlaying(false));
-  }, [audio, playing]);
+    if (playing) {
+      audio.pause();
+      // 暂停基本等于「我这就走开」，立刻落盘，不等那 15 秒的节流窗口。
+      resume.saveNow(id, audio.currentMs(), audio.durationMs());
+    } else {
+      void audio.play().catch(() => setPlaying(false));
+    }
+  }, [audio, playing, resume]);
 
   const seek = useCallback(
     (ms: number) => {
