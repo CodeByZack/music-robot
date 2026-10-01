@@ -197,9 +197,11 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
 .lyr p.on{color:var(--fg);font-weight:500}
 </style>
 <body>
+<noscript><div style="position:fixed;inset:0;z-index:99;background:#14121b;color:#f2f3f4;padding:40px;font:14px/22px system-ui">
+<b>这个原型需要 JavaScript。</b><br>你现在这个查看环境把脚本禁掉了（部分文件预览器会这样）。<br>用浏览器直接打开这个 .html 文件即可。</div></noscript>
 
 <!-- ═══ 登录 ═══ -->
-<div id="login">
+<div id="login" hidden>
   <div class="lcorner lc1">Personal Music Archive</div>
   <div class="lcorner lc2">Tracks // Albums // Artists</div>
   <div class="lvert">music-robot</div>
@@ -211,6 +213,7 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
     <label class="fld"><span>用户名</span><input id="lu" placeholder="请输入用户名" autocomplete="username"></label>
     <label class="fld"><span>密码</span><input id="lp" type="password" placeholder="请输入密码" autocomplete="current-password"></label>
     <div class="lrow"><label style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" style="accent-color:var(--accent)">记住账号</label><span style="color:var(--fg-4)">忘记密码？</span></div>
+    <div class="muted" style="margin:-8px 0 16px;font-size:12px">演示原型 · 用户名随意填 · 点「登录」进入</div>
     <div class="lbtns"><button type="button" class="btn-d">使用 NAS 登录</button><button type="submit" class="btn-w">登录</button></div>
   </form>
 </div>
@@ -236,7 +239,7 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
     <span style="flex:1"></span>
     <button class="icob" title="排序"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v10M4 13l-2-2M4 13l2-2M12 13V3M12 3l-2 2M12 3l2 2"/></svg></button>
     <button class="icob" onclick="go('tasks')" title="任务"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h10M3 8h10M3 11h6"/></svg></button>
-    <div class="me">z</div>
+    <div class="me" onclick="showLogin()" title="演示：点这里看登录页">z</div>
   </header>
 
   <!-- 首页 -->
@@ -440,6 +443,7 @@ function go(p){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.p===p));
   document.querySelector('.page:not([hidden])').scrollTop = 0;
 }
+function showLogin(){ document.getElementById('login').hidden = false; }
 function enter(){
   const u = document.getElementById('lu').value || 'zackdk';
   document.querySelector('.me').textContent = u[0];
@@ -500,6 +504,9 @@ function filterSongs(){
   const n = [...document.querySelectorAll('#libSongs tr')].filter(r=>!r.hidden).length;
   document.getElementById('libCount').textContent = q ? `筛选出 ${n} 首` : '共 2657 首歌 · 1125 位歌手';
 }
+/* 原型初始状态：直接进首页（不看登录页），播放条预置一首 */
+playRow(null, 7);
+
 document.addEventListener('keydown', e=>{
   if (e.key === 'Escape') document.getElementById('login').hidden = false;
   if (e.key === ' ' && document.activeElement.tagName !== 'INPUT'){ e.preventDefault(); togglePlay(); }
