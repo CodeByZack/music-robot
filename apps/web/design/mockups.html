@@ -1,198 +1,119 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>music-robot · PC 端布局三选一</title>
+<title>music-robot · B 方案（顶栏 + 播放优先）</title>
 <style>
-  :root{
-    --bg:#fff; --fg:#14171a; --mut:#5d6b7a; --line:#e3e8ef; --card:#f7f9fb;
-    --accent:#c2410c; --wash:#f2f5f8; --bar:#e9eef3;
-  }
+  :root{--bg:#fff;--fg:#14171a;--mut:#5d6b7a;--line:#e3e8ef;--wash:#f2f5f8;
+        --bar:#fbfcfd;--accent:#c2410c;--hover:#f6f8fa}
   @media (prefers-color-scheme:dark){
-    :root{--bg:#0f1418;--fg:#eef2f6;--mut:#9aa8b6;--line:#243039;--card:#161d23;
-          --accent:#fb923c;--wash:#1b232a;--bar:#1e272e}
-  }
+    :root{--bg:#0f1418;--fg:#eef2f6;--mut:#9aa8b6;--line:#243039;--wash:#181f26;
+          --bar:#141b21;--accent:#fb923c;--hover:#1e272e}}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);padding:36px 28px 80px;
-       font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
-  h1{font-size:24px;margin:0 0 6px}
-  p.lede{margin:0 0 26px;color:var(--mut);max-width:78ch;font-size:14px}
-  .wrap{display:flex;flex-direction:column;gap:26px;max-width:1180px;margin:0 auto}
-  .card{border:1px solid var(--line);border-radius:12px;background:var(--card);
-        padding:16px;display:flex;flex-direction:column;gap:10px}
-  h2{font-size:16px;margin:0}
-  .angle{color:var(--mut);font-size:13px;margin:0}
-  .pick{font:inherit;font-size:13px;padding:7px 12px;border-radius:7px;cursor:pointer;
-        border:1px solid var(--accent);background:transparent;color:var(--accent);align-self:flex-start}
-  .pick:hover{background:var(--accent);color:var(--bg)}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--fg);display:flex;flex-direction:column;
+       font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
 
-  /* ── 线框屏幕：灰阶，只judge结构 ── */
-  .screen{border:1px solid var(--line);border-radius:8px;overflow:hidden;
-          height:400px;display:flex;font-size:11px;background:var(--bg);color:var(--fg)}
-  .col{display:flex;flex-direction:column;min-width:0}
-  .row{display:flex;align-items:center;min-width:0}
-  .grow{flex:1;min-width:0}
-  .pad{padding:9px 11px}
-  .side{width:150px;background:var(--wash);border-right:1px solid var(--line);flex:none}
-  .side2{width:120px;background:var(--wash);border-right:1px solid var(--line);flex:none}
-  .aside{width:262px;background:var(--wash);border-left:1px solid var(--line);flex:none}
-  .top{border-bottom:1px solid var(--line);flex:none}
-  .bar{border-top:1px solid var(--line);background:var(--bar);flex:none;height:52px}
-  .nav{padding:6px 9px;color:var(--mut);border-radius:5px;margin:1px 6px}
-  .nav.on{background:var(--bg);color:var(--fg);box-shadow:inset 2px 0 0 var(--accent)}
-  .brand{font-weight:600;padding:11px;letter-spacing:.3px}
-  .t{display:flex;padding:5px 11px;border-bottom:1px solid var(--line);color:var(--mut);font-size:10.5px}
-  .t.h{background:var(--wash);font-weight:600}
-  .t:nth-child(odd){background:color-mix(in srgb,var(--wash) 45%,transparent)}
-  .t>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-  /* 按比例分列，别让标题列吃掉全部宽度（否则右边挤成一堆，看着像表格没排好）*/
-  .c1{flex:2 1 0;min-width:0}.c2{flex:1 1 0;min-width:0}.c3{flex:1 1 0;min-width:0}.c4{flex:none;width:56px;text-align:right}
-  .chip{border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--mut);flex:none}
-  .box{background:var(--wash);border:1px solid var(--line);border-radius:6px}
-  .art{width:34px;height:34px;border-radius:4px;background:var(--bar);flex:none;
-       border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--mut)}
-  .art.big{width:96px;height:96px;border-radius:8px}
-  .grid3{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:9px;padding:11px;overflow:hidden}
-  .tl{font-size:10px;color:var(--mut);margin-top:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-  .fnote{color:var(--mut);font-size:12px;margin:2px 0 0}
+  /* 顶栏：导航是次要的，搜索是主要的 */
+  header{flex:none;height:56px;display:flex;align-items:center;gap:22px;
+         padding:0 22px;border-bottom:1px solid var(--line);background:var(--bar)}
+  .brand{font-weight:650;letter-spacing:.2px;font-size:15px;flex:none}
+  nav{display:flex;gap:4px;flex:none}
+  nav a{padding:6px 12px;border-radius:7px;color:var(--mut);text-decoration:none;font-size:13.5px}
+  nav a.on{color:var(--fg);background:var(--wash);font-weight:600}
+  nav a:hover{background:var(--hover);color:var(--fg)}
+  .spacer{flex:1}
+  .search{width:260px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--bg);
+          color:var(--mut);display:flex;align-items:center;padding:0 12px;gap:8px;font-size:13px}
+  /* 任务：只在有活儿时出现的状态胶囊，不是常驻导航 */
+  .task{display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:99px;
+        border:1px solid var(--accent);color:var(--accent);font-size:12.5px;flex:none}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+  .me{width:30px;height:30px;border-radius:50%;background:var(--wash);border:1px solid var(--line);flex:none}
+
+  main{flex:1;overflow:auto;padding:26px 22px 34px}
+  h2{font-size:19px;margin:0 0 14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:18px}
+  .card{padding:11px;border-radius:10px;cursor:pointer}
+  .card:hover{background:var(--hover)}
+  .cover{aspect-ratio:1;border-radius:8px;background:var(--wash);border:1px solid var(--line);
+         display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:22px}
+  .t1{margin-top:9px;font-size:13.5px;font-weight:550;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .t2{font-size:12.5px;color:var(--mut);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+  /* 播放条：全app最常驻、也最该做好的东西 */
+  footer{flex:none;height:74px;display:flex;align-items:center;gap:18px;padding:0 22px;
+         border-top:1px solid var(--line);background:var(--bar)}
+  .art{width:46px;height:46px;border-radius:7px;background:var(--wash);border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;color:var(--mut);flex:none}
+  .now{min-width:0;width:200px;flex:none}
+  .ctrls{display:flex;align-items:center;gap:6px;flex:none}
+  .btn{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--mut)}
+  .btn svg,.play svg{display:block}
+  .btn:hover{background:var(--hover);color:var(--fg)}
+  .play{width:36px;height:36px;border-radius:50%;background:var(--fg);color:var(--bg);
+        display:flex;align-items:center;justify-content:center;font-size:13px}
+  .prog{flex:1;display:flex;align-items:center;gap:11px;min-width:0}
+  .track{flex:1;height:4px;border-radius:99px;background:var(--wash);position:relative;min-width:0}
+  .track>i{position:absolute;inset:0 70% 0 0;background:var(--accent);border-radius:99px}
+  .track>b{position:absolute;left:30%;top:-4px;width:12px;height:12px;border-radius:50%;
+           background:var(--fg);opacity:0}
+  .track:hover>i{background:var(--accent)}
+  .tm{font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums;flex:none}
+  .vol{width:92px;height:4px;border-radius:99px;background:var(--wash);position:relative;flex:none}
+  .vol>i{position:absolute;inset:0 35% 0 0;background:var(--mut);border-radius:99px}
 </style>
 
-<h1>music-robot · PC 端布局三选一</h1>
-<p class="lede">
-  <b>故意画成灰阶</b>——先定结构，颜色和字体是下一步的事。<br>
-  三张图内容一样（同一份曲库、同一套导航），差别只在<b>什么东西占据屏幕</b>。<br>
-  看的时候只问一句：<b>你平时在这个站上干得最多的事，占的地方够不够大？</b>
-</p>
+<header>
+  <span class="brand">music-robot</span>
+  <nav>
+    <a class="on" href="#">曲库</a><a href="#">专辑</a><a href="#">歌手</a><a href="#">歌单</a>
+  </nav>
+  <span class="spacer"></span>
+  <div class="task"><span class="dot"></span>刮削中 3/8</div>
+  <div class="search">搜索歌曲、专辑、歌手…</div>
+  <div class="me"></div>
+</header>
 
-<div class="wrap">
-
-  <div class="card">
-    <h2>A — 左侧栏 + 曲目表格（管理台）</h2>
-    <p class="angle">导航常驻，表格占满主区。扫描 / 刮削 / 任务和听歌<b>同权</b>，一个都不藏。</p>
-
-    <div class="screen">
-      <div class="col side">
-        <div class="brand">music-robot</div>
-        <div class="nav on">曲库</div>
-        <div class="nav">专辑</div>
-        <div class="nav">歌手</div>
-        <div class="nav">歌单</div>
-        <div class="nav">收藏</div>
-        <div class="nav">历史</div>
-        <div class="nav">点歌</div>
-        <div class="nav">任务 <span style="color:var(--accent)">●</span></div>
-        <div class="nav">设置</div>
-      </div>
-      <div class="col grow">
-        <div class="row top pad" style="gap:8px">
-          <span class="chip">全部</span><span class="chip">专辑</span><span class="chip">歌手</span>
-          <span class="grow"></span><span class="chip">搜索…</span><span class="chip">排序</span>
-        </div>
-        <div class="col grow" style="overflow:hidden">
-          <div class="t h"><span class="c1">标题</span><span class="c2">歌手</span><span class="c3">专辑</span><span class="c4">时长</span></div>
-          <div class="t"><span class="c1">牵丝戏</span><span class="c2">银临 / Aki阿杰</span><span class="c3">牵丝戏</span><span class="c4">3:58</span></div>
-          <div class="t"><span class="c1">老男孩</span><span class="c2">筷子兄弟</span><span class="c3">2015 跨年</span><span class="c4">4:50</span></div>
-          <div class="t"><span class="c1">盛夏</span><span class="c2">毛不易</span><span class="c3">平凡的一天</span><span class="c4">4:52</span></div>
-          <div class="t"><span class="c1">最美情侣</span><span class="c2">白小白</span><span class="c3">最美情侣</span><span class="c4">4:02</span></div>
-          <div class="t"><span class="c1">华夏传说</span><span class="c2">凤凰传奇</span><span class="c3">华夏传说</span><span class="c4">3:37</span></div>
-          <div class="t"><span class="c1">Havana</span><span class="c2">Camila Cabello</span><span class="c3">Camila</span><span class="c4">3:37</span></div>
-          <div class="t"><span class="c1">…</span><span class="c2"></span><span class="c3"></span><span class="c4"></span></div>
-        </div>
-        <div class="row bar pad" style="gap:10px">
-          <div class="art">▶</div>
-          <div class="col grow"><div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div></div>
-          <span class="chip">◀◀</span><span class="chip">▶</span><span class="chip">▶▶</span><span class="chip">1:12 / 3:58</span>
-        </div>
-      </div>
-    </div>
-    <button class="pick" onclick="navigator.clipboard.writeText('A');this.textContent='已复制 A —— 回贴给我'">选 A</button>
+<main>
+  <h2>最近添加</h2>
+  <div class="grid">
+    <div class="card"><div class="cover">♪</div><div class="t1">牵丝戏</div><div class="t2">银临 / Aki阿杰</div></div>
+    <div class="card"><div class="cover">♪</div><div class="t1">平凡的一天</div><div class="t2">毛不易</div></div>
+    <div class="card"><div class="cover">♪</div><div class="t1">2015 江苏卫视跨年</div><div class="t2">筷子兄弟</div></div>
+    <div class="card"><div class="cover">♪</div><div class="t1">华夏传说</div><div class="t2">凤凰传奇</div></div>
+    <div class="card"><div class="cover">♪</div><div class="t1">Camila</div><div class="t2">Camila Cabello</div></div>
+    <div class="card"><div class="cover">♪</div><div class="t1">最美情侣</div><div class="t2">白小白</div></div>
   </div>
 
-  <div class="card">
-    <h2>B — 顶栏 + 大封面（播放优先）</h2>
-    <p class="angle">浏览和播放是主角，管理功能收进右上角。像 Spotify Web —— 好看，但<b>扫描/刮削要翻两层</b>。</p>
-
-    <div class="screen">
-      <div class="col grow">
-        <div class="row top pad" style="gap:10px">
-          <span style="font-weight:600">music-robot</span>
-          <span class="nav on" style="margin:0">曲库</span>
-          <span class="nav" style="margin:0">专辑</span>
-          <span class="nav" style="margin:0">歌手</span>
-          <span class="nav" style="margin:0">歌单</span>
-          <span class="grow"></span>
-          <span class="chip">搜索…</span><span class="chip">任务</span><span class="chip">设置</span>
-        </div>
-        <div class="col grow" style="overflow:hidden">
-          <div class="pad" style="padding-bottom:0"><b>最近添加</b></div>
-          <div class="grid3">
-            <div><div class="art big">♪</div><div class="tl">牵丝戏</div><div class="tl">银临 / Aki阿杰</div></div>
-            <div><div class="art big">♪</div><div class="tl">平凡的一天</div><div class="tl">毛不易</div></div>
-            <div><div class="art big">♪</div><div class="tl">2015 跨年</div><div class="tl">筷子兄弟</div></div>
-            <div><div class="art big">♪</div><div class="tl">华夏传说</div><div class="tl">凤凰传奇</div></div>
-            <div><div class="art big">♪</div><div class="tl">Camila</div><div class="tl">Camila Cabello</div></div>
-            <div><div class="art big">♪</div><div class="tl">最美情侣</div><div class="tl">白小白</div></div>
-            <div><div class="art big">♪</div><div class="tl">…</div><div class="tl"></div></div>
-          </div>
-        </div>
-        <div class="row bar pad" style="gap:10px">
-          <div class="art">▶</div>
-          <div class="col grow"><div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div></div>
-          <span class="chip">◀◀</span><span class="chip">▶</span><span class="chip">▶▶</span><span class="chip">1:12 / 3:58</span>
-        </div>
-      </div>
-    </div>
-    <button class="pick" onclick="navigator.clipboard.writeText('B');this.textContent='已复制 B —— 回贴给我'">选 B</button>
+  <h2 style="margin-top:34px">常听的歌手</h2>
+  <div class="grid">
+    <div class="card"><div class="cover">人</div><div class="t1">毛不易</div><div class="t2">12 首</div></div>
+    <div class="card"><div class="cover">人</div><div class="t1">凤凰传奇</div><div class="t2">8 首</div></div>
+    <div class="card"><div class="cover">人</div><div class="t1">筷子兄弟</div><div class="t2">5 首</div></div>
+    <div class="card"><div class="cover">人</div><div class="t1">银临</div><div class="t2">4 首</div></div>
   </div>
 
-  <div class="card">
-    <h2>C — 三栏：分类树 + 曲目 + 队列常驻</h2>
-    <p class="angle">信息密度最高，专辑 → 曲目 → 正在播同屏。<b>代价：1280 宽以下会挤</b>，手机上完全用不了。</p>
-
-    <div class="screen">
-      <div class="col side2">
-        <div class="brand" style="padding:9px">曲库</div>
-        <div class="nav on">全部歌曲</div>
-        <div class="nav">最近添加</div>
-        <div class="nav">专辑</div>
-        <div class="nav">歌手</div>
-        <div class="nav">歌单</div>
-        <div class="nav">收藏</div>
-        <div class="nav">点歌</div>
-        <div class="nav">任务</div>
-        <div class="nav">设置</div>
-      </div>
-      <div class="col grow">
-        <div class="row top pad" style="gap:8px"><b>全部歌曲</b><span class="grow"></span><span class="chip">搜索…</span></div>
-        <div class="col grow" style="overflow:hidden">
-          <div class="t h"><span class="c1">标题</span><span class="c2">歌手</span><span class="c4">时长</span></div>
-          <div class="t"><span class="c1">牵丝戏</span><span class="c2">银临 / Aki阿杰</span><span class="c4">3:58</span></div>
-          <div class="t"><span class="c1">老男孩</span><span class="c2">筷子兄弟</span><span class="c4">4:50</span></div>
-          <div class="t"><span class="c1">盛夏</span><span class="c2">毛不易</span><span class="c4">4:52</span></div>
-          <div class="t"><span class="c1">最美情侣</span><span class="c2">白小白</span><span class="c4">4:02</span></div>
-          <div class="t"><span class="c1">华夏传说</span><span class="c2">凤凰传奇</span><span class="c4">3:37</span></div>
-          <div class="t"><span class="c1">Havana</span><span class="c2">Camila Cabello</span><span class="c4">3:37</span></div>
-          <div class="t"><span class="c1">…</span><span class="c2"></span><span class="c4"></span></div>
-        </div>
-      </div>
-      <div class="col aside">
-        <div class="pad" style="border-bottom:1px solid var(--line)"><b>正在播放</b></div>
-        <div class="pad" style="display:flex;gap:10px;align-items:flex-start">
-          <div class="art big" style="width:64px;height:64px">♪</div>
-          <div style="min-width:0">
-            <div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div><div class="fnote">牵丝戏 · 2015</div>
-          </div>
-        </div>
-        <div class="pad" style="padding-top:0"><div class="box" style="height:6px"><div style="width:30%;height:100%;background:var(--accent)"></div></div>
-          <div class="fnote" style="margin-top:6px">1:12 / 3:58</div></div>
-        <div class="pad" style="border-top:1px solid var(--line)"><b>接下来</b></div>
-        <div class="pad" style="padding-top:0">
-          <div>老男孩 <span class="fnote">筷子兄弟</span></div>
-          <div>盛夏 <span class="fnote">毛不易</span></div>
-          <div>最美情侣 <span class="fnote">白小白</span></div>
-          <div class="fnote">…</div>
-        </div>
-      </div>
-    </div>
-    <button class="pick" onclick="navigator.clipboard.writeText('C');this.textContent='已复制 C —— 回贴给我'">选 C</button>
+  <h2 style="margin-top:34px">我建的歌单</h2>
+  <div class="grid">
+    <div class="card"><div class="cover">≡</div><div class="t1">深夜单曲循环</div><div class="t2">23 首</div></div>
+    <div class="card"><div class="cover">≡</div><div class="t1">开车听</div><div class="t2">41 首</div></div>
   </div>
+</main>
 
-</div>
+<footer>
+  <div class="art">♪</div>
+  <div class="now"><div class="t1">牵丝戏</div><div class="t2">银临 / Aki阿杰</div></div>
+  <div class="ctrls">
+    <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h2.5l7 6H14"/><path d="M2 11h2.5l7-6H14"/><path d="M12 3.2 14 5l-2 1.8"/><path d="M12 9.2 14 11l-2 1.8"/></svg></div>
+    <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4v8l-6-4z" fill="currentColor"/><path d="M3.5 4v8"/></svg></div>
+    <div class="play"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M5 3.5v9L13 8z" fill="currentColor"/></svg></div>
+    <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4v8l6-4z" fill="currentColor"/><path d="M12.5 4v8"/></svg></div>
+    <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 0 1 5-5h3.5"/><path d="M9.5 1.2 11.7 3 9.5 4.8"/><path d="M13 8a5 5 0 0 1-5 5H4.5"/><path d="M6.5 14.8 4.3 13l2.2-1.8"/></svg></div>
+  </div>
+  <div class="prog">
+    <span class="tm">1:12</span>
+    <div class="track"><i></i></div>
+    <span class="tm">3:58</span>
+  </div>
+  <div class="vol"><i></i></div>
+  <div class="btn"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h7"/></svg></div>
+</footer>
