@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>music-robot · 主页面原型</title>
 <style>
 :root{
@@ -252,7 +253,64 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
 .row2 .lbl span{font-size:12px;color:var(--fg-3)}
 .pathbox{font-size:12px;color:var(--fg-3);background:rgba(0,0,0,.28);border-radius:var(--r-sm);
   padding:7px 11px;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em}
+
+/* ══ 响应式 ══════════════════════════════════════════════════════
+   目标：**先保证不破**（窄窗口 / 平板 / 偶尔用手机打开），
+   不做手机专属 UI —— 手机端的完整体验交给将来的 apps/mobile。
+   三档：>1024 完整 ｜ 641–1024 收窄 ｜ ≤640 精简
+   ═════════════════════════════════════════════════════════════ */
+@media (max-width:1024px){
+  .grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:12px}
+  .tiles{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .fmt{display:none}                    /* 格式列 */
+  .page{padding:6px 16px 120px}
+}
+@media (max-width:900px){
+  /* 侧边栏收成图标导轨：导航还在，只是不写字 */
+  aside{width:60px;padding:14px 8px 10px}
+  .brand{justify-content:center;padding:4px 0 14px}
+  .brand b{display:none}
+  nav button{justify-content:center;padding:9px 0}
+  .nl{display:none}
+  .foot{justify-content:center;padding:8px 0}
+  /* 表格再减两列 */
+  .alb{display:none}
+  /* ⚠️ 不加 fixed，列的 nowrap 会把表撑得比容器宽（只是把溢出挪到页面内部滚动）*/
+  table{table-layout:fixed}
+  td,thead th{overflow:hidden}
+  /* 播放页改上下堆叠 */
+  .playwrap{flex-direction:column;align-items:center;gap:22px;padding:20px 16px 28px;overflow:auto}
+  .pcol{flex:none;width:100%;max-width:420px;align-items:center;text-align:center}
+  .bigcover{width:230px;height:230px;font-size:52px}
+  .bigt{margin-top:18px;font-size:20px;line-height:26px}
+  .bigprog{width:100%}
+  .bigvol{display:none}
+  .pcol2{width:100%;max-width:560px;align-self:auto;max-height:none;padding-top:0}
+  .lyr{max-height:280px}
+  /* 底栏瘦身 */
+  footer{width:calc(100% - 24px);bottom:12px;height:56px;padding:0 12px;gap:10px;border-radius:14px}
+  .wide-only{display:none}
+  .pn{width:auto;flex:1}
+  .tm{display:none}
+  header{padding:0 14px}
+  .icob{display:none}
+}
+@media (max-width:640px){
+  .idx,.hc{display:none}                /* 只剩 歌曲/歌手 + 时长 */
+  .page{padding:4px 12px 108px}
+  h1{font-size:20px;line-height:26px}
+  .phead{flex-wrap:wrap;gap:10px;padding-bottom:14px}
+  .search{max-width:none}
+  .bigcover{width:170px;height:170px;font-size:40px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+  /* 登录页居中 */
+  .lbox{margin:0 auto;width:min(340px,calc(100% - 40px))}
+  .lvert,.lc1,.lc2{display:none}
+  .lbtns{flex-direction:column}
+}
+
 </style>
+
 <body>
 <noscript><div style="position:fixed;inset:0;z-index:99;background:#14121b;color:#f2f3f4;padding:40px;font:14px/22px system-ui">
 <b>这个原型需要 JavaScript。</b><br>你现在这个查看环境把脚本禁掉了（部分文件预览器会这样）。<br>用浏览器直接打开这个 .html 文件即可。</div></noscript>
@@ -283,7 +341,7 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
   </div>
   <nav id="nav"></nav>
   <span class="sp"></span>
-  <div class="foot"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4 6 8l4 4"/></svg>收起</div>
+  <div class="foot"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4 6 8l4 4"/></svg><span class="nl">收起</span></div>
 </aside>
 
 <!-- ═══ 主区 ═══ -->
@@ -325,7 +383,7 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
       </div>
     </div>
     <table>
-      <thead><tr><th class="idx">#</th><th>歌曲 / 歌手</th><th>专辑</th><th class="hc">♡</th><th class="num">时长</th><th class="fmt">格式</th></tr></thead>
+      <thead><tr><th class="idx">#</th><th>歌曲 / 歌手</th><th class="alb">专辑</th><th class="hc">♡</th><th class="num">时长</th><th class="fmt">格式</th></tr></thead>
       <tbody id="libSongs"></tbody>
     </table>
   </section>
@@ -482,9 +540,9 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
       <div class="track" id="pTrack" onclick="seek(event)"><i id="pFill"></i></div>
       <span class="tm" id="pDur">0:00</span>
     </div>
-    <button class="cb"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 8a5 5 0 0 1 5-5h3.5"/><path d="M9.5 1.2 11.7 3 9.5 4.8"/><path d="M13 8a5 5 0 0 1-5 5H4.5"/><path d="M6.5 14.8 4.3 13l2.2-1.8"/></svg></button>
-    <button class="cb" onclick="go('now')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 7h11v2H2zM4 3h11v2H4zM4 11h9v2H4z"/></svg></button>
-    <div class="vol"><i></i></div>
+    <button class="cb wide-only"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 8a5 5 0 0 1 5-5h3.5"/><path d="M9.5 1.2 11.7 3 9.5 4.8"/><path d="M13 8a5 5 0 0 1-5 5H4.5"/><path d="M6.5 14.8 4.3 13l2.2-1.8"/></svg></button>
+    <button class="cb wide-only" onclick="go('now')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 7h11v2H2zM4 3h11v2H4zM4 11h9v2H4z"/></svg></button>
+    <div class="vol wide-only"><i></i></div>
   </footer>
 </main>
 <script>
@@ -527,7 +585,7 @@ const heart = (on) => `<svg class="heart ${on?'on':''}" width="14" height="14" v
 
 /* ── 渲染 ── */
 document.getElementById('nav').innerHTML = NAV.map(([p,n,d],i)=>
-  `<button data-p="${p}" ${p==='home'?'class="on"':''} onclick="go('${p}')">${ico(d)}${n}</button>`).join('');
+  `<button data-p="${p}" ${p==='home'?'class="on"':''} onclick="go('${p}')" title="${n}">${ico(d)}<span class="nl">${n}</span></button>`).join('');
 
 const row = ([t,a,al,d,f,dirty],i) => `<tr onclick="playRow(this,${i})">
   <td class="idx">${String(i+1).padStart(2,'0')}</td>
