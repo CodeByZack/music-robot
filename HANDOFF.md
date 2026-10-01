@@ -568,11 +568,42 @@ packages/core/             # 100% 共用：API client / 类型 / 播放队列状
 ```
 
 **S24 的交付物（按本方案改写，替代画布里那句「Vite + React + axios 拦截器」）**：
-`npx create-expo-app`（TypeScript + Expo Router）→ `packages/core` 放 API client / 类型 / 鉴权；
-`app/_layout.web.tsx` 写 PC 外壳（`<div>` + CSS grid 侧边栏），不要用 `<Tabs>`；
-UI 组件库用 **Ant Design**（纯 React DOM 库，与「Web 写 DOM」这条路线天然兼容；
-反过来说，全用 RNW 组件的话 antd 根本用不上）。
-测试仍是 Vitest（`expo` 侧用 jest-expo 也行，但 Web 逻辑层用 Vitest 更省事）。
+
+技术栈：**Expo(Metro) + Expo Router + TypeScript + Tailwind v4 + shadcn/ui**。
+（2026-10-01 用户拍板：**不用 antd**，用 shadcn/ui。）
+
+```sh
+npx create-expo-app@latest          # TS + Expo Router
+npx expo install tailwindcss @tailwindcss/postcss postcss --dev   # 官方 Tailwind 指南
+```
+`postcss.config.mjs` → `{'@tailwindcss/postcss': {}}`；`global.css` → `@import 'tailwindcss';`；
+**在 `app/_layout.tsx`（根布局，不是嵌套布局）里 import `global.css`** —— 导入位置错了会让
+`node_modules` 的 CSS 排在你的样式前面，样式顺序就崩了（官方明确警告）。
+别在 `metro.config.js` 里关掉 CSS（`isCSSEnabled` 必须为 true）。
+
+四条**已核实的兼容性前提**（都是官方文档，不是推测）：
+1. 📗 Expo 官方 Tailwind 指南：「You can use Tailwind with **React DOM elements as-is**」
+   —— 和本方案「Web 写 `<div>`」严丝合缝。
+2. 📗 同一页也写了：**标准 Tailwind 只支持 Web**。将来做移动端要么上 NativeWind/Uniwind，
+   要么原生 UI 另写样式 —— 与我们「UI 层各写各的」的结论一致，不是新增代价。
+3. 📗 `@/*` 路径别名 **Expo 默认就开**（`experiments.tsconfigPaths`，Metro 含 web 都支持），
+   正是 shadcn 的约定（`@/components`、`@/lib/utils`）；改了 `tsconfig.json` 要重启 Expo CLI。
+4. shadcn 组件 = Radix + Tailwind + `cn()`，全是普通 React DOM，`className` 直接可用。
+
+⚠️ **动手时要现场确认的一件事**：`npx shadcn@latest init` **未必认得 Expo 项目**（它默认探测
+Next/Vite 等）。认不出就走**手动安装**路径（自己写 `components.json`、拷组件源码、装
+`class-variance-authority` / `clsx` / `tailwind-merge` / 对应 Radix 包）。这一步没实测过，
+别当已知 — 真跑的时候以实际输出为准。
+
+⚠️ shadcn 的 registry **可以来自第三方**，社区讨论过注入风险。**只用官方 registry。**
+
+**设计决策谁来做**（用户自述「设计 UI 头疼」，而 shadcn 恰恰不替你做设计决策）：
+`shadcn init` 时**一次性定死** base color + radius，之后不再改；动手写页面前，先用本机的
+`html-prototype` / `show-me` / `design-artifact` skill 出 2~3 个 HTML 变体让用户挑，
+**挑完再落代码**。布局结构可直接参考 `satnaing/shadcn-admin`（Shadcn + Vite 的后台模板，
+只抄布局，不抄技术栈）。
+
+测试仍是 Vitest（Web 逻辑层用 Vitest 比 jest-expo 省事）。
 
 硬规则（不管最后选哪个方案都成立）：
 1. **PC 页面不用 `<View>/<Text>` 拼布局**，直接 `<div>` + CSS；`className` 在 RNW 组件上
