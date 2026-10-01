@@ -1,0 +1,17 @@
+{
+  "name": "@music-robot/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "两端共用的业务逻辑：API client / 类型 / 播放队列状态机。**不碰宿主 API**（见 README）",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api/index.ts"
+  },
+  "//": "零依赖：源码直接导出 TS，Vite 与 Metro 都能编，不建 dist。测试用 Node 内置 runner + 原生类型擦除，不需要任何测试框架。",
+  "scripts": {
+    "test": "node --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  }
+}
