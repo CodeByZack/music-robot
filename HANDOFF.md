@@ -29,10 +29,10 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **495 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **499 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **619 passed / 0 failed / 1 ignored** |
-| 端到端 API 脚本 | `node scripts/api_test.mjs` → **133 通过 / 0 失败** |
+| 合计 | **623 passed / 0 failed / 1 ignored** |
+| 端到端 API 脚本 | `node scripts/api_test.mjs` → **140 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
@@ -187,8 +187,9 @@ music-robot/
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，133 项；非交互，给回归用）
-├── scripts/api_cli.mjs  # 交互式 API 客户端（菜单式，连**已在跑**的服务；只用 node:readline，零依赖）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，140 项；非交互，给回归用）
+├── scripts/api_cli.mjs  # 交互式 API 客户端（方向键菜单，连**已在跑**的服务；只用 node:readline，零依赖）
+│                       # 曲库菜单里有：扫描入库 / 刮削 / 重刮失败项 / 重刮单曲
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
 ├── music-server-architecture.excalidraw   # ★ 全部架构设计 + 28 步实施计划
 └── HANDOFF.md          # ← 本文件（**仓库里唯一的文档**）
@@ -203,6 +204,7 @@ music-robot/
 | 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号，注册关闭后唯一入口）· `GET /api/admin/ping`（admin 占位） |
 | 曲库 | `GET /api/library` · `GET /api/songs/{id}` · `GET /api/albums/{id}` · `GET /api/artists/{name}` · `GET /api/search` |
 | 任务 | `POST/GET /api/scan` · `GET /api/scan/{batch_id}` · `POST/GET /api/scrape` · `GET /api/scrape/{batch_id}` · `GET /api/jobs` |
+| ↳ 刮削队列选择 | `POST /api/scrape` 的 body **可选**：不给 = `pending` 队列；`{"mode":"failed"}` = 重刮失败项；`{"song_ids":[1,2]}` = 只听点名的（**含已 done 的**，这是唯一的「重新刮削」入口）。字段名写错一律 400，**绝不静默退化成刮全库** |
 | 音频 | `GET /api/stream/{id}`（Range · `?format=mp3` 转码）· `GET /api/songs/{id}/cover` |
 | 歌单 | `/api/playlists` 共 8 条 CRUD + 排序 |
 | 播放周边 | `/api/history` · `/api/favorites` · `/api/settings` 共 7 条 |
@@ -434,7 +436,8 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
   中途失败原文件完好，**但 rename 一成功原文件就被换掉了**。而且是**无条件覆盖**不是填空缺
   （`apply_tags_to_song` 直接赋值）。
   * 没有 `.bak`、没有 dry-run、没有二次确认；`--preview` / `--bak` **只有 CLI 的 `write` / `blank` 有**
-  * `POST /api/scrape` **连请求体都不收**（`routes/jobs.rs` 只有 `State` + `AdminUser`），一按就是全库
+  * `POST /api/scrape` 的 body 里能指定队列（2026-09-30 补的，见 §2），但**默认不给 body 仍是全库 pending**；
+    而且**没有「只入库不写文件」的档位** —— 库里没有这个开关，前端做页面时必须自己拦一道（见「未完成」表）
   * DB 里的旧值也**没留档**（没有标签历史表，`play_history` 是播放记录不是改动记录）
   * 所以**逐曲日志（§7.7）是唯一的痕迹**，别删。前端做刮削页时必须给开关（见「未完成」表）
   * 实测对照（同一个文件）：原件 `歌手: 公众号：阿乐资源库 / 专辑: 2015江苏卫视新年演唱会`
@@ -634,7 +637,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 
 ### 8.2 测试文件对照（**实测数字**）
 
-库用例（`cargo test --lib`）共 **495 passed / 0 failed / 1 ignored**。集成测试：
+库用例（`cargo test --lib`）共 **499 passed / 0 failed / 1 ignored**。集成测试：
 
 | 文件 | 用例 | 覆盖 |
 |---|---|---|
@@ -651,7 +654,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 | `tests/plugin_e2e.rs` | 3 | **真拉起 `node` / `python3` / `sh`** 跑插件协议 |
 | **合计** | **124** | |
 
-另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**133 通过 / 0 失败**，
+另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**140 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
 它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 

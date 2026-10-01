@@ -82,13 +82,25 @@ pub async fn start_scan(
     ))
 }
 
-/// POST /api/scrape —— 触发批量为 pending 的歌刮削（admin）。
+/// POST /api/scrape —— 触发刮削（admin）。
 ///
-/// 队列就是 songs.scrape_status = 'pending'（画布区块 ③）。
+/// 请求体**可选**，不给就是原来的行为（队列 = songs.scrape_status = 'pending'，画布区块 ③）：
+///
+/// | 请求体 | 队列 |
+/// |---|---|
+/// | 无 / `{}` / `{"mode":"pending"}` | `scrape_status = 'pending'`（新入库的歌） |
+/// | `{"mode":"failed"}` | `scrape_status = 'failed'`（重刮失败项） |
+/// | `{"song_ids":[1,2]}` | 显式指定曲目，**可含已经 done 的** —— 这才是「重新刮削」 |
+///
+/// 为什么要这个：`pending` 队列只收新入库的歌（`library.rs` 明确不重置已有行的状态），
+/// 所以在那之前，一首刮过的歌（不管成功失败）**再没有任何接口能碰到它**，
+/// 只能手改数据库。service 层的 `run_failed` / `run_ids` 早就写好了，一直没接路由。
 pub async fn start_scrape(
     State(state): State<AppState>,
     _admin: AdminUser,
+    body: Option<Json<Value>>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
+    let queue = parse_scrape_body(body.as_ref().map(|Json(value)| value))?;
     // 实时进度源：内部读的是 BatchRunner 的原子计数，轮询时不会阻塞。
     let live: Arc<dyn ProgressSource> = Arc::new(RunnerProgress(Arc::clone(&state.scrape)));
     let guard = state
@@ -101,11 +113,18 @@ pub async fn start_scrape(
     let spawned = std::thread::Builder::new()
         .name(format!("scrape-{batch_id}"))
         .spawn(move || {
-            guard.run_catching_panic(move || match runner.run() {
-                Ok(report) => {
-                    JobOutcome::done(batch_counters(&report), Some(report.to_string()))
+            guard.run_catching_panic(move || {
+                let report = match &queue {
+                    ScrapeQueue::Pending => runner.run(),
+                    ScrapeQueue::Failed => runner.run_failed(),
+                    ScrapeQueue::Ids(ids) => runner.run_ids(ids),
+                };
+                match report {
+                    Ok(report) => {
+                        JobOutcome::done(batch_counters(&report), Some(report.to_string()))
+                    }
+                    Err(e) => JobOutcome::failed(e.to_string()),
                 }
-                Err(e) => JobOutcome::failed(e.to_string()),
             });
         });
     if let Err(e) = spawned {
@@ -159,6 +178,84 @@ impl ProgressSource for RunnerProgress {
             failed: snapshot.failed,
             skipped: snapshot.skipped,
         }
+    }
+}
+
+/// `POST /api/scrape` 这次要刮哪些歌。
+#[derive(Debug, PartialEq, Eq)]
+enum ScrapeQueue {
+    /// 默认：`scrape_status = 'pending'`（新入库的歌）。
+    Pending,
+    /// `{"mode":"failed"}`：只重刮失败项。
+    Failed,
+    /// `{"song_ids":[...]}`：显式指定，**可含已经 done 的**。
+    Ids(Vec<i64>),
+}
+
+/// 解析 `POST /api/scrape` 的可选请求体。
+///
+/// **不给请求体 = pending 队列**，与加这个参数之前的行为一模一样，老客户端不受影响。
+///
+/// 字段名写错一律 400，**绝不静默退化成「刮全库」**—— 刮削会覆盖原文件，
+/// 一个拼错的 `mode` 悄悄变成全库重刮，代价太大。（画布区块 ⑦ 的安全不变式同理：
+/// 宁可报错，也不要做用户没要求的破坏性操作。）
+fn parse_scrape_body(body: Option<&Value>) -> Result<ScrapeQueue, ApiError> {
+    let Some(body) = body else {
+        return Ok(ScrapeQueue::Pending);
+    };
+    let obj = body
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("请求体必须是 JSON 对象"))?;
+    for key in obj.keys() {
+        if key != "mode" && key != "song_ids" {
+            return Err(ApiError::bad_request(format!(
+                "不认识的字段「{key}」；POST /api/scrape 只支持 mode 与 song_ids"
+            )));
+        }
+    }
+
+    let ids = match obj.get("song_ids") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) => {
+            if items.is_empty() {
+                return Err(ApiError::bad_request(
+                    "song_ids 不能是空数组；想刮 pending 队列就别传这个字段",
+                ));
+            }
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                // is_i64 对 1.0 这类浮点返回 None，正好挡住「id 写成小数」。
+                let id = item.as_i64().ok_or_else(|| {
+                    ApiError::bad_request("song_ids 里必须都是整数 id")
+                })?;
+                if id <= 0 {
+                    return Err(ApiError::bad_request(format!(
+                        "song_ids 里的 id 必须是正整数，收到 {id}"
+                    )));
+                }
+                out.push(id);
+            }
+            Some(out)
+        }
+        Some(_) => return Err(ApiError::bad_request("song_ids 必须是整数数组")),
+    };
+
+    let mode = match obj.get("mode") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(text)) => Some(text.as_str()),
+        Some(_) => return Err(ApiError::bad_request("mode 必须是字符串")),
+    };
+
+    // song_ids 优先：它是更具体的指定，同时给 mode 时以 ids 为准。
+    if let Some(ids) = ids {
+        return Ok(ScrapeQueue::Ids(ids));
+    }
+    match mode {
+        None | Some("pending") => Ok(ScrapeQueue::Pending),
+        Some("failed") => Ok(ScrapeQueue::Failed),
+        Some(other) => Err(ApiError::bad_request(format!(
+            "mode 只支持 \"pending\" 或 \"failed\"，收到「{other}」"
+        ))),
     }
 }
 
@@ -358,6 +455,29 @@ mod tests {
 
     async fn trigger(state: &AppState, token: &str, uri: &str) -> (StatusCode, Value) {
         call(state, post(uri, Some(token))).await
+    }
+
+    /// 带 JSON body 的 POST。Content-Type 必须给，否则 Json 提取器直接 415。
+    fn post_json(uri: &str, token: Option<&str>, body: &Value) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        builder
+            .body(Body::from(body.to_string()))
+            .expect("构造请求")
+    }
+
+    /// 触发带 body 的刮削。
+    async fn trigger_scrape(
+        state: &AppState,
+        token: &str,
+        body: &Value,
+    ) -> (StatusCode, Value) {
+        call(state, post_json("/api/scrape", Some(token), body)).await
     }
 
     /// 轮询到任务离开 running 为止：每 20ms 一次，最多等 budget。
@@ -626,8 +746,191 @@ mod tests {
         assert!(done["message"].is_string(), "完成时要带统计摘要：{done}");
     }
 
-    // ── 6. 未知 / 种类不符的 batch_id → 404 ──────────────────────────────
+    // ── 5b. 重刮：指定曲目 / 失败项（可选请求体）─────────────────────────
 
+    /// 纯解析：字段白名单、类型、边界。老客户端**不发 body** 必须还是 pending 队列。
+    #[test]
+    fn parse_scrape_body_covers_every_branch() {
+        assert_eq!(parse_scrape_body(None).expect("无 body"), ScrapeQueue::Pending);
+        assert_eq!(
+            parse_scrape_body(Some(&json!({}))).expect("空对象"),
+            ScrapeQueue::Pending
+        );
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"mode": "pending"}))).expect("显式 pending"),
+            ScrapeQueue::Pending
+        );
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"mode": "failed"}))).expect("失败项"),
+            ScrapeQueue::Failed
+        );
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"song_ids": [3, 1]}))).expect("指定曲目"),
+            ScrapeQueue::Ids(vec![3, 1])
+        );
+
+        // 单曲重刮：这是「已经 done 的歌怎么再刮一遍」的唯一入口
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"song_ids": [7]}))).expect("单曲"),
+            ScrapeQueue::Ids(vec![7])
+        );
+        // song_ids 更具体，同时给 mode 时以它为准
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"mode": "failed", "song_ids": [7]}))).expect("id 优先"),
+            ScrapeQueue::Ids(vec![7])
+        );
+        // null 视同没给
+        assert_eq!(
+            parse_scrape_body(Some(&json!({"mode": null, "song_ids": null}))).expect("null"),
+            ScrapeQueue::Pending
+        );
+
+        // 以下每条都必须**报错**。刮削会覆盖原文件，拼错字段名静默退化成
+        // 「刮全库 pending」的代价太大 —— 宁可 400。
+        for bad in [
+            json!({"mode": "everything"}),          // 不认识的 mode
+            json!({"mode": 1}),                     // 类型不对
+            json!({"song_ids": []}),                // 空数组（会变成「什么都没刮」）
+            json!({"song_ids": "7"}),               // 不是数组
+            json!({"song_ids": [1.5]}),             // 不是整数
+            json!({"song_ids": [0]}),               // 非正数
+            json!({"song_ids": [-3]}),              // 负数
+            json!({"song_id": 7}),                  // 少个 s，最容易犯的拼写错
+            json!({"modes": "failed"}),             // 同上
+            json!([1, 2, 3]),                       // 顶层不是对象
+            json!("failed"),                        // 顶层不是对象
+        ] {
+            assert!(
+                parse_scrape_body(Some(&bad)).is_err(),
+                "这个 body 必须 400，不能静默降级：{bad}"
+            );
+        }
+    }
+
+    /// 已 done 的歌**必须**能被显式重刮 —— 在这之前没有任何接口做得到。
+    #[tokio::test]
+    async fn single_song_can_be_rescraped_after_it_is_done() {
+        let dir = TempDir::new("s17-rescrape-one");
+        let (state, _temp) = test_state("s17-rescrape-one", make_root(&dir, &[FIXTURE_ONE]));
+        let token = issue_token(&state, "admin-rescrape", Role::Admin);
+
+        // 先扫一轮 + 刮一轮 pending，让这首歌走完一次（测试里没接插件 → 落成 failed）。
+        let (_, scan_body) = trigger(&state, &token, "/api/scan").await;
+        let scan_id = scan_body["batch_id"].as_str().expect("batch_id").to_string();
+        wait_finished(
+            &state,
+            &token,
+            &format!("/api/scan/{scan_id}"),
+            Duration::from_secs(5),
+        )
+        .await;
+        let (_, first_body) = trigger(&state, &token, "/api/scrape").await;
+        let first_id = first_body["batch_id"].as_str().expect("batch_id").to_string();
+        let first = wait_finished(
+            &state,
+            &token,
+            &format!("/api/scrape/{first_id}"),
+            Duration::from_secs(10),
+        )
+        .await;
+        assert_eq!(first["status"], "done");
+        assert!(first["total"].as_u64().unwrap_or(0) >= 1, "应刮到歌：{first}");
+
+        // pending 队列现在是空的 —— 这正是「再没有任何接口碰得到这首歌」的那一刻。
+        let (_, empty_body) = trigger(&state, &token, "/api/scrape").await;
+        let empty_id = empty_body["batch_id"].as_str().expect("batch_id").to_string();
+        let empty = wait_finished(
+            &state,
+            &token,
+            &format!("/api/scrape/{empty_id}"),
+            Duration::from_secs(10),
+        )
+        .await;
+        assert_eq!(empty["total"].as_u64(), Some(0), "pending 队列该空了：{empty}");
+
+        // 拿到歌 id，显式重刮它。
+        let (_, lib) = authed(&state, &token, "/api/library").await;
+        let song_id = lib["items"][0]["id"].as_i64().expect("歌曲 id");
+        let (status, body) = trigger_scrape(&state, &token, &json!({ "song_ids": [song_id] })).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "指定曲目重刮必须 202：{body}");
+        let again_id = body["batch_id"].as_str().expect("batch_id").to_string();
+        let again = wait_finished(
+            &state,
+            &token,
+            &format!("/api/scrape/{again_id}"),
+            Duration::from_secs(10),
+        )
+        .await;
+        assert_eq!(again["status"], "done", "{again}");
+        assert_eq!(
+            again["total"].as_u64(),
+            Some(1),
+            "只该处理点名的这 1 首，不能顺带刮别的：{again}"
+        );
+    }
+
+    /// `{"mode":"failed"}` 要真的取到失败项（模块文档承诺过，此前没有接口能触发）。
+    #[tokio::test]
+    async fn failed_queue_is_reachable_through_the_api() {
+        let dir = TempDir::new("s17-rescrape-failed");
+        let (state, _temp) = test_state("s17-rescrape-failed", make_root(&dir, &[FIXTURE_ONE]));
+        let token = issue_token(&state, "admin-failed", Role::Admin);
+
+        let (_, scan_body) = trigger(&state, &token, "/api/scan").await;
+        let scan_id = scan_body["batch_id"].as_str().expect("batch_id").to_string();
+        wait_finished(
+            &state,
+            &token,
+            &format!("/api/scan/{scan_id}"),
+            Duration::from_secs(5),
+        )
+        .await;
+        let (_, first_body) = trigger(&state, &token, "/api/scrape").await;
+        let first_id = first_body["batch_id"].as_str().expect("batch_id").to_string();
+        wait_finished(
+            &state,
+            &token,
+            &format!("/api/scrape/{first_id}"),
+            Duration::from_secs(10),
+        )
+        .await;
+
+        // 测试环境没有插件，所以歌都是 failed；failed 队列应当能把它们捞回来。
+        let (status, body) = trigger_scrape(&state, &token, &json!({ "mode": "failed" })).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "failed 队列必须能触发：{body}");
+        let retry_id = body["batch_id"].as_str().expect("batch_id").to_string();
+        let retry = wait_finished(
+            &state,
+            &token,
+            &format!("/api/scrape/{retry_id}"),
+            Duration::from_secs(10),
+        )
+        .await;
+        assert_eq!(retry["status"], "done");
+        assert!(
+            retry["total"].as_u64().unwrap_or(0) >= 1,
+            "失败项应当被重新取到：{retry}"
+        );
+    }
+
+    /// 非法 body → 400（而不是静默刮全库）。
+    #[tokio::test]
+    async fn bad_scrape_body_is_400_not_a_full_library_scrape() {
+        let dir = TempDir::new("s17-scrape-badbody");
+        let (state, _temp) = test_state("s17-scrape-badbody", make_root(&dir, &[FIXTURE_ONE]));
+        let token = issue_token(&state, "admin-badbody", Role::Admin);
+
+        for bad in [json!({"mode": "everything"}), json!({"song_ids": []})] {
+            let (status, body) = trigger_scrape(&state, &token, &bad).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad} 应当 400：{body}");
+            assert_eq!(body["error"]["code"], "BAD_REQUEST");
+        }
+        // 400 之后单例锁必须没被占住，否则刮削就永久锁死了。
+        let (status, _) = trigger(&state, &token, "/api/scrape").await;
+        assert_eq!(status, StatusCode::ACCEPTED, "报错不该占住刮削锁");
+    }
+
+    // ── 6. 未知 / 种类不符的 batch_id → 404 ──────────────────────────────
     #[tokio::test]
     async fn unknown_batch_id_is_404() {
         let (state, _temp) = test_state("s17-unknown", vec!["/tmp/s17-unknown-music".to_string()]);

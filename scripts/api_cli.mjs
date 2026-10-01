@@ -337,10 +337,10 @@ async function actScan() {
   process.stdout.write(`${X}\n${Y}等超时了，去「任务 › 任务列表」自己看。${X}\n`);
 }
 
-async function actScrape() {
-  if (!needLogin()) return;
-  console.log(`${D}队列 = scrape_status 还是 pending 的歌；插件按文件名升序尝试、命中即停${X}\n`);
-  const [st, , b] = await call('POST', '/api/scrape', null, null, 202);
+/** 触发一次刮削并轮询到结束。payload 为 null = pending 队列（服务端行为与以前完全一致）。 */
+async function runScrape(label, payload) {
+  console.log(`${D}${label}${X}\n${Y}注意：刮削会直接覆盖原文件标签（无备份、无预览）${X}\n`);
+  const [st, , b] = await call('POST', '/api/scrape', payload, null, 202);
   if (st !== 202) return;
   const batch = b?.batch_id;
   if (!batch) return;
@@ -356,6 +356,32 @@ async function actScrape() {
     await sleep(500);
   }
   process.stdout.write(`${X}\n${Y}等超时了，去「任务 › 任务列表」看看。${X}\n`);
+}
+
+async function actScrape() {
+  if (!needLogin()) return;
+  await runScrape('队列 = scrape_status 还是 pending 的歌；插件按文件名升序尝试、命中即停', null);
+}
+
+async function actScrapeFailed() {
+  if (!needLogin()) return;
+  await runScrape('只重刮 scrape_status = failed 的歌（失败不自动重试，得手动捞）', {
+    mode: 'failed',
+  });
+}
+
+async function actScrapeSong() {
+  if (!needLogin()) return;
+  const raw = await ask('要重刮的歌曲 id', state.lastSongId ?? '');
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    console.log(`${Y}id 得是正整数，收到「${raw}」${X}`);
+    return;
+  }
+  // 关键：已 done 的歌 pending 队列永远取不到，只有这条路能重新刮它。
+  await runScrape(`只听点名的这一首（id=${id}；已 done 或 failed 都能重刮）`, {
+    song_ids: [id],
+  });
 }
 
 async function actLibrary() {
@@ -580,6 +606,8 @@ const TREE = [
     children: [
       { label: '扫描入库', run: actScan },
       { label: '刮削（批量补标签）', run: actScrape },
+      { label: '重刮失败项', run: actScrapeFailed },
+      { label: '重刮单曲（按 id）', run: actScrapeSong },
       { label: '曲库列表', run: actLibrary },
       { label: '搜索', run: actSearch },
       { label: '歌曲详情', run: actSongDetail },

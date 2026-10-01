@@ -23,8 +23,8 @@
 //! | 画布规则 | 实现位置 |
 //! |---|---|
 //! | 触发 1：每首歌首次入库自动刮削 | 队列 = songs 表里 scrape_status = pending 的行（扫描入库即 pending） |
-//! | 触发 2：手动重刮（单曲 / 批量失败项） | [ScrapeService::scrape_song] / [BatchRunner::run_failed] |
-//! | 失败不自动重试 | 队列只取 pending；failed 行必须被显式重新提交才会再处理 |
+//! | 触发 2：手动重刮（单曲 / 批量失败项） | `POST /api/scrape` 的 body 选队列 → [BatchRunner::run_ids] / [BatchRunner::run_failed] |
+//! | 失败不自动重试 | 队列只取 pending；failed 行要靠 `{"mode":"failed"}` 显式重新提交 |
 //! | 调度：顺序回退（顺序尝试插件，命中即停） | [ScrapeService::scrape_song] 的 for 循环 |
 //! | 命中 → 写回文件标签 + 更新 DB → done | commit_hit |
 //! | 歌词只入 DB（songs.lyrics），不写文件 | commit_hit 里 Id3EditMeta::lyrics / lyrics_timed 恒为 None |

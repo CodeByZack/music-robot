@@ -467,6 +467,35 @@ async function main() {
       brief(body).slice(0, 200),
     );
 
+    // 重刮：可选 body 选队列。老客户端不发 body 的行为上面刚验过（pending 队列）。
+    const rescrapeId = (body?.items ?? []).find((x) => x?.id)?.id ?? null;
+    [st, , body] = await c.json('POST', '/api/scrape', { song_ids: [rescrapeId] });
+    check('指定 song_ids 重刮 → 202', st, 202);
+    const oneBatch = body?.batch_id ?? null;
+    checkTrue('单曲重刮返回 batch_id', Boolean(oneBatch), brief(body));
+    let oneStatus = null;
+    for (let i = 0; i < 100; i += 1) {
+      [st, , body] = await c.json('GET', `/api/scrape/${oneBatch}`);
+      oneStatus = body?.status ?? null;
+      if (oneStatus === 'done' || oneStatus === 'failed') break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    check('单曲重刮跑完 status = done', oneStatus, 'done');
+    check(
+      '只处理点名的那一首（已 done 的歌 pending 队列永远取不到）',
+      body?.total ?? -1,
+      1,
+    );
+
+    [st, , body] = await c.json('POST', '/api/scrape', { mode: 'failed' });
+    check('重刮失败项 mode=failed → 202', st, 202);
+
+    // 非法 body 必须 400，绝不能静默退化成「刮全库」
+    [st, , body] = await c.json('POST', '/api/scrape', { mode: 'everything' });
+    check('未知 mode → 400（不静默刮全库）', st, 400);
+    [st, , body] = await c.json('POST', '/api/scrape', { song_ids: [] });
+    check('空 song_ids → 400', st, 400);
+
     // ───────────────────────── 曲库接口 ─────────────────────────
     section('3. 曲库接口（S16）');
     [st, , body] = await c.json('GET', '/api/library');

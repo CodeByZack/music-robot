@@ -76,7 +76,7 @@ HTTP ─┘        ↑
 > ⚠️ **刮削会直接改写你的音乐文件，且没有撤销。**
 > 命中后按插件给的标签**覆盖**原文件（`atomic_replace` 保证「中途失败原文件完好」，
 > 但一旦成功就是新文件了），DB 里的旧值也一起被覆盖。**没有 `.bak`、没有 dry-run、没有确认框**，
-> `POST /api/scrape` 一调就是全库。
+> `POST /api/scrape` 不给 body 时一调就是全库 pending 队列（可以传 `song_ids` 只听点名的几首，但**没有「只入库不写文件」这个档位**）。
 > 先拿几首**副本**试插件，确认它写出来的标签是你想要的，再对真库下手。
 > 每次刮削都会逐曲写日志（`[scrape]`），含**改动明细**：
 > `曲目 3 命中：插件 musicbrainz（confidence 0.92）改动 2 处：歌手「公众号：阿乐资源库」→「白小白」；…`
@@ -155,6 +155,7 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 | 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号）· `GET /api/admin/ping` |
 | 曲库 | `GET /api/library` · `/api/songs/{id}` · `/api/albums/{id}` · `/api/artists/{name}` · `/api/search` |
 | 任务 | `POST\|GET /api/scan` · `GET /api/scan/{batch_id}` · `POST\|GET /api/scrape` · `GET /api/scrape/{batch_id}` · `GET /api/jobs` |
+| ↳ 刮削队列 | `POST /api/scrape` body 可选：不给 = pending 队列；`{"mode":"failed"}` = 重刮失败项；`{"song_ids":[1,2]}` = 只听点名的（**已 done 的也能重刮**） |
 | 音频 | `GET /api/stream/{id}`（Range · `?format=mp3` 转码）· `GET /api/songs/{id}/cover` |
 | 歌单 | `/api/playlists` · `/{id}` · `/{id}/items` · `/{id}/items/{song_id}`（8 个操作） |
 | 播放周边 | `/api/history` · `/api/favorites` · `/api/favorites/{song_id}` · `/api/settings`（7 个操作） |
@@ -175,9 +176,9 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 ## 测试
 
 ```bash
-cargo test --lib            # 库用例    495 passed / 0 failed / 1 ignored
+cargo test --lib            # 库用例    499 passed / 0 failed / 1 ignored
 cargo test --tests          # 库 + 全部集成（集成 124）
-node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，133 项）
+node scripts/api_test.mjs # 端到端 API（起临时服务逐条断言，140 项）
 node scripts/api_cli.mjs  # 交互式客户端（连已在跑的服务，菜单选功能）
 ```
 
