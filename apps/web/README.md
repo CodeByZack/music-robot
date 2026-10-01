@@ -9,9 +9,10 @@ src/
 ├─ components/app/ 本项目自己的组合件：app-shell / song-table / player-bar
 ├─ pages/         11 个页面，对着后端 33 条路由
 └─ lib/utils.ts   shadcn 的 cn()
-design/           原型图（一次性设计产物，不是应用代码）
-                  **壳已定：暗色 + 安静侧边栏 + 顶栏搜索 + 悬浮毛玻璃播放条**
-                  形态参考用户自建的「飞牛音乐」（fnOS），但视觉是自己的。
+design/           设计产物（不是应用代码）
+   prototype.html   主页面原型：**单文件、可交互、双击就能开**（不需要服务器）
+                     7 个页面 + 登录页；点侧边栏切页、点行播放、搜索能过滤
+   （设计令牌与理由见 ../../docs/design.md）
 ```
 
 逻辑全部来自 `@music-robot/core`（workspace 包），**这里不放 core**。
