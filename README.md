@@ -17,6 +17,9 @@ HTTP ─┘        ↑
 
 ## ⚠️ 项目状态：后端完成，前端骨架已跑通
 
+> **要接着开发 / 交给别的 agent？先读 [`AGENT-HANDOFF.md`](AGENT-HANDOFF.md)** ——
+> 怎么把服务跑起来、现状实测数字、还剩哪些活、不能破的规矩、踩过的坑，都在那一份里。
+
 28 步实施计划与全部架构设计记录在画布 **[`music-server-architecture.excalidraw`](music-server-architecture.excalidraw)**（用 [Excalidraw](https://excalidraw.com) 打开）。当前进度 **24/28**。
 
 | 层 | 状态 |
