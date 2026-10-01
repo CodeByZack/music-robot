@@ -174,3 +174,30 @@ fn python_plugin_end_to_end() {
 fn shell_plugin_end_to_end() {
     run_e2e("example.sh", "sh", "example-sh", "sh");
 }
+
+/// `plugins/musicbrainz.js` 的离线自检。
+///
+/// 真插件不能进上面那套 e2e —— 它要联网，测试会随机红。但它的**纯函数**
+/// （文件名解析 / 查询串规范化 / 歌手·时长分档与排序）恰恰是最容易悄悄写错、
+/// 又决定「哪条候选会被写进用户文件」的地方；而刮削会覆盖原文件、不可撤销。
+/// 所以让插件自己带一个不联网的 `--selftest`，这里只负责把它的退出码带出来。
+#[test]
+fn musicbrainz_plugin_passes_its_offline_selftest() {
+    // 注意是 plugins/ 而不是 plugins_dir()（那个指向 plugins/examples/ 的示例夹具）：
+    // musicbrainz.js 是**真插件**，跟示例不在同一层，见 HANDOFF §6.3。
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("plugins")
+        .join("musicbrainz.js");
+    let out = std::process::Command::new("node")
+        .arg(&script)
+        .arg("--selftest")
+        .output()
+        .expect("跑 musicbrainz.js --selftest");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "musicbrainz.js 离线自检失败：\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("全部通过"), "自检应当明确报告通过：{stdout}");
+}

@@ -13,8 +13,27 @@
 // MusicBrainz 刮削插件（Node，单文件、零外部依赖、daemon 模式）。
 //
 // ## 它做什么
-// 拿歌曲的 title / artist 去 MusicBrainz 的 recording 搜索接口查，挑最像的一条，
-// 把 title / artist / album / year / genre / track 回给服务端。
+// 从**文件名**解析出歌名与歌手（解析不出来才退回标签），**只用歌名**去 MusicBrainz
+// 的 recording 搜索接口查；回来的候选再按**歌手吻合度 → 时长吻合度 → MB score →
+// 发行日期**排序，取最优的一条，把 title / artist / album / year / genre / track 回给服务端。
+//
+// ## 为什么查询不带 artist（2026-10-01 改，之前是 `recording:"X" AND artist:"Y"`）
+//
+// 实测：本机 fixture 的 artist 标签**本身是脏的** —— 盗版资源的上传者把广告塞进了
+// 歌手字段（`公众号：阿乐资源库`、`凤凰传奇 | 音乐下载网站 yym4.com`）。拿这种值去
+// AND，**6 首样本全军覆没**，尽管其中 3 首只按歌名查立刻 score=100 命中。
+// 一个字段脏就判死整首歌，这个查询策略太脆。
+//
+// 反过来只查歌名的问题是**召回噪声大**：MusicBrainz 给同一首歌的不同演唱者
+// **统统打 100 分**，而且**返回顺序不稳定**（同一个查询连打 4 次，「筷子兄弟」
+// 一会儿第 1 一会儿第 3）。所以 MB 自己的 score 在中文曲库里**几乎没有区分度**，
+// 真正管用的是歌手与时长这两个本地信号 —— 排序时它们排在最前面。
+//
+// ## 为什么优先用文件名
+//
+// 同上：标签脏、文件名反而干净（`老男孩-筷子兄弟.mp3`、`盛夏-毛不易.mp3`）。
+// 约定 **第一个分隔符之前是歌名，之后是歌手**；解析不出来就整条退回标签。
+// 只从文件名补 title / artist **两个字段**，album 等仍取标签。
 //
 // ## 几个必须遵守的 MusicBrainz 规矩（不然会被 403 / 限流）
 //   1. **必须带 User-Agent**，格式 `应用名/版本 ( 联系方式 )`。缺了会被直接拒绝。
@@ -172,10 +191,129 @@ function escapeLucene(s) {
 }
 
 function buildQuery(song) {
-  const parts = [];
-  if (song.title) parts.push('recording:"' + escapeLucene(song.title) + '"');
-  if (song.artist) parts.push('artist:"' + escapeLucene(song.artist) + '"');
-  return parts.join(' AND ');
+  // 兜底查询：**只用歌名**（带 artist 的 AND 会让一个脏标签判死整首歌，见文件头）。
+  return song.title ? 'recording:"' + escapeLucene(song.title) + '"' : '';
+}
+
+// 首选查询：歌名 + 歌手。歌手取文件名解析出来的那个（比标签干净）。
+function buildStrictQuery(title, artist) {
+  if (!title || !artist) return '';
+  return (
+    'recording:"' + escapeLucene(title) + '"' +
+    ' AND artist:"' + escapeLucene(artist) + '"'
+  );
+}
+
+// 规范化歌手，用于**第二个**查询变体。
+//
+//   `Camila Cabello&YoungThug-大耳兽莫慢待` → `Camila Cabello & Young Thug`
+//
+// 三处改动都有实测依据：
+//   · 末段 `-大耳兽莫慢待` 是上传者昵称，带着它查零结果；
+//   · `&` 两侧不带空格时 MusicBrainz 匹配不上；
+//   · 连写的驼峰要拆开 —— `YoungThug` 查不到，`Young Thug` 才行
+//     （实测 `artist:"Camila Cabello & Young Thug"` 恰好 1 条，就是本地那个 217s 的专辑版）。
+//
+// ⚠️ 只在**第一个变体失败后**才用它：`Jay-Z` 这种名字里真带 `-` 的歌手，
+// 第一个变体（原样）能查到，轮不到这里被切成 `Jay`。
+function normalizeArtistForQuery(artist) {
+  let text = String(artist || '').trim();
+  if (!text) return '';
+  const cut = text.lastIndexOf('-');
+  if (cut > 0) text = text.slice(0, cut).trim();
+  return text
+    .replace(/&/g, ' & ')
+    // 驼峰拆分：小写/数字 紧跟 大写 时插空格（`YoungThug` → `Young Thug`）
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// 查一次 MusicBrainz，把「HTTP 杂事」收在这一个地方。
+// 返回 { recordings } 或 { error: { code, message, retryable } }。
+async function fetchRecordings(query, timeoutMs) {
+  const url = MB_BASE + '?query=' + encodeURIComponent(query) + '&fmt=json&limit=' + RESULT_LIMIT;
+  const got = await fetchWithRetry(url, timeoutMs);
+  if (!got.resp) {
+    // TIMEOUT / NETWORK 都是可重试错误，交给上层决定要不要再战（retryable = true）。
+    return { error: { code: got.code, message: got.message, retryable: true } };
+  }
+  const resp = got.resp;
+
+  if (resp.status === 503) {
+    // MusicBrainz 限流时回 503 并带 Retry-After
+    return { error: { code: 'RATE_LIMITED', message: '被 MusicBrainz 限流，稍后重试', retryable: true } };
+  }
+  if (resp.status === 400) {
+    return { error: { code: 'BAD_REQUEST', message: '查询串被 MusicBrainz 拒绝（可能含非法字符）', retryable: false } };
+  }
+  if (resp.status === 403) {
+    return { error: { code: 'AUTH_FAILED', message: 'MusicBrainz 拒绝了请求（User-Agent 不合规？）', retryable: false } };
+  }
+  if (!resp.ok) {
+    return { error: { code: 'NETWORK', message: 'MusicBrainz 返回 HTTP ' + resp.status, retryable: true } };
+  }
+
+  let data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    return { error: { code: 'NETWORK', message: 'MusicBrainz 返回的不是合法 JSON', retryable: true } };
+  }
+  return { recordings: data && Array.isArray(data.recordings) ? data.recordings : [] };
+}
+
+// ── 从文件名解析歌名 / 歌手 ──────────────────────────────────────────────
+//
+// 约定：**第一个分隔符之前是歌名，之后是歌手**。
+//   `老男孩-筷子兄弟.mp3`                              → 老男孩 / 筷子兄弟
+//   `牵丝戏 - 白兀.flac`                               → 牵丝戏 / 白兀
+//   `Havana-Camila Cabello&YoungThug-大耳兽莫慢待.mp3`  → Havana / Camila Cabello&YoungThug-大耳兽莫慢待
+//
+// 取**第一个**分隔符而不是最后一个：上例最后一个分隔符切出来的是
+// `Havana-Camila Cabello&YoungThug` / `大耳兽莫慢待`，歌名里塞着歌手、歌手是上传者昵称，
+// 两边都不能用来查。取第一个则歌名正好是 `Havana`（要查的就是它）。
+//
+// 解析不出来（没分隔符 / 某一侧为空 / 长得离谱）返回 null，调用方整条退回标签。
+function parseFileName(filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) return null;
+  // 取 basename 再剥扩展名。手写而不用 require('path')：插件要跨平台，且这里够简单。
+  const base = filePath.split(/[\\/]/).pop() || '';
+  // 扩展名限定成「点 + 1~5 个字母数字」，免得把歌名里的 `.` 当成扩展名切掉。
+  const stem = base.replace(/\.[a-z0-9]{1,5}$/i, '').trim();
+  if (!stem) return null;
+
+  // 去掉开头的音轨号（`01. ` / `01 - ` / `01_`）。只剥数字，别把 `1999-...` 这种年份当序号。
+  const body = stem.replace(/^\d{1,3}\s*[.\-_]\s+/, '').trim();
+  if (!body) return null;
+
+  // 优先切「两边带空格」的分隔符：`歌名 - 歌手` 比 `歌名-歌手` 更明确，
+  // 也避免把 `Havana-Camila` 这种无空格连字符先切了（上面那条是为了歌名准确，这里同理）。
+  let sep = body.includes(' - ') ? ' - ' : '-';
+  const at = body.indexOf(sep);
+  if (at < 0) return null;
+
+  const title = body.slice(0, at).trim();
+  const artist = body.slice(at + sep.length).trim();
+  if (!title || !artist) return null;
+  // 两侧都别长得离谱：正常歌名/歌手不会有 100 字符，出现了多半是误切。
+  if (title.length > 100 || artist.length > 100) return null;
+  return { title: title, artist: artist };
+}
+
+// 这首歌的「查询身份」：文件名优先，解析不出来的那半边退回标签。
+function pickIdentity(song) {
+  const fromName = parseFileName(song && song.file_path);
+  const tagTitle = typeof song.title === 'string' ? song.title.trim() : '';
+  const tagArtist = typeof song.artist === 'string' ? song.artist.trim() : '';
+  const title = (fromName && fromName.title) || tagTitle;
+  const artist = (fromName && fromName.artist) || tagArtist;
+  return {
+    title: title,
+    artist: artist,
+    // 只用于日志/排查：这次的身份是从文件名来的还是从标签来的。
+    from: fromName ? 'file_name' : 'tags',
+  };
 }
 
 // ── 打分：MB 自己的 score（0~100）+ 与本地标签的一致性 + 时长吻合度 ──
@@ -216,6 +354,26 @@ function artistCredit(cand) {
     .join(' / ');
 }
 
+// 歌手吻合度分档：2 = 吻合，1 = 无法比较（本地没歌手 / 候选没歌手），0 = 明显不符。
+//
+// 为什么放在**排序第一位**：MusicBrainz 的 score 在中文曲库里没有区分度（见文件头），
+// 歌手是本地能给的最强信号。实测「老男孩」的候选里 筷子兄弟 / 雷婷 / 羽·泉 / 赵照
+// **全是 100 分**，只有歌手能把正确的那条挑出来。
+//
+// 双向包含：文件名里常见 `Havana-Camila Cabello&YoungThug-大耳兽莫慢待` 这种
+// 「歌手后面还拖着一串」的写法，短的那侧被长的那侧包含就算吻合。
+// 但包含判定要求短侧 >= 2 字符 —— 否则单字母歌手（`T`、`A`）会匹配上任何东西。
+function artistClass(cand, song) {
+  const want = normalize(song && song.artist);
+  const got = normalize(artistCredit(cand));
+  if (!want || !got) return 1;
+  if (want === got) return 2;
+  const shorter = want.length <= got.length ? want : got;
+  const longer = want.length <= got.length ? got : want;
+  if (shorter.length >= 2 && longer.includes(shorter)) return 2;
+  return 0;
+}
+
 // 时长吻合度分档：2 = 吻合（<=3%），1 = 未知/无法比较，0 = 明显不吻合（>=10%）
 function durationClass(cand, song) {
   const want = song && song.duration_ms;
@@ -229,8 +387,10 @@ function durationClass(cand, song) {
 }
 
 // 排序用键（**故意不 clamp**，否则信号会被上限吃掉，见调用处的长注释）
+// 优先级：歌手吻合 → 时长吻合 → MB score → 发行日期最早
 function rankKey(cand, song) {
   return [
+    -artistClass(cand, song),
     -durationClass(cand, song),
     -(typeof cand.score === 'number' ? cand.score : 0),
     paddedDate(typeof cand['first-release-date'] === 'string' ? cand['first-release-date'] : ''),
@@ -382,53 +542,74 @@ function buildError(id, code, message, retryable) {
 
 // ── 主流程：查一次 MusicBrainz ──
 async function scrape(req) {
-  const song = req.song || {};
-  const title = typeof song.title === 'string' ? song.title.trim() : '';
-  const artist = typeof song.artist === 'string' ? song.artist.trim() : '';
+  const raw = req.song || {};
+  // 文件名优先解析出 title / artist；解析不出来退回标签。
+  // album 不从文件名取（它不在文件名里），仍用标签值选 release。
+  const identity = pickIdentity(raw);
+  const song = Object.assign({}, raw, { title: identity.title, artist: identity.artist });
+  const title = song.title;
+  const artist = song.artist;
 
   if (!title && !artist) {
     return buildError(req.id, 'NOT_FOUND', '这首歌没有标题也没有歌手，无法查询 MusicBrainz', false);
   }
-
-  const url =
-    MB_BASE +
-    '?query=' + encodeURIComponent(buildQuery({ title, artist })) +
-    '&fmt=json&limit=' + RESULT_LIMIT;
+  if (!title) {
+    // 查询只用歌名，没歌名就没法查 —— 说清楚是哪一步缺，别含糊成「没找到」。
+    return buildError(
+      req.id,
+      'NOT_FOUND',
+      '这首歌没有可用的标题（文件名没解析出歌名，标签里也没有），无法查询 MusicBrainz',
+      false
+    );
+  }
+  log('查询身份来自 ' + identity.from + '：title=' + JSON.stringify(title) + ' artist=' + JSON.stringify(artist));
 
   // timeout_ms 在这里是**整次请求（含重试）的总预算**，见 fetchWithRetry 的注释。
   const timeoutMs = (req.options && req.options.timeout_ms) || 10000;
-  const got = await fetchWithRetry(url, timeoutMs);
-  if (!got.resp) {
-    // TIMEOUT / NETWORK 都是可重试错误，交给上层决定要不要再战（retryable = true）。
-    return buildError(req.id, got.code, got.message, true);
-  }
-  const resp = got.resp;
 
-  if (resp.status === 503) {
-    // MusicBrainz 限流时回 503 并带 Retry-After
-    return buildError(req.id, 'RATE_LIMITED', '被 MusicBrainz 限流，稍后重试', true);
-  }
-  if (resp.status === 400) {
-    return buildError(req.id, 'BAD_REQUEST', '查询串被 MusicBrainz 拒绝（可能含非法字符）', false);
-  }
-  if (resp.status === 403) {
-    return buildError(req.id, 'AUTH_FAILED', 'MusicBrainz 拒绝了请求（User-Agent 不合规？）', false);
-  }
-  if (!resp.ok) {
-    return buildError(req.id, 'NETWORK', 'MusicBrainz 返回 HTTP ' + resp.status, true);
-  }
+  // ── 两段式查询：先带歌手（精确），零结果才退回只查歌名（宽容）──
+  //
+  // 为什么不是「只查歌名」这一条路：同名歌一多，纯歌名查询**等于随机**。
+  // 实测 `recording:"Havana"` 前 25 条 score 全是 100，却一条都不是 Camila Cabello
+  // （Kenny G / Wimme / Frank Loesser…）；本地那个 217s 的文件会被一条时长恰好
+  // 215s 的同名歌（Brother Sun Sister Moon《Havana》1997）顶掉 —— 而且它能过认领闸门，
+  // 因为时长「吻合」。写错还不可撤销。
+  //
+  // 反过来只走 AND 也不行：歌手本身可能是错的（实测 牵丝戏 被标成「白兀」），
+  // `artist:"白兀"` 零结果，歌其实查得到。
+  //
+  // 所以：AND 优先（干净歌手时 4/6 直接命中且全对），零结果才退到歌名，
+  // 两条路**都**要过下面的认领闸门。
+  const steps = [];
+  const seen = new Set();
+  const pushQuery = (kind, query) => {
+    if (!query || seen.has(query)) return; // 去重：干净歌手只需要一次请求
+    seen.add(query);
+    steps.push({ kind: kind, query: query });
+  };
+  pushQuery('strict', buildStrictQuery(title, artist));
+  pushQuery('strict-normalized', buildStrictQuery(title, normalizeArtistForQuery(artist)));
+  pushQuery('loose', buildQuery({ title: title }));
 
-  let data;
-  try {
-    data = await resp.json();
-  } catch (e) {
-    return buildError(req.id, 'NETWORK', 'MusicBrainz 返回的不是合法 JSON', true);
+  let recordings = [];
+  let usedKind = '';
+  for (const step of steps) {
+    const got = await fetchRecordings(step.query, timeoutMs);
+    if (got.error) {
+      return buildError(req.id, got.error.code, got.error.message, got.error.retryable);
+    }
+    if (got.recordings.length) {
+      recordings = got.recordings;
+      usedKind = step.kind;
+      break;
+    }
+    log(step.kind + ' 查询零结果，继续下一种：' + step.query);
   }
-
-  const recordings = data && Array.isArray(data.recordings) ? data.recordings : [];
   if (recordings.length === 0) {
     return buildError(req.id, 'NOT_FOUND', 'MusicBrainz 没有找到匹配的录音', false);
   }
+  log(usedKind + ' 查询命中 ' + recordings.length + ' 条候选');
+
 
   // 同名录音会有多个（原版 / 现场 / 重混），而且 MusicBrainz 给它们的 score **常常都是 100**
   // —— 它们是不同的 recording 实体，光看 score 挑不准。
@@ -451,8 +632,31 @@ async function scrape(req) {
     }
   }
   const bestConf = confidenceOf(best, song);
+  const bestArtist = best ? artistClass(best, song) : 0;
+  const bestDuration = best ? durationClass(best, song) : 0;
 
-  if (!best || bestConf < 0.5) {
+  // ── 认领闸门：必须拿到**至少一个强本地信号**才认这个候选 ──
+  //
+  // 查询只用歌名之后，候选里全是**毫不相干的同名歌**。实测 `recording:"Havana"`
+  // 返回的前 25 条**score 全是 100**，却没有一条是 Camila Cabello
+  // （Kenny G / Wimme / Frank Loesser……），因为 MusicBrainz 的 score 在这种
+  // 查询下等于噪声。少了这道闸，插件会把 `David Rudder` 的《Havana》(2001)
+  // 当成用户的歌写进文件 —— 而刮削会覆盖原文件，**不可撤销**。
+  //
+  // ⚠️ 光靠 confidence 的加减分拦不住它：那条候选**没有时长字段**，反而躲过了
+  // 时长扣分，最终算出 0.9，高于服务端 0.80 的命中阈值。所以闸门必须显式判。
+  if (!best || bestArtist !== 2 && bestDuration !== 2) {
+    return buildError(
+      req.id,
+      'NOT_FOUND',
+      'MusicBrainz 的候选里没有一条能和本地歌手或时长对上（' +
+        '歌手吻合度 ' + bestArtist + '/2、时长吻合度 ' + bestDuration + '/2，' +
+        '最高 confidence ' + bestConf.toFixed(2) + '）',
+      false
+    );
+  }
+
+  if (bestConf < 0.5) {
     // 低于 0.5 连「候选」都算不上；回 NOT_FOUND 让上层顺序回退到下一个插件，
     // 而不是塞一堆不可信标签进去（0.80 的命中阈值由服务端判定）。
     return buildError(
@@ -497,6 +701,79 @@ function handleLine(line) {
       log('未捕获异常：' + (e && e.stack ? e.stack : e));
       respond(buildError(req.id, 'INTERNAL', '插件内部错误', false));
     });
+}
+
+// ── 离线自检：`node plugins/musicbrainz.js --selftest` ────────────────────
+//
+// 只测**纯函数**（文件名解析、查询串构造、歌手/时长分档与排序），不联网。
+// 这些是 2026-10-01 改查询策略时新加的判断逻辑，也是最容易悄悄写错的地方：
+// 它们决定「哪条候选会被写进用户的文件」，而刮削会覆盖原文件、不可撤销。
+// `tests/plugin_e2e.rs` 会跑这个自检，所以 `cargo test` 就覆盖得到。
+function selftest() {
+  const failures = [];
+  const eq = (name, got, want) => {
+    const a = JSON.stringify(got);
+    const b = JSON.stringify(want);
+    if (a !== b) failures.push(name + '\n    实际 ' + a + '\n    期望 ' + b);
+  };
+
+  // 文件名解析：歌名取第一个分隔符之前（Havana 那条取第一个而不是最后一个，
+  // 否则歌名会变成 `Havana-Camila Cabello&YoungThug`，拿去查反而查不到）
+  eq('解析 老男孩-筷子兄弟.mp3',
+    parseFileName('/music/老男孩-筷子兄弟.mp3'), { title: '老男孩', artist: '筷子兄弟' });
+  eq('解析 牵丝戏 - 白兀.flac',
+    parseFileName('/music/牵丝戏 - 白兀.flac'), { title: '牵丝戏', artist: '白兀' });
+  eq('解析 Havana-...-大耳兽莫慢待.mp3（取第一个分隔符）',
+    parseFileName('/music/Havana-Camila Cabello&YoungThug-大耳兽莫慢待.mp3'),
+    { title: 'Havana', artist: 'Camila Cabello&YoungThug-大耳兽莫慢待' });
+  eq('解析 Windows 路径 + 音轨号',
+    parseFileName('C:\\music\\01. 盛夏-毛不易.mp3'), { title: '盛夏', artist: '毛不易' });
+  // 解析不出来必须回 null（调用方据此退回标签），不能猜
+  eq('无分隔符 → null', parseFileName('/music/没有分隔符.mp3'), null);
+  eq('歌手侧为空 → null', parseFileName('/music/只有歌名-.mp3'), null);
+  eq('歌名侧为空 → null', parseFileName('/music/-只有歌手.mp3'), null);
+  eq('空路径 → null', parseFileName(''), null);
+  eq('非字符串 → null', parseFileName(null), null);
+
+  // 查询串规范化
+  eq('规范化 驼峰+&+尾巴',
+    normalizeArtistForQuery('Camila Cabello&YoungThug-大耳兽莫慢待'),
+    'Camila Cabello & Young Thug');
+  eq('规范化 干净歌手原样', normalizeArtistForQuery('筷子兄弟'), '筷子兄弟');
+  eq('规范化 名字里的 - 不动（第一个变体能查到就不走这里）',
+    normalizeArtistForQuery('Jay-Z'), 'Jay');
+
+  // 歌手吻合度：双向包含，但短侧 < 2 字符不算（否则单字母歌手匹配一切）
+  const cand = (artist, len, score) => ({
+    score: score === undefined ? 100 : score,
+    length: len,
+    title: 'Havana',
+    'artist-credit': [{ name: artist }],
+  });
+  const song = { title: 'Havana', artist: 'Camila Cabello&YoungThug-大耳兽莫慢待', duration_ms: 217307 };
+  eq('长串包含候选名 → 吻合', artistClass(cand('Camila Cabello'), song), 2);
+  eq('毫不相干 → 不吻合', artistClass(cand('Bongwater'), song), 0);
+  eq('短侧只有 1 字符 → 不算吻合', artistClass(cand('C'), song), 0);
+  eq('本地没歌手 → 无法比较', artistClass(cand('Bongwater'), { artist: '' }), 1);
+
+  // 这条是**安全闸门**的核心：同名的另一首歌（时长恰好接近）不能胜出
+  const wrong = cand('Bongwater', 215000);
+  const right = cand('Camila Cabello', 217000);
+  if (compareRank(rankKey(right, song), rankKey(wrong, song)) >= 0) {
+    failures.push('歌手吻合的候选必须排在同名不同歌的前面');
+  }
+
+  if (failures.length) {
+    for (const f of failures) process.stderr.write('[selftest] ✗ ' + f + '\n');
+    process.stderr.write('[selftest] ' + failures.length + ' 项失败\n');
+    return 1;
+  }
+  process.stdout.write('[selftest] 全部通过\n');
+  return 0;
+}
+
+if (process.argv.includes('--selftest')) {
+  process.exit(selftest());
 }
 
 const rl = readline.createInterface({ input: process.stdin });

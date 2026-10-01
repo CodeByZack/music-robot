@@ -30,8 +30,8 @@
 |---|---|
 | `cargo check --lib` | **0 警告** |
 | 库用例（`cargo test --lib`） | **499 passed / 0 failed / 1 ignored** |
-| 集成用例（`tests/`，11 个文件） | **124 passed / 0 failed** |
-| 合计 | **623 passed / 0 failed / 1 ignored** |
+| 集成用例（`tests/`，11 个文件） | **125 passed / 0 failed** |
+| 合计 | **624 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **140 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
@@ -306,6 +306,14 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 `year` 同样不可全信（Bohemian Rhapsody 实测给 1992，原版是 1975）—— 它取自
 `first-release-date`，可能是某次再版的年份。
 
+**③ MusicBrainz 的 score / 返回顺序**在中文曲库里**没有区分度**，别拿它当选主依据。**
+
+实测（2026-10-01）：`recording:"老男孩"` 的同一条查询连打 4 次，正确歌手「筷子兄弟」
+一会儿第 1、一会儿第 3，甚至掉出前 3；候选里 筷子兄弟 / 雷婷 / 羽·泉 / 赵照
+**全是 score=100**。`recording:"Havana"` 更夸张：前 25 条 score 全 100，却一条都不是
+Camila Cabello（Kenny G / Wimme / Frank Loesser…）。
+**真正能区分的是本地的「歌手」与「时长」两个信号**，插件的 `rankKey` 就是按它们排序的。
+
 ---
 
 ## 4. 与 TS 的解耦状态
@@ -444,6 +452,28 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
     → 被 example.js 刮完 `歌手: 示例歌手 / 专辑: 示例专辑`。**插件写坏了标签，原值就找不回来了**
 - **`plugins/musicbrainz.js` 曾被 `.gitignore` 挡住**（规则是 `/plugins/*` 只放行 example.*）。
   它是**随仓库发布的真实插件**，已加放行。别再把 `/plugins/*` 理解成「仓库里不放插件」。
+- **MusicBrainz 插件不能「只查歌名」，必须 AND 优先 + 歌名兜底**（2026-10-01 改，别退回去）。
+  起因：本机 6 首 fixture **全军覆没**，一查才发现**标签本身是脏的** ——
+  盗版资源的上传者把广告塞进了 artist 字段（`公众号：阿乐资源库`、
+  `凤凰传奇 | 音乐下载网站 yym4.com`），拿这种值 AND 必然零结果，而其中 3 首
+  只按歌名查立刻 score=100 命中。**一个字段脏就判死整首歌** —— 这个策略太脆。
+  现在插件的行为：
+  * 身份**优先从文件名解析**（`歌名-歌手.ext`，取**第一个**分隔符），解析不出来才退回标签。
+    标签脏、文件名反而干净，本机 fixture 就是活例子。
+  * 查询**三段**（去重后最多 3 次请求）：`歌名 AND 歌手` → `歌名 AND 规范化歌手` → `歌名`。
+    规范化 = 去掉最后一个 `-` 之后的尾巴 + `&` 两边加空格 + 驼峰拆分
+    （`Camila Cabello&YoungThug-大耳兽莫慢待` → `Camila Cabello & Young Thug`，这条恰好
+    命中本地那个 217s 的专辑版）。
+  * ⚠️ **认领闸门**：候选必须满足「歌手吻合 **或** 时长吻合」才认，否则回 NOT_FOUND。
+    **少了这道闸会写错数据**：实测 `recording:"Havana"` 的候选里
+    `Brother Sun Sister Moon`《Havana》(1997) 时长恰好 215s（本地 217s），
+    confidence 算出 0.9 > 服务端 0.80 阈值 —— 靠加减分**拦不住**（那条候选没有时长字段的那次
+    是 `David Rudder`，也是 0.9）。闸门必须显式判。
+  * 结果（6 首 fixture）：**4 首正确命中**（Havana / 牵丝戏 / 盛夏 / 老男孩，**歌手全对**），
+    **2 首 MusicBrainz 里确实没有**（华夏传说 / 最美情侣），**0 假阳性**。
+  * 纯函数有离线自检：`node plugins/musicbrainz.js --selftest`，
+    已挂进 `cargo test`（`tests/plugin_e2e.rs::musicbrainz_plugin_passes_its_offline_selftest`）。
+    **改这三个函数一定要先跑它** —— 它们决定「哪条候选会被写进用户文件」。
 
 ### 6.4 未决疑点（**用户说后面再议，别自己拍板**）
 
