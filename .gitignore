@@ -29,3 +29,6 @@ dist/
 web-build/
 *.tsbuildinfo
 .env.local
+
+# 前端构建产物
+apps/*/dist/

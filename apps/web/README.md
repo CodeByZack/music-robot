@@ -25,6 +25,25 @@ design/           设计产物（不是应用代码）
 2. `adapters/` 是 core 唯一碰宿主的地方（`token-store.web.ts` / `audio.web.ts`）。
 3. `components/ui/` 是 shadcn 的，手改前想清楚 —— 以后要跟上游更新。
 
-## 还没做的
+## 跑起来
 
-没跑 `npm create vite`、没装任何依赖（装之前先问用户）。`design/` 里是原型图，不是应用代码。
+```sh
+pnpm install                                   # 仓库根
+pnpm --filter @music-robot/web dev             # http://127.0.0.1:5173
+```
+
+开发时 `/api` 由 Vite 代理到 `http://127.0.0.1:8080`（见 vite.config.ts）。
+后端指到别处就改那一行的 target。
+
+## 现状（2026-10-01）
+
+**已跑通**：登录 → 自动恢复登录（令牌存 localStorage）→ 音乐库列表（真数据，
+含脏标签识别）。侧边栏 7 项里除音乐库外都是占位页。
+
+**还没做**：底部悬浮播放条、专辑/歌手/歌单/收藏/设置页、shadcn 组件。
+
+⚠️ **曲库列表没有「专辑」列**：`/api/library` 只返回 `album_id`，**不返回专辑名**。
+要显示得二选一 —— 再拉一次 `/api/albums` 在客户端 join，或改后端加上。
+
+⚠️ 表格暂时**用原生 `<table>`**，没用 `@tanstack/react-table`（已装 v9）。
+v9 的 API 还没核实过，不照记忆写。加排序/列显示开关时再引入。

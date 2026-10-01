@@ -1,0 +1,29 @@
+{
+  "name": "@music-robot/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PC 端 Web（Vite + React + Tailwind + shadcn/ui）。业务逻辑全部来自 @music-robot/core。",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@music-robot/core": "workspace:*",
+    "@tanstack/react-table": "^9.2.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
+}
