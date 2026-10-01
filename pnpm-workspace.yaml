@@ -1,0 +1,5 @@
+# 现在就建 workspace 是因为目录形状已经定了（见 apps/ packages/），
+# 但**不要**在这里跑 install —— 装依赖前先问用户（AGENTS.md：NAS 上不随便装东西）。
+packages:
+  - 'apps/*'
+  - 'packages/*'

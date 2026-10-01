@@ -21,3 +21,11 @@ env.local
 # 插件按文件名升序尝试、命中即停，而 example.js 永远返回 confidence 0.95，
 # 一旦和 musicbrainz.js 同层，那个真插件就永远不会被执行。
 !/plugins/examples/*
+
+# ── 前端（apps/ packages/）────────────────────────────────
+node_modules/
+dist/
+.expo/
+web-build/
+*.tsbuildinfo
+.env.local

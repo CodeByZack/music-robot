@@ -1,0 +1,198 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>music-robot · PC 端布局三选一</title>
+<style>
+  :root{
+    --bg:#fff; --fg:#14171a; --mut:#5d6b7a; --line:#e3e8ef; --card:#f7f9fb;
+    --accent:#c2410c; --wash:#f2f5f8; --bar:#e9eef3;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0f1418;--fg:#eef2f6;--mut:#9aa8b6;--line:#243039;--card:#161d23;
+          --accent:#fb923c;--wash:#1b232a;--bar:#1e272e}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);padding:36px 28px 80px;
+       font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:24px;margin:0 0 6px}
+  p.lede{margin:0 0 26px;color:var(--mut);max-width:78ch;font-size:14px}
+  .wrap{display:flex;flex-direction:column;gap:26px;max-width:1180px;margin:0 auto}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--card);
+        padding:16px;display:flex;flex-direction:column;gap:10px}
+  h2{font-size:16px;margin:0}
+  .angle{color:var(--mut);font-size:13px;margin:0}
+  .pick{font:inherit;font-size:13px;padding:7px 12px;border-radius:7px;cursor:pointer;
+        border:1px solid var(--accent);background:transparent;color:var(--accent);align-self:flex-start}
+  .pick:hover{background:var(--accent);color:var(--bg)}
+
+  /* ── 线框屏幕：灰阶，只judge结构 ── */
+  .screen{border:1px solid var(--line);border-radius:8px;overflow:hidden;
+          height:400px;display:flex;font-size:11px;background:var(--bg);color:var(--fg)}
+  .col{display:flex;flex-direction:column;min-width:0}
+  .row{display:flex;align-items:center;min-width:0}
+  .grow{flex:1;min-width:0}
+  .pad{padding:9px 11px}
+  .side{width:150px;background:var(--wash);border-right:1px solid var(--line);flex:none}
+  .side2{width:120px;background:var(--wash);border-right:1px solid var(--line);flex:none}
+  .aside{width:262px;background:var(--wash);border-left:1px solid var(--line);flex:none}
+  .top{border-bottom:1px solid var(--line);flex:none}
+  .bar{border-top:1px solid var(--line);background:var(--bar);flex:none;height:52px}
+  .nav{padding:6px 9px;color:var(--mut);border-radius:5px;margin:1px 6px}
+  .nav.on{background:var(--bg);color:var(--fg);box-shadow:inset 2px 0 0 var(--accent)}
+  .brand{font-weight:600;padding:11px;letter-spacing:.3px}
+  .t{display:flex;padding:5px 11px;border-bottom:1px solid var(--line);color:var(--mut);font-size:10.5px}
+  .t.h{background:var(--wash);font-weight:600}
+  .t:nth-child(odd){background:color-mix(in srgb,var(--wash) 45%,transparent)}
+  .t>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  /* 按比例分列，别让标题列吃掉全部宽度（否则右边挤成一堆，看着像表格没排好）*/
+  .c1{flex:2 1 0;min-width:0}.c2{flex:1 1 0;min-width:0}.c3{flex:1 1 0;min-width:0}.c4{flex:none;width:56px;text-align:right}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--mut);flex:none}
+  .box{background:var(--wash);border:1px solid var(--line);border-radius:6px}
+  .art{width:34px;height:34px;border-radius:4px;background:var(--bar);flex:none;
+       border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--mut)}
+  .art.big{width:96px;height:96px;border-radius:8px}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:9px;padding:11px;overflow:hidden}
+  .tl{font-size:10px;color:var(--mut);margin-top:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .fnote{color:var(--mut);font-size:12px;margin:2px 0 0}
+</style>
+
+<h1>music-robot · PC 端布局三选一</h1>
+<p class="lede">
+  <b>故意画成灰阶</b>——先定结构，颜色和字体是下一步的事。<br>
+  三张图内容一样（同一份曲库、同一套导航），差别只在<b>什么东西占据屏幕</b>。<br>
+  看的时候只问一句：<b>你平时在这个站上干得最多的事，占的地方够不够大？</b>
+</p>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>A — 左侧栏 + 曲目表格（管理台）</h2>
+    <p class="angle">导航常驻，表格占满主区。扫描 / 刮削 / 任务和听歌<b>同权</b>，一个都不藏。</p>
+
+    <div class="screen">
+      <div class="col side">
+        <div class="brand">music-robot</div>
+        <div class="nav on">曲库</div>
+        <div class="nav">专辑</div>
+        <div class="nav">歌手</div>
+        <div class="nav">歌单</div>
+        <div class="nav">收藏</div>
+        <div class="nav">历史</div>
+        <div class="nav">点歌</div>
+        <div class="nav">任务 <span style="color:var(--accent)">●</span></div>
+        <div class="nav">设置</div>
+      </div>
+      <div class="col grow">
+        <div class="row top pad" style="gap:8px">
+          <span class="chip">全部</span><span class="chip">专辑</span><span class="chip">歌手</span>
+          <span class="grow"></span><span class="chip">搜索…</span><span class="chip">排序</span>
+        </div>
+        <div class="col grow" style="overflow:hidden">
+          <div class="t h"><span class="c1">标题</span><span class="c2">歌手</span><span class="c3">专辑</span><span class="c4">时长</span></div>
+          <div class="t"><span class="c1">牵丝戏</span><span class="c2">银临 / Aki阿杰</span><span class="c3">牵丝戏</span><span class="c4">3:58</span></div>
+          <div class="t"><span class="c1">老男孩</span><span class="c2">筷子兄弟</span><span class="c3">2015 跨年</span><span class="c4">4:50</span></div>
+          <div class="t"><span class="c1">盛夏</span><span class="c2">毛不易</span><span class="c3">平凡的一天</span><span class="c4">4:52</span></div>
+          <div class="t"><span class="c1">最美情侣</span><span class="c2">白小白</span><span class="c3">最美情侣</span><span class="c4">4:02</span></div>
+          <div class="t"><span class="c1">华夏传说</span><span class="c2">凤凰传奇</span><span class="c3">华夏传说</span><span class="c4">3:37</span></div>
+          <div class="t"><span class="c1">Havana</span><span class="c2">Camila Cabello</span><span class="c3">Camila</span><span class="c4">3:37</span></div>
+          <div class="t"><span class="c1">…</span><span class="c2"></span><span class="c3"></span><span class="c4"></span></div>
+        </div>
+        <div class="row bar pad" style="gap:10px">
+          <div class="art">▶</div>
+          <div class="col grow"><div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div></div>
+          <span class="chip">◀◀</span><span class="chip">▶</span><span class="chip">▶▶</span><span class="chip">1:12 / 3:58</span>
+        </div>
+      </div>
+    </div>
+    <button class="pick" onclick="navigator.clipboard.writeText('A');this.textContent='已复制 A —— 回贴给我'">选 A</button>
+  </div>
+
+  <div class="card">
+    <h2>B — 顶栏 + 大封面（播放优先）</h2>
+    <p class="angle">浏览和播放是主角，管理功能收进右上角。像 Spotify Web —— 好看，但<b>扫描/刮削要翻两层</b>。</p>
+
+    <div class="screen">
+      <div class="col grow">
+        <div class="row top pad" style="gap:10px">
+          <span style="font-weight:600">music-robot</span>
+          <span class="nav on" style="margin:0">曲库</span>
+          <span class="nav" style="margin:0">专辑</span>
+          <span class="nav" style="margin:0">歌手</span>
+          <span class="nav" style="margin:0">歌单</span>
+          <span class="grow"></span>
+          <span class="chip">搜索…</span><span class="chip">任务</span><span class="chip">设置</span>
+        </div>
+        <div class="col grow" style="overflow:hidden">
+          <div class="pad" style="padding-bottom:0"><b>最近添加</b></div>
+          <div class="grid3">
+            <div><div class="art big">♪</div><div class="tl">牵丝戏</div><div class="tl">银临 / Aki阿杰</div></div>
+            <div><div class="art big">♪</div><div class="tl">平凡的一天</div><div class="tl">毛不易</div></div>
+            <div><div class="art big">♪</div><div class="tl">2015 跨年</div><div class="tl">筷子兄弟</div></div>
+            <div><div class="art big">♪</div><div class="tl">华夏传说</div><div class="tl">凤凰传奇</div></div>
+            <div><div class="art big">♪</div><div class="tl">Camila</div><div class="tl">Camila Cabello</div></div>
+            <div><div class="art big">♪</div><div class="tl">最美情侣</div><div class="tl">白小白</div></div>
+            <div><div class="art big">♪</div><div class="tl">…</div><div class="tl"></div></div>
+          </div>
+        </div>
+        <div class="row bar pad" style="gap:10px">
+          <div class="art">▶</div>
+          <div class="col grow"><div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div></div>
+          <span class="chip">◀◀</span><span class="chip">▶</span><span class="chip">▶▶</span><span class="chip">1:12 / 3:58</span>
+        </div>
+      </div>
+    </div>
+    <button class="pick" onclick="navigator.clipboard.writeText('B');this.textContent='已复制 B —— 回贴给我'">选 B</button>
+  </div>
+
+  <div class="card">
+    <h2>C — 三栏：分类树 + 曲目 + 队列常驻</h2>
+    <p class="angle">信息密度最高，专辑 → 曲目 → 正在播同屏。<b>代价：1280 宽以下会挤</b>，手机上完全用不了。</p>
+
+    <div class="screen">
+      <div class="col side2">
+        <div class="brand" style="padding:9px">曲库</div>
+        <div class="nav on">全部歌曲</div>
+        <div class="nav">最近添加</div>
+        <div class="nav">专辑</div>
+        <div class="nav">歌手</div>
+        <div class="nav">歌单</div>
+        <div class="nav">收藏</div>
+        <div class="nav">点歌</div>
+        <div class="nav">任务</div>
+        <div class="nav">设置</div>
+      </div>
+      <div class="col grow">
+        <div class="row top pad" style="gap:8px"><b>全部歌曲</b><span class="grow"></span><span class="chip">搜索…</span></div>
+        <div class="col grow" style="overflow:hidden">
+          <div class="t h"><span class="c1">标题</span><span class="c2">歌手</span><span class="c4">时长</span></div>
+          <div class="t"><span class="c1">牵丝戏</span><span class="c2">银临 / Aki阿杰</span><span class="c4">3:58</span></div>
+          <div class="t"><span class="c1">老男孩</span><span class="c2">筷子兄弟</span><span class="c4">4:50</span></div>
+          <div class="t"><span class="c1">盛夏</span><span class="c2">毛不易</span><span class="c4">4:52</span></div>
+          <div class="t"><span class="c1">最美情侣</span><span class="c2">白小白</span><span class="c4">4:02</span></div>
+          <div class="t"><span class="c1">华夏传说</span><span class="c2">凤凰传奇</span><span class="c4">3:37</span></div>
+          <div class="t"><span class="c1">Havana</span><span class="c2">Camila Cabello</span><span class="c4">3:37</span></div>
+          <div class="t"><span class="c1">…</span><span class="c2"></span><span class="c4"></span></div>
+        </div>
+      </div>
+      <div class="col aside">
+        <div class="pad" style="border-bottom:1px solid var(--line)"><b>正在播放</b></div>
+        <div class="pad" style="display:flex;gap:10px;align-items:flex-start">
+          <div class="art big" style="width:64px;height:64px">♪</div>
+          <div style="min-width:0">
+            <div>牵丝戏</div><div class="fnote">银临 / Aki阿杰</div><div class="fnote">牵丝戏 · 2015</div>
+          </div>
+        </div>
+        <div class="pad" style="padding-top:0"><div class="box" style="height:6px"><div style="width:30%;height:100%;background:var(--accent)"></div></div>
+          <div class="fnote" style="margin-top:6px">1:12 / 3:58</div></div>
+        <div class="pad" style="border-top:1px solid var(--line)"><b>接下来</b></div>
+        <div class="pad" style="padding-top:0">
+          <div>老男孩 <span class="fnote">筷子兄弟</span></div>
+          <div>盛夏 <span class="fnote">毛不易</span></div>
+          <div>最美情侣 <span class="fnote">白小白</span></div>
+          <div class="fnote">…</div>
+        </div>
+      </div>
+    </div>
+    <button class="pick" onclick="navigator.clipboard.writeText('C');this.textContent='已复制 C —— 回贴给我'">选 C</button>
+  </div>
+
+</div>
