@@ -3,3 +3,18 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# 依赖版本上限：钉在「已发布超过 24 小时」的版本上（2026-10-02）。
+# 起因：lockfile 里钉了当天刚发的 rolldown@1.2.12（Vite 8 的打包器）+ 它 15 个平台二进制
+# + source-map-js@1.2.2，于是任何开了 pnpm minimumReleaseAge（24h 供应链策略）的机器上
+# `pnpm install` / `pnpm dev` 全被 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION 拦下。
+#
+# 为什么不直接在项目里开 minimum-release-age：试过了，**不行** —— rolldown 的绑定是
+# 精确版本的可选依赖，pnpm 遇到「太新」的绑定不会回退到旧版 rolldown，而是直接
+# ERR_PNPM_NO_MATURE_MATCHING_VERSION 让解析失败。所以在**这里**钉版本，解析期就绕开了。
+#
+# 两条都在 vite@8.3.1 声明的 ~1.2.9 范围内，不是硬降级。
+# 等 1.2.12 满 24 小时（2026-10-01T14:43Z 之后）就可以删掉这两行。
+overrides:
+  rolldown: 1.2.11
+  source-map-js: 1.2.1
