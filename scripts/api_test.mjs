@@ -126,6 +126,8 @@ class Client {
   constructor(base) {
     this.base = base;
     this.token = null;
+    /** 登录时服务端下发的媒体 cookie 原值（`mr_media=...`）。 */
+    this.mediaCookie = null;
   }
 
   /** 返回 [status, headers(小写键), body(Uint8Array)] —— 对齐原 Python 的三元组。 */
@@ -147,6 +149,28 @@ class Client {
     const buf = new Uint8Array(await resp.arrayBuffer());
     // axum / hyper 发出的头名本来就是小写，这里统一一遍纯属自保
     // （原 Python 版因为 http.client 保留原样，栽过一次假失败）。
+    const hd = {};
+    for (const [k, v] of resp.headers) hd[k.toLowerCase()] = v;
+    // 登录会下发媒体 cookie（<audio src> 带不了请求头，只能靠它）。顺手记下来。
+    const sc = hd['set-cookie'];
+    if (sc && sc.includes('mr_media=')) this.mediaCookie = sc.split(';')[0];
+    return [resp.status, hd, buf];
+  }
+
+  /**
+   * **模拟 `<audio src>` / `<img src>`**：浏览器自发的裸 GET，**没有 Authorization 头**。
+   * `withCookie` 控制带不带那个媒体 cookie —— 两种都要测：
+   * 带 = 应当放行；不带 = 应当 401。
+   */
+  async media(method, p, { withCookie = true, headers = null } = {}) {
+    const h = { ...(headers ?? {}) };
+    if (withCookie && this.mediaCookie) h.Cookie = this.mediaCookie;
+    const resp = await fetch(this.base + p, {
+      method,
+      headers: h,
+      signal: AbortSignal.timeout(30000),
+    });
+    const buf = new Uint8Array(await resp.arrayBuffer());
     const hd = {};
     for (const [k, v] of resp.headers) hd[k.toLowerCase()] = v;
     return [resp.status, hd, buf];
@@ -382,13 +406,20 @@ async function main() {
     });
     check('库非空后再注册 → 403（引导已完成）', st, 403);
 
-    [st, , body] = await c.json('POST', '/api/auth/login', {
+    let loginHd;
+    [st, loginHd, body] = await c.json('POST', '/api/auth/login', {
       username: 'alice',
       password: 'password123',
     });
     check('登录 → 200', st, 200);
     c.token = body?.token ?? '';
     checkTrue('登录返回非空 token', c.token.length > 20, `token 太短: ${brief(c.token)}`);
+    // <audio src> / <img src> 带不了 Authorization 头，媒体端点只能靠这个 cookie
+    const sc = loginHd['set-cookie'] ?? '';
+    checkTrue('登录下发媒体 cookie mr_media', sc.startsWith('mr_media='), brief(sc));
+    for (const attr of ['HttpOnly', 'SameSite=Lax', 'Path=/api']) {
+      checkTrue(`媒体 cookie 带 ${attr}`, sc.includes(attr), brief(sc));
+    }
 
     // 建号改由管理员发起
     [st, , body] = await c.json('POST', '/api/admin/users', {
@@ -496,6 +527,18 @@ async function main() {
     [st, , body] = await c.json('POST', '/api/scrape', { song_ids: [] });
     check('空 song_ids → 400', st, 400);
 
+    // ── 登出：清掉媒体 cookie；且**不要求令牌**（过期后更需要能登出）──
+    {
+      const anon = new Client(base);
+      const [logoutSt, logoutHd] = await anon.req('POST', '/api/auth/logout');
+      check('登出（无令牌）→ 200', logoutSt, 200);
+      checkTrue(
+        '登出清媒体 cookie（Max-Age=0）',
+        String(logoutHd['set-cookie'] ?? '').includes('Max-Age=0'),
+        brief(logoutHd['set-cookie']),
+      );
+    }
+
     // ───────────────────────── 曲库接口 ─────────────────────────
     section('3. 曲库接口（S16）');
     [st, , body] = await c.json('GET', '/api/library');
@@ -552,6 +595,17 @@ async function main() {
     [st, hd] = await c.req('GET', `/api/stream/${firstId}`, null, { Range: `bytes=${fullLen}-` });
     check('越界 Range → 416', st, 416);
     check('416 带 Content-Range: bytes */len', hd['content-range'] ?? null, `bytes */${fullLen}`);
+
+    // ── 媒体端点的 cookie 通道（<audio>/<img> 的真实行为）──
+    let mst;
+    [mst] = await c.media('GET', `/api/stream/${firstId}`);
+    check('裸 GET + cookie（模拟 <audio>）→ 200', mst, 200);
+    [mst] = await c.media('GET', `/api/stream/${firstId}`, { withCookie: false });
+    check('裸 GET 不带 cookie → 401', mst, 401);
+    [mst] = await c.media('GET', `/api/songs/${firstId}/cover`);
+    check('封面同样认 cookie（模拟 <img>）', mst, 200);
+    [mst] = await c.media('GET', '/api/library');
+    check('⭐ 其余 API 不认 cookie（否则等于开 CSRF）→ 401', mst, 401);
 
     [st] = await c.req('GET', `/api/stream/${firstId}`, null, { Range: 'bytes=0-1,3-4' });
     check('多段 Range → 416', st, 416);

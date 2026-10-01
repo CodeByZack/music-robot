@@ -28,33 +28,17 @@ export type { User };
 /**
  * 把后端媒体路径解析成 `<audio>` / `<img>` 能直接用的 URL。
  *
- * ⚠️ **这是一个绕法，根因在后端。** `/api/stream/{id}` 与 `/api/songs/{id}/cover`
- * 都在 `require_auth` 后面，但 `<audio src>` / `<img src>` 发的是**裸 GET，
- * 带不了 `Authorization` 头**（实测：裸 GET → 401，带令牌 → 200）。
+ * **现在就是原样返回** —— 这里曾经有一段「带令牌 fetch 成 blob 再喂给标签」的绕法，
+ * 因为 `/api/stream` 与 `/api/songs/{id}/cover` 当初在 `require_auth` 后面，
+ * 而 `<audio src>` / `<img src>` 发的是浏览器自发的裸 GET，带不了 `Authorization` 头。
  *
- * 所以先带令牌 fetch 成 blob，再把 blob URL 交给标签。代价：
- * - **整个文件下完才开始播**，没有真正的流式 Range（LAN 上 9MB ≈ 0.2s，40MB FLAC ≈ 1s）
- * - blob 占内存
+ * 后端已改为：媒体端点走独立中间件 `require_auth_media`，除了请求头还接受登录时
+ * 下发的 **HttpOnly cookie**（浏览器自动携带）。于是绕法可以删掉，
+ * 恢复了真正的流式 Range 与 seek —— 不再「整个文件下完才播」。
  *
- * 正确的修法是后端给**媒体类端点**（stream / cover）另开一条鉴权通道：
- * ① 登录时下发一个 `HttpOnly; SameSite=Lax; Path=/api` 的 cookie，媒体端点认 cookie；
- * ② 或者发短时效的签名 URL（`?t=<ticket>`）。
- * 两条都比把 JWT 放进查询串好 —— 查询串会进 nginx 与反代的访问日志。
- *
- * 后端改完，**把这里换成 `async (p) => p` 即可**，其余代码一行不用动。
+ * 保留这一层（而不是直接拼 URL）是因为它是宿主接缝：
+ * 将来 mobile 端在这里换成别的东西时，上层不用动。
  */
-let lastObjectUrl: string | null = null;
-
 export async function resolveMediaUrl(path: string): Promise<string> {
-  const res = await fetch(path, {
-    headers: tokens.get() ? { Authorization: `Bearer ${tokens.get()}` } : {},
-  });
-  if (!res.ok) throw new Error(`媒体请求失败：HTTP ${res.status}`);
-
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  // 一次只播一首，所以只保留最后一个 blob URL；旧的立刻回收，否则每换一首漏一份内存
-  if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
-  lastObjectUrl = url;
-  return url;
+  return path;
 }

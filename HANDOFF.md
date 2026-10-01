@@ -29,10 +29,10 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **500 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **508 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **125 passed / 0 failed** |
-| 合计 | **625 passed / 0 failed / 1 ignored** |
-| 端到端 API 脚本 | `node scripts/api_test.mjs` → **140 通过 / 0 失败** |
+| 合计 | **633 passed / 0 failed / 1 ignored** |
+| 端到端 API 脚本 | `node scripts/api_test.mjs` → **150 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
@@ -189,7 +189,7 @@ music-robot/
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
 ├── .dsh/skills/         # **项目级 agent skill**（DSH 扫这一层，`<名>/SKILL.md`，不递归）
 │                       # 24 个 Expo 官方 skill（expo-*/eas-*），来源与更新方式见 .dsh/README.md
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，140 项；非交互，给回归用）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，150 项；非交互，给回归用）
 ├── scripts/api_cli.mjs  # 交互式 API 客户端（方向键菜单，连**已在跑**的服务；只用 node:readline，零依赖）
 │                       # 曲库菜单里有：扫描入库 / 刮削 / 重刮失败项 / 重刮单曲
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
@@ -197,11 +197,11 @@ music-robot/
 └── HANDOFF.md          # ← 本文件（**仓库里唯一的文档**）
 ```
 
-### 全部 HTTP 路由（**30 条路径 / 38 个操作**，与 `src/server/routes/mod.rs` 一一对应）
+### 全部 HTTP 路由（**31 条路径 / 39 个操作**，与 `src/server/routes/mod.rs` 一一对应）
 
 | 分组 | 路由 |
 |---|---|
-| 公开 | `GET /healthz` · `POST /api/auth/login` |
+| 公开 | `GET /healthz` · `POST /api/auth/login` · `POST /api/auth/logout`（不要求令牌：令牌过期后更需要能登出清 cookie）|
 | 引导 | `POST /api/auth/register` —— **仅库空时可用**（初始化出首个 admin），之后一律 403 |
 | 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号，注册关闭后唯一入口）· `GET /api/admin/ping`（admin 占位） |
 | 曲库 | `GET /api/library` · `GET /api/songs/{id}` · `GET /api/albums/{id}` · `GET /api/artists/{name}` · `GET /api/search` |
@@ -268,7 +268,7 @@ pub trait CommandIO { fn log(&self, m: &str); fn error(&self, m: &str); }
 
 AppState / 统一 ApiError 形状 / build_router / 优雅关闭 · JWT（HS256，拒绝 alg:none）+
 argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
-后台长任务（单例锁，并发触发恰好 1 个成功、其余 409）· 30 条路径（见 §2）·
+后台长任务（单例锁，并发触发恰好 1 个成功、其余 409）· 31 条路径（见 §2）·
 `scripts/api_test.mjs` 端到端覆盖。
 
 ### ❌ 未完成
@@ -281,6 +281,40 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 | **provider（下载）插件 kind** | ❌ 未实现 —— 见下面「两个已知缺口」 |
 | `config.ts` 移植 | **用户明确说暂时不做**（配置改由 `src/config.rs` 承担） |
 | TS 侧同步修 bug | **TS 要抛弃，不用管了**（用户已决定） |
+
+### 媒体端点鉴权：为什么是 cookie 而不是请求头 ⭐
+
+`/api/stream/{id}` 与 `/api/songs/{id}/cover` **不挂在 `require_auth` 上**，
+而是单独挂 `require_auth_media`（`src/server/auth.rs`）。原因是数据最终要交给
+`<audio src>` / `<img src>`，而它们发的是**浏览器自发的裸 GET，带不了 `Authorization` 头**：
+
+```
+裸 GET /api/stream/6      → 401     ← 这就是 <audio> 的行为
+带令牌 /api/stream/6      → 200
+裸 GET /api/songs/6/cover → 401     ← <img> 同理
+```
+
+`require_auth_media` **先试请求头，再试登录时下发的 cookie**：
+
+```
+Set-Cookie: mr_media=<jwt>; HttpOnly; SameSite=Lax; Path=/api; Max-Age=<token_expiry>
+```
+
+三个属性各有用途，**别删任何一个**：`HttpOnly`（JS 读不到 → XSS 偷不走）、
+`SameSite=Lax`（跨站请求不带 → 挡 CSRF）、`Path=/api`（缩小暴露面）。
+
+🔴 **安全支点：cookie 只在媒体子路由上被接受，其余 API 仍然只认请求头。**
+浏览器会自动携带 cookie，若写操作也认它，等于把 CSRF 面全打开。
+`require_auth_media` 里还显式挡了非 GET（防将来有人往这个子路由上加 POST）。
+这两条都有测试钉着，且**做过变异验证**：把通用 `require_auth` 改成也认 cookie，
+`cookie_is_not_a_general_credential` 立刻变红。
+
+配套：`POST /api/auth/logout` 清 cookie。**它不要求令牌** —— 令牌过期后用户更需要能登出，
+而 cookie 是 HttpOnly 的，JS 删不掉。JWT 无状态、服务端没有吊销名单，所以
+「登出」= 客户端丢令牌 + 清 cookie；已签发的令牌到期前仍有效（JWT 的固有性质）。
+
+⚠️ 别把这两条挪回 `protected`：那样媒体就只能在 JS `fetch` 里用，`<audio>`/`<img>` 全失效。
+⚠️ localStorage 里仍然存着同一个 JWT 供 `fetch` 用（cookie 是 HttpOnly，JS 读不到）。
 
 ### ⚠️ 两个已知缺口（别误当成 bug）
 
@@ -848,7 +882,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 | `tests/plugin_e2e.rs` | 3 | **真拉起 `node` / `python3` / `sh`** 跑插件协议 |
 | **合计** | **124** | |
 
-另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**140 通过 / 0 失败**，
+另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**150 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
 它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 

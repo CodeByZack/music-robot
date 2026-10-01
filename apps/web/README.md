@@ -42,27 +42,15 @@ pnpm --filter @music-robot/web dev             # http://127.0.0.1:5173
 
 **还没做**：专辑/歌手/歌单/收藏/设置页（占位）、正在播放大页、shadcn 组件。
 
-## ⚠️ 一个必须知道的后端问题：媒体端点没法带令牌
+## 媒体鉴权：cookie 通道（后端已解决）
 
-`/api/stream/{id}` 和 `/api/songs/{id}/cover` 都在 `require_auth` 后面，
-但 **`<audio src>` / `<img src>` 发的是裸 GET，带不了 `Authorization` 头**。实测：
+`/api/stream/{id}` 和 `/api/songs/{id}/cover` 曾在 `require_auth` 后面，
+而 `<audio src>` / `<img src>` 发的是浏览器自发的裸 GET，**带不了 `Authorization` 头**
+—— 于是音频和封面全都 401。
 
-    裸 GET /api/stream/6      → 401
-    带令牌 /api/stream/6      → 200
-    裸 GET /api/songs/6/cover → 401
+**后端已改**：这两条单独挂 `require_auth_media`，除请求头外还接受登录时下发的
+`HttpOnly; SameSite=Lax; Path=/api` cookie（浏览器自动携带）。
+`lib/client.ts` 的 `resolveMediaUrl` 因此**简化成了原样返回**，
+恢复了真正的流式 Range 与 seek（不再「整个文件下完才播」）。
 
-现在的前端绕法（`lib/client.ts` 的 `resolveMediaUrl`）：带令牌 fetch 成 blob 再喂给 `<audio>`。
-代价是**整个文件下完才开始播**、没有真正的流式 Range、blob 占内存。
-
-**正确的修法是后端给媒体类端点另开一条鉴权通道**（二选一）：
-① 登录时下发 `HttpOnly; SameSite=Lax; Path=/api` 的 cookie，媒体端点认 cookie；
-② 发短时效的签名 URL（`?t=<ticket>`）。
-
-别把 JWT 直接放进查询串 —— 它会进 nginx 与反代的访问日志。
-后端改完，把 `resolveMediaUrl` 换成 `async (p) => p` 即可，其余代码不用动。
-
-⚠️ **曲库列表没有「专辑」列**：`/api/library` 只返回 `album_id`，**不返回专辑名**。
-要显示得二选一 —— 再拉一次 `/api/albums` 在客户端 join，或改后端加上。
-
-⚠️ 表格暂时**用原生 `<table>`**，没用 `@tanstack/react-table`（已装 v9）。
-v9 的 API 还没核实过，不照记忆写。加排序/列显示开关时再引入。
+设计细节与安全支点见 `HANDOFF.md` §2「媒体端点鉴权」。

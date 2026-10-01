@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use rusqlite::TransactionBehavior;
@@ -312,13 +312,36 @@ pub async fn login(
         .saturating_mul(3600)
         .min(i64::MAX as u64) as i64;
 
-    Ok(Json(json!({
+    // 同时下发媒体 cookie：`<audio src>` / `<img src>` 是浏览器自发的裸 GET，
+    // **带不了 Authorization 头**，只能靠浏览器自动挂上去的 cookie。
+    // 详见 `crate::server::auth::require_auth_media`。
+    let cookie = crate::server::auth::media_cookie(&token, expires_in.max(0) as u64);
+    let mut response = Json(json!({
         "token": token,
         "token_type": "Bearer",
         "expires_in": expires_in,
         "user": user_json(&user),
     }))
-    .into_response())
+    .into_response();
+    if let Ok(value) = cookie.parse() {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    Ok(response)
+}
+
+/// POST /api/auth/logout —— 清掉媒体 cookie。
+///
+/// **为什么不要求登录**：令牌过期后用户更需要能登出（不然 cookie 会赖着不走，
+/// 而它是 HttpOnly 的，JS 删不掉）。这个接口不读任何用户数据，也不需要鉴权。
+///
+/// JWT 是无状态的，服务端没有吊销名单，所以「登出」= 客户端丢掉令牌 + 清 cookie。
+/// 已经签发出去的令牌在过期前仍然有效 —— 这是 JWT 的固有性质，不是这里漏了。
+pub async fn logout() -> Response {
+    let mut response = Json(json!({ "ok": true })).into_response();
+    if let Ok(value) = crate::server::auth::clear_media_cookie().parse() {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
 }
 
 /// GET /api/auth/me —— 当前登录用户。

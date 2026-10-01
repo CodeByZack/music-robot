@@ -442,6 +442,87 @@ pub async fn require_auth(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 媒体端点鉴权：<audio> / <img> 带不了请求头，所以另开一条 cookie 通道
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 媒体 cookie 名。
+///
+/// **为什么需要它**：`/api/stream/{id}` 与 `/api/songs/{id}/cover` 的数据要交给
+/// `<audio src>` / `<img src>`，而这两类标签发的是**浏览器自发的裸 GET，带不了
+/// `Authorization` 头**（实测裸 GET → 401）。cookie 是浏览器**自动**挂上去的，
+/// 所以只有它能覆盖这一类请求。
+pub const MEDIA_COOKIE: &str = "mr_media";
+
+/// 登录时下发的 Set-Cookie。
+///
+/// 三个属性各有用途，别删：
+/// - `HttpOnly`：JS 读不到 → XSS 偷不走它
+/// - `SameSite=Lax`：跨站发起的请求不带它 → 挡 CSRF
+/// - `Path=/api`：缩小暴露面，别的路径上根本不发
+///
+/// 值就是那个 JWT 本身（base64url + 点，天然是 cookie 安全字符，不用再编码）。
+pub fn media_cookie(token: &str, max_age_secs: u64) -> String {
+    format!(
+        "{MEDIA_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/api; Max-Age={max_age_secs}"
+    )
+}
+
+/// 登出时清掉它。Max-Age=0 是删除 cookie 的标准写法。
+pub fn clear_media_cookie() -> String {
+    format!("{MEDIA_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api; Max-Age=0")
+}
+
+/// 从 `Cookie` 头里取媒体令牌。手写解析而不引 cookie crate —— 格式简单（`a=b; c=d`），
+/// 为它多一个依赖不划算。
+fn media_cookie_token(headers: &HeaderMap) -> Option<&str> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name.trim() == MEDIA_COOKIE).then(|| value.trim())
+    })
+}
+
+/// 媒体端点的鉴权：**先试 `Authorization` 头，再试 cookie**。
+///
+/// ⚠️ **cookie 只在 GET 上被接受**，这是整个方案的安全支点：
+/// 浏览器会自动带 cookie，若写操作也认它，就等于把 CSRF 面打开了。
+/// 这里显式挡一道，而不是指望「媒体路由恰好只有 GET」——
+/// 将来谁往这个子路由上加个 POST，会被这里拦住。
+pub async fn require_auth_media(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let from_header = bearer_token(request.headers()).ok().map(str::to_string);
+    let token = match from_header {
+        Some(t) => t,
+        None => {
+            if request.method() != axum::http::Method::GET {
+                return ApiError::unauthorized(
+                    "媒体端点用 cookie 鉴权时只允许 GET；写操作请带 Authorization 头",
+                )
+                .into_response();
+            }
+            match media_cookie_token(request.headers()) {
+                Some(t) => t.to_string(),
+                None => {
+                    // 文案与 require_auth 保持一致：不区分「没带」和「带错了」
+                    return ApiError::unauthorized("未认证：请先登录并携带 Bearer 令牌")
+                        .into_response();
+                }
+            }
+        }
+    };
+    match authenticate(&state, &token).await {
+        Ok(user) => {
+            request.extensions_mut().insert(AuthUser(user));
+            next.run(request).await
+        }
+        Err(e) => e.into_response(),
+    }
+}
+
 /// 提取器：要求请求已通过 `require_auth`（扩展里有 `AuthUser`）。
 ///
 /// 没挂中间件的路由上直接用它一定 401 —— 这是有意的：公开路由不该顺手拿到用户。

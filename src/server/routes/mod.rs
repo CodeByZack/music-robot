@@ -121,14 +121,6 @@ pub fn build_router(state: AppState) -> AppRouter {
         .route("/api/scrape", post(jobs::start_scrape))
         .route("/api/scrape/{batch_id}", get(jobs::scrape_status))
         .route("/api/jobs", get(jobs::list))
-        // ── S18 流式播放 ──────────────────────────────────────────────────
-        // 画布：GET /api/stream/:id，支持 Range。放在受保护组里，未登录一律 401；
-        // 路径参数用 axum 0.8 的花括号写法（:id 在 matchit 0.8 下会 panic）。
-        .route("/api/stream/{id}", get(stream::stream))
-        // ── S20 封面 ──────────────────────────────────────────────────────
-        // 画布：GET /api/songs/:id/cover。放在受保护组里，未登录一律 401；
-        // 路径参数用 axum 0.8 的花括号写法（:id 在 matchit 0.8 下会 panic）。
-        .route("/api/songs/{id}/cover", get(cover::cover))
         // ── S22 播放列表 ──────────────────────────────────────────────────
         // 画布：GET/POST /api/playlists、GET/PUT/DELETE /api/playlists/:id、
         // POST/DELETE/PUT /api/playlists/:id/items[/:song_id]。8 条一律放在受保护
@@ -197,12 +189,30 @@ pub fn build_router(state: AppState) -> AppRouter {
             super::auth::require_auth,
         ));
 
+    // ── 媒体子路由：鉴权与其余 API 不同 ──────────────────────────────────
+    //
+    // 这两条的数据要交给 `<audio src>` / `<img src>`，而它们发的是**浏览器自发的
+    // 裸 GET，带不了 `Authorization` 头**。所以单独挂 `require_auth_media`：
+    // 先试请求头，再试登录时下发的 HttpOnly cookie。
+    //
+    // ⚠️ 别把这两条挪回 `protected`：那样媒体就只能在 JS fetch 里用，标签全失效。
+    let media = Router::new()
+        .route("/api/stream/{id}", get(stream::stream))
+        .route("/api/songs/{id}/cover", get(cover::cover))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            super::auth::require_auth_media,
+        ));
+
     Router::new()
         .route("/healthz", get(healthz))
         // 公开的认证路由：注册 / 登录不要求携带令牌。
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
+        // 登出也不要求令牌：令牌过期后更需要能登出（cookie 是 HttpOnly，JS 删不掉）
+        .route("/api/auth/logout", post(auth::logout))
         .merge(protected)
+        .merge(media)
         // 未知路径与不支持的方法都回统一错误形状，而不是 axum 默认的空 body。
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
