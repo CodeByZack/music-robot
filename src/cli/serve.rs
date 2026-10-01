@@ -116,6 +116,18 @@ pub fn run_serve(argv: &[&str], io: &dyn CommandIO) -> Result<i32, UsageError> {
         ),
     );
 
+    // 库根不存在**不算错**（外接盘没挂上时还得能启动），但必须吼一声。
+    // 否则用户看到的是「scan 完成：遍历 0」、库永远空的，而日志里一个字都没有 ——
+    // 2026-10-02 实测：env.example 原来写「不存在会直接启动失败」，其实根本不会。
+    for root in &cfg.storage.library_roots {
+        if !std::path::Path::new(root).is_dir() {
+            crate::serverlog::warn(
+                "server",
+                format!("曲库根不存在或不是目录，扫描会整根跳过（库会是空的）：{root}"),
+            );
+        }
+    }
+
     // ── 3) 启动维护：清一次过期的转码缓存 ──
     // 只在这一刻清，**不是**每次转码都清、也没有定时任务：清理是尽力而为的磁盘治理，
     // 常驻期反复扫目录只会白耗 IO。删除判据（为什么不会误删用户文件）见

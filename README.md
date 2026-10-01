@@ -144,22 +144,60 @@ curl -s localhost:18099/healthz               # 顺带看插件加载情况
 | `MR_DATABASE_PATH` / `MR_CACHE_DIR` | 单独挪走数据库或缓存（优先于 `MR_DATA_DIR`） |
 | `MR_FFMPEG_PATH` | ffmpeg 可执行文件（走 PATH） |
 | `MR_PLUGINS_DIR` / `MR_SANDBOX` / `MR_PLUGIN_USER` | 插件目录与沙箱（⚠️ 后两者目前**能读能校验，但尚未真正接进沙箱行为**，沙箱用的是固定默认值） |
-
-完整带注释的模板见 [`env.example`](env.example)：`cp env.example env.local`，改完 `source env.local` 再启动。
 | `MR_LOG_LEVEL` | 日志级别 `error`/`warn`/`info`/`debug`/`trace`（写错启动即报错）|
+
+完整带注释的模板见 [`env.example`](env.example)。
+
+### 起前端（PC 页面）
+
+后端跑起来**只**提供 API，界面在 `apps/web`（Vite + React）。两个进程，两个端口：
+
+```bash
+# ① 后端 —— 必须在 8080，前端 dev 代理写死了这个地址
+cp env.example .env          # serve 会自动读当前目录的 .env，不用 source
+vi .env                      # 至少改 MR_JWT_SECRET 和 MR_LIBRARY_ROOTS
+./target/release/music-robot serve --host 127.0.0.1 --port 8080
+
+# ② 前端（另开一个终端，仓库根）
+pnpm install                 # 必须用 pnpm：workspace 里用的是 workspace:* 协议，npm 解析不了
+pnpm --filter @music-robot/web dev --host 127.0.0.1
+# → http://127.0.0.1:5173
+```
+
+**第一次登录前要先建号**：`POST /api/auth/register` **只在库空时可用**，建出来的第一个用户就是 admin。
+
+```bash
+curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json' \
+  -d '{"username":"me","password":"至少八位"}'
+# → 201 {"user":{"id":1,"role":"admin",...}}
+```
+
+（之后再加人走 `POST /api/admin/users`，带 admin 的 token。登录后到**设置页点「重新扫描」**才会入库。）
+
+手边没有音乐也能看界面：把 `MR_LIBRARY_ROOTS` 指到仓库自带的 `fixtures/`（9 个真音频文件，扫进去 8 首），扫一下就有内容了。
+
+**踩坑速查**
+
+| 现象 | 原因 |
+|---|---|
+| 注册返回 **500 `AUTH_NOT_CONFIGURED`** | 没设 `MR_JWT_SECRET`。服务照常启动、`/healthz` 也 200，只有注册会挂 |
+| 扫描「完成：遍历 0」，库是空的 | `MR_LIBRARY_ROOTS` 指错了。**目录不存在不会启动失败**，启动日志里搜「曲库根不存在」 |
+| 前端 404 / 请求全挂 | 后端不在 **8080**（`apps/web/vite.config.ts` 的代理目标写死了；改那一行也行） |
+| `pnpm install` 报 `workspace:*` | 用了 npm/yarn。这个仓库只支持 pnpm |
+| `http://127.0.0.1:5173` 连不上但 `localhost:5173` 能开 | 没加 `--host`。Vite 默认只绑 `localhost`，这台机器上解析成了 `[::1]`，IPv4 就没监听 |
 
 ---
 
 ## HTTP API
 
-共 **29 条路径 / 37 个操作**，与 [`src/server/routes/mod.rs`](src/server/routes/mod.rs) 一一对应。除公开组外全部要求 `Authorization: Bearer <token>`。
+共 **33 条路径 / 41 个操作**，与 [`src/server/routes/mod.rs`](src/server/routes/mod.rs) 一一对应。除公开组外全部要求 `Authorization: Bearer <token>`。
 
 | 分组 | 路径 |
 |---|---|
 | 公开 | `GET /healthz` · `POST /api/auth/login` |
 | 引导 | `POST /api/auth/register` —— **仅库空时可用**（初始化出首个 admin），之后 403 |
 | 认证 | `GET /api/auth/me` · `POST /api/admin/users`（admin 建号）· `GET /api/admin/ping` |
-| 曲库 | `GET /api/library` · `/api/songs/{id}` · `/api/albums/{id}` · `/api/artists/{name}` · `/api/search` |
+| 曲库 | `GET /api/library` · `/api/songs/{id}` · `GET /api/albums` · `/api/albums/{id}` · `GET /api/artists` · `/api/artists/{name}` · `/api/search` |
 | 任务 | `POST\|GET /api/scan` · `GET /api/scan/{batch_id}` · `POST\|GET /api/scrape` · `GET /api/scrape/{batch_id}` · `GET /api/jobs` |
 | ↳ 刮削队列 | `POST /api/scrape` body 可选：不给 = pending 队列；`{"mode":"failed"}` = 重刮失败项；`{"song_ids":[1,2]}` = 只听点名的（**已 done 的也能重刮**） |
 | 音频 | `GET /api/stream/{id}`（Range · `?format=mp3` 转码）· `GET /api/songs/{id}/cover` |
