@@ -29,9 +29,9 @@
 | 项 | 值 |
 |---|---|
 | `cargo check --lib` | **0 警告** |
-| 库用例（`cargo test --lib`） | **499 passed / 0 failed / 1 ignored** |
+| 库用例（`cargo test --lib`） | **500 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **125 passed / 0 failed** |
-| 合计 | **624 passed / 0 failed / 1 ignored** |
+| 合计 | **625 passed / 0 failed / 1 ignored** |
 | 端到端 API 脚本 | `node scripts/api_test.mjs` → **140 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
@@ -630,6 +630,21 @@ CLI 外壳：read/write/blank/scan/doctor/wash + 事件流，120 用例；修 ID
   （改前快照必须在 `apply_tags_to_song` **之前**取）+ 歌词的 `FieldUpdate` 分支拼成；
   专辑比**名字**不比 id（id 变了名字没变 = 用户视角没改）。
   只列真的变了的字段，一个都没变就写「无字段变化」。
+* **插件收发的原始报文**（`target = plugin`，2026-10-01 加）—— 插件链路上唯一的原始证据：
+  * `INFO  启动插件进程 musicbrainz：node /path/plugins/musicbrainz.js（工作目录 /tmp/…）`
+    —— 起进程只发生一次（之后复用），放 info 就是为了随时能回答「到底用什么命令调的插件」。
+  * `DEBUG 调用插件 musicbrainz：{完整请求 JSON}`
+  * `DEBUG 插件 musicbrainz 返回：{完整响应 JSON}`
+    请求体含 `song{title,artist,album,duration_ms,file_path,…}` + `want` + `work_dir`；
+    响应体就是插件回的协议 JSON。**排查「插件为什么没命中」看这一对就够。**
+  * 收发放 **debug**：一次刮削按「曲目 × 插件数」产生成对的行，10k 首的库放 info 会把日志淹掉。
+    看它们要 `MR_LOG_LEVEL=debug`（或配置 `log.level = "debug"`）；info 下只有「启动插件进程」那行。
+  * 单行超 **2000 字符**截断并注明原长（`cap_line`，按**字符**不按字节 —— 中文不能被切出乱码）。
+    截断后不再是合法 JSON，日志用，没关系。
+* ⚠️ **插件自己的 stderr 是 `Stdio::null()`，被直接丢掉**（`pool.rs` 的 `spawn_worker`）。
+  这是刻意的：插件是不可信子进程，不能让它往服务端 stderr 里灌东西。所以插件内部的
+  诊断（如 `[musicbrainz] strict 查询零结果…`）**不会进日志**；要调插件就靠上面那对收发报文。
+  真需要时再改，但那时要连同「每行加前缀、限制单行长度」一起做，否则是不可信输入直灌日志。
 
 ### 7.6 服务端读写的唯一入口
 

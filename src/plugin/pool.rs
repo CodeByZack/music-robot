@@ -376,7 +376,8 @@ impl PoolGuard<'_> {
             None => return Err(PoolError::Crashed { code: None, signal: None }),
         };
         let timeout = self.pool.inner.cfg.task_timeout;
-        match exchange(&mut worker, req, timeout) {
+        let plugin = self.pool.inner.meta.name.clone();
+        match exchange(&mut worker, req, timeout, &plugin) {
             Ok(resp) => {
                 self.worker = Some(worker);
                 Ok(resp)
@@ -490,6 +491,17 @@ impl PoolInner {
             .map_err(|e| PoolError::Spawn(std::io::Error::other(e.to_string())))?;
 
         let mut child = cmd.spawn().map_err(PoolError::Spawn)?;
+        // 起进程只发生一次（之后复用），放 info：排查「到底用什么命令调的插件」看这一行。
+        // 逐次请求/响应体是 debug（量大、且可能很长），见 exchange。
+        crate::serverlog::info(
+            "plugin",
+            format!(
+                "启动插件进程 {}：{}（工作目录 {}）",
+                self.meta.name,
+                self.meta.command.join(" "),
+                work_dir.display()
+            ),
+        );
         let stdin = match child.stdin.take() {
             Some(s) => s,
             None => {
@@ -642,13 +654,36 @@ fn sanitize_name(name: &str) -> String {
 
 // ─────────────────────────── 一次请求/响应往返 ───────────────────────────
 
+/// 日志里一条协议行的长度上限。
+///
+/// 插件响应可能很大（歌词、封面路径列表、插件自己塞的调试信息），整条进日志会把文件
+/// 撑爆，而且没人看得下去。截断后**不再是合法 JSON**，这没关系 —— 它只是给人看的。
+const LOG_LINE_CAP: usize = 2000;
+
+/// 超长就截断并注明原长。
+fn cap_line(line: &str) -> String {
+    let total = line.chars().count();
+    if total <= LOG_LINE_CAP {
+        return line.to_string();
+    }
+    let head: String = line.chars().take(LOG_LINE_CAP).collect();
+    format!("{head}…（共 {total} 字符，已截断）")
+}
+
 /// 写一行 → 等一行。任何异常都会让调用方回收这个 worker。
+///
+/// 收发**都记 debug**（`target = plugin`）：这是插件链路上唯一的原始报文，
+/// 排查「插件为什么没命中 / 回了个什么」全靠它。放 debug 是因为一次刮削会按
+/// 曲目×插件数产生成对的行，10k 首的库放 info 会把日志淹掉。
+/// 要看：`MR_LOG_LEVEL=debug`（或配置文件 `log.level = "debug"`）。
 fn exchange(
     worker: &mut IdleWorker,
     req: &PluginRequest,
     timeout: Duration,
+    plugin: &str,
 ) -> Result<PluginResponse, PoolError> {
     let line = encode_request(req);
+    crate::serverlog::debug("plugin", format!("调用插件 {plugin}：{}", cap_line(&line)));
     if let Err(e) = write_line(&mut worker.stdin, &line) {
         let (code, signal) = exit_status(worker);
         if e.kind() == std::io::ErrorKind::BrokenPipe || code.is_some() || signal.is_some() {
@@ -660,6 +695,7 @@ fn exchange(
 
     match worker.events.recv_timeout(timeout) {
         Ok(ReadEvent::Line(text)) => {
+            crate::serverlog::debug("plugin", format!("插件 {plugin} 返回：{}", cap_line(&text)));
             if text.trim().is_empty() {
                 return Err(PoolError::Protocol("插件输出了空行".to_string()));
             }
@@ -1448,5 +1484,34 @@ done
         );
         let second = guard.call(&scrape_req("q2")).expect("第二次调用");
         assert_eq!(resp_source(&second).as_deref(), Some("nnp=1"));
+    }
+
+    // ─────────────────────────── 协议行日志 ───────────────────────────
+
+    /// `cap_line` 是插件请求/响应日志唯一的加工逻辑：
+    /// 短的原样返回（日志里要能直接当 JSON 看），长的截断并注明原长。
+    #[test]
+    fn cap_line_truncates_only_when_too_long() {
+        // 短行原样，一个字符都不动（含中文与转义）
+        let short = r#"{"action":"scrape","song":{"title":"老男孩"}}"#;
+        assert_eq!(cap_line(short), short);
+        assert_eq!(cap_line(""), "");
+
+        // 正好等于上限：不动
+        let exact = "a".repeat(LOG_LINE_CAP);
+        assert_eq!(cap_line(&exact), exact);
+
+        // 超一个字符就该截断
+        let over = "a".repeat(LOG_LINE_CAP + 1);
+        let capped = cap_line(&over);
+        assert!(capped.ends_with("（共 2001 字符，已截断）"), "要注明原长：{capped}");
+        assert!(capped.starts_with(&"a".repeat(LOG_LINE_CAP)));
+
+        // 按**字符**而不是字节截断：中文行不能被切成半个字符（会写出乱码）
+        let wide = "汉".repeat(LOG_LINE_CAP + 10);
+        let wide_capped = cap_line(&wide);
+        assert!(wide_capped.ends_with("（共 2010 字符，已截断）"));
+        assert!(wide_capped.starts_with(&"汉".repeat(LOG_LINE_CAP)));
+        assert_eq!(wide_capped.chars().filter(|c| *c == '汉').count(), LOG_LINE_CAP);
     }
 }
