@@ -188,13 +188,70 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
 .kv div{font-size:12.5px;color:var(--fg-3)}
 .kv b{display:block;font-size:20px;color:var(--fg);font-weight:500;line-height:26px}
 
-/* ── 正在播放 ── */
-.now{display:flex;gap:32px;align-items:flex-start;padding-top:8px}
-.now .big{width:300px;height:300px;border-radius:var(--r-xl);background:var(--surface);
-  display:flex;align-items:center;justify-content:center;color:var(--fg-4);font-size:64px;flex:none}
-.lyr{flex:1;min-width:0}
-.lyr p{margin:0 0 3px;color:var(--fg-4);font-size:15px;line-height:26px}
+/* ── 播放页（主页面）── */
+#p-now{position:relative;padding:0;overflow:hidden}
+.playbg{position:absolute;inset:-120px;z-index:0;
+  background:radial-gradient(60% 55% at 26% 34%,#7b4bd0 0%,transparent 62%),
+             radial-gradient(50% 50% at 62% 18%,#c934e1 0%,transparent 60%),
+             radial-gradient(45% 45% at 40% 70%,#ef6b3c 0%,transparent 62%);
+  filter:blur(110px) saturate(1.5);opacity:.5}
+.playbg::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(20,18,27,.42) 0%,rgba(20,18,27,.86) 58%,#14121b 100%)}
+.playwrap{position:relative;z-index:1;display:flex;gap:44px;padding:28px 38px 34px;
+  height:100%;min-height:0;align-items:center}
+.pcol{flex:0 0 330px;display:flex;flex-direction:column}
+.bigcover{width:330px;height:330px;border-radius:var(--r-xl);background:rgba(255,255,255,.07);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+  color:var(--fg-4);font-size:74px;box-shadow:var(--sh-3);flex:none}
+.bigt{margin:26px 0 2px;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.2px}
+.biga{font-size:15px;color:var(--fg-2)}
+.bigmeta{font-size:12.5px;color:var(--fg-3);margin-top:5px}
+.bigprog{margin:26px 0 10px}
+.bigbar{height:4px;border-radius:99px;background:rgba(255,255,255,.16);position:relative;cursor:pointer}
+.bigbar>i{position:absolute;inset:0 100% 0 0;background:var(--accent);border-radius:99px}
+.bigbar>b{position:absolute;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 4px #0008;left:0}
+.bigtm{display:flex;justify-content:space-between;font-size:11px;color:var(--fg-3);
+  font-variant-numeric:tabular-nums;margin-top:9px}
+.transport{display:flex;align-items:center;justify-content:center;gap:8px;margin:6px 0 0}
+.tb{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:var(--fg-2);transition:background var(--t),color var(--t)}
+.tb:hover{background:var(--surface-hover);color:var(--fg)}
+.tb.on{color:var(--accent)}
+.tplay{width:56px;height:56px;border-radius:50%;background:var(--fg);color:#14121b;
+  display:flex;align-items:center;justify-content:center;margin:0 10px;transition:transform var(--t)}
+.tplay:hover{transform:scale(1.06)}
+.bigvol{display:flex;align-items:center;gap:10px;margin-top:22px;color:var(--fg-3)}
+.bigvol .vol{width:auto;flex:1;height:4px}
+
+.pcol2{flex:1;min-width:0;display:flex;flex-direction:column;max-height:100%;align-self:stretch;padding-top:6px}
+.tabs{display:flex;gap:4px;flex:none;margin-bottom:18px}
+.tabs button{padding:7px 14px;border-radius:var(--r-sm);font-size:13px;color:var(--fg-3);
+  transition:background var(--t),color var(--t)}
+.tabs button:hover{color:var(--fg)}
+.tabs button.on{background:var(--surface);color:var(--fg)}
+.lyr{flex:1;overflow:auto;min-height:0;padding-right:8px}
+.lyr p{margin:0 0 4px;color:var(--fg-4);font-size:15px;line-height:30px;transition:color var(--t)}
 .lyr p.on{color:var(--fg);font-weight:500}
+.qlist{flex:1;overflow:auto;min-height:0}
+.qrow{display:flex;align-items:center;gap:11px;height:44px;padding:0 10px;border-radius:var(--r-md);
+  cursor:pointer;transition:background var(--t)}
+.qrow:hover{background:var(--surface)}
+.qrow.on{background:var(--accent-soft)}
+.qrow.on .tt{color:var(--accent)}
+
+/* ── 设置页 ── */
+.setnav{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap}
+.setnav button{padding:7px 14px;border-radius:var(--r-sm);font-size:13px;color:var(--fg-3);
+  transition:background var(--t),color var(--t)}
+.setnav button.on{background:var(--surface);color:var(--fg)}
+.row2{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px solid var(--line-weak)}
+.row2:last-child{border-bottom:0}
+.row2 .lbl{flex:1;min-width:0}
+.row2 .lbl b{display:block;font-size:13.5px;font-weight:400}
+.row2 .lbl span{font-size:12px;color:var(--fg-3)}
+.pathbox{font-size:12px;color:var(--fg-3);background:rgba(0,0,0,.28);border-radius:var(--r-sm);
+  padding:7px 11px;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em}
 </style>
 <body>
 <noscript><div style="position:fixed;inset:0;z-index:99;background:#14121b;color:#f2f3f4;padding:40px;font:14px/22px system-ui">
@@ -238,14 +295,14 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
     </div>
     <span style="flex:1"></span>
     <button class="icob" title="排序"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v10M4 13l-2-2M4 13l2-2M12 13V3M12 3l-2 2M12 3l2 2"/></svg></button>
-    <button class="icob" onclick="go('tasks')" title="任务"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h10M3 8h10M3 11h6"/></svg></button>
+    <button class="icob" onclick="go('settings')" title="设置"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h10M3 8h10M3 11h6"/></svg></button>
     <div class="me" onclick="showLogin()" title="演示：点这里看登录页">z</div>
   </header>
 
   <!-- 首页 -->
   <section class="page" id="p-home">
     <div class="phead"><div><h1>晚上好</h1><div class="sub">2657 首歌 · 1125 位歌手 · 上次同步 2 小时前</div></div>
-      <div class="cta"><button class="pill" onclick="go('tasks')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9L13 8z"/></svg>继续听</button></div>
+      <div class="cta"><button class="pill" onclick="go('now')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9L13 8z"/></svg>继续听</button></div>
     </div>
     <div class="tiles">
       <div class="tile hero" onclick="go('now')"><span class="ic"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="1.7" fill="currentColor" stroke="none"/><path d="M4.6 11.4a4.8 4.8 0 0 1 0-6.8M11.4 4.6a4.8 4.8 0 0 1 0 6.8"/></svg></span><b>漫游</b></div>
@@ -303,13 +360,13 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
     <table><tbody id="favSongs"></tbody></table>
   </section>
 
-  <!-- 任务（music-robot 特有） -->
-  <section class="page" id="p-tasks" hidden>
-    <div class="phead"><div><h1>任务</h1><div class="sub">扫描入库 · 刮削补标签</div></div></div>
+  <!-- 设置（扫描 / 刮削都收在这里） -->
+  <section class="page" id="p-settings" hidden>
+    <div class="phead"><div><h1>设置</h1><div class="sub">当前用户 zackdk · 管理员</div></div></div>
 
     <div class="panel">
       <div class="plabel">刮削</div>
-      <div class="kv" style="margin-bottom:14px">
+      <div class="kv" style="margin-bottom:16px">
         <div><b>275</b>待刮削</div><div><b>128</b>已命中</div><div><b>41</b>未命中</div><div><b>2657</b>总曲目</div>
       </div>
       <label class="sw" id="applySw" onclick="toggleApply()">
@@ -325,35 +382,91 @@ footer{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;
         <button class="pill" onclick="startJob()" id="jobBtn">开始刮削</button>
         <button class="ghost">只刮未命中的 41 首</button>
       </div>
-    </div>
-
-    <div class="panel" id="jobPanel" hidden>
-      <div class="plabel">进行中</div>
-      <div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:15px">刮削中</b><span class="muted" id="jobStat">已处理 3 / 8</span></div>
-      <div class="bar"><i id="jobBar" style="width:37%"></i></div>
-      <div class="muted">当前：牵丝戏 — 银临 / Aki阿杰</div>
+      <div id="jobPanel" hidden style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:14px">刮削中</b>
+          <span class="muted" id="jobStat">已处理 3 / 8</span></div>
+        <div class="bar"><i id="jobBar" style="width:37%"></i></div>
+        <div class="muted">当前：牵丝戏 — 银临 / Aki阿杰</div>
+      </div>
     </div>
 
     <div class="panel">
-      <div class="plabel">扫描</div>
-      <div class="muted" style="margin-bottom:14px">上次扫描 2 小时前 · 遍历 2657 个文件 · 新增 12 · 更新 3</div>
-      <button class="ghost">重新扫描曲库</button>
+      <div class="plabel">曲库</div>
+      <div class="row2">
+        <div class="lbl"><b>曲库根目录</b><span>启动时必须存在，否则服务起不来</span></div>
+        <span class="pathbox">/vol1/music</span>
+      </div>
+      <div class="row2">
+        <div class="lbl"><b>上次扫描</b><span>2 小时前 · 遍历 2657 个文件 · 新增 12 · 更新 3</span></div>
+        <button class="ghost" onclick="startScan()">重新扫描</button>
+      </div>
+      <div class="row2" id="scanRow" hidden>
+        <div class="lbl"><b>扫描中…</b><span id="scanStat">遍历 0 个文件</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="plabel">播放</div>
+      <div class="row2"><div class="lbl"><b>断点续播</b><span>记住每首歌上次听到的位置</span></div>
+        <span class="sw on" onclick="flip(this)"><span class="tg"></span></span></div>
+      <div class="row2"><div class="lbl"><b>转码上限</b><span>同时进行的 ffmpeg 任务数</span></div>
+        <span class="pathbox">2</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="plabel">账号</div>
+      <div class="row2"><div class="lbl"><b>zackdk</b><span>管理员 · 注册于 2026-09-30</span></div>
+        <button class="ghost" onclick="showLogin()">退出登录</button></div>
     </div>
   </section>
 
-  <!-- 正在播放 -->
+  <!-- 正在播放（主页面） -->
   <section class="page" id="p-now" hidden>
-    <div class="now">
-      <div class="big">♪</div>
-      <div class="lyr">
-        <h1 style="margin-bottom:4px">牵丝戏</h1>
-        <div class="sub" style="margin-bottom:22px">银临 / Aki阿杰 · 牵丝戏 · 2015</div>
-        <p>嘲笑谁恃美扬威 没了心如何相配</p>
-        <p class="on">盘铃声清脆 帷幕间灯火幽微</p>
-        <p>我和你 最天生一对</p>
-        <p>没了你才算原罪 没了心才好相配</p>
-        <p>你褴褛我彩绘 并肩行过山与水</p>
-        <p>你憔悴 我替你明媚</p>
+    <div class="playbg"></div>
+    <div class="playwrap">
+      <div class="pcol">
+        <div class="bigcover">♪</div>
+        <div class="bigt" id="nTitle">牵丝戏</div>
+        <div class="biga" id="nArtist">银临 / Aki阿杰</div>
+        <div class="bigmeta" id="nAlbum">牵丝戏 · 2015 · FLAC</div>
+        <div class="bigprog">
+          <div class="bigbar" onclick="seekBig(event)"><i id="nFill"></i><b id="nKnob"></b></div>
+          <div class="bigtm"><span id="nCur">0:00</span><span id="nDur">0:00</span></div>
+        </div>
+        <div class="transport">
+          <button class="tb" onclick="flip(this)" title="随机"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h2.5l7 6H14"/><path d="M2 11h2.5l7-6H14"/><path d="M12 3.2 14 5l-2 1.8"/><path d="M12 9.2 14 11l-2 1.8"/></svg></button>
+          <button class="tb" title="上一首"><svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor"><path d="M12.5 4v8l-6-4z"/><path d="M3.5 4h1.2v8H3.5z"/></svg></button>
+          <button class="tplay" id="nPlay" onclick="togglePlay()"><svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" id="nIcon"><path d="M5 3.5v9L13 8z"/></svg></button>
+          <button class="tb" title="下一首"><svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 4v8l6-4z"/><path d="M11.3 4h1.2v8h-1.2z"/></svg></button>
+          <button class="tb" onclick="flip(this)" title="循环"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 0 1 5-5h3.5"/><path d="M9.5 1.2 11.7 3 9.5 4.8"/><path d="M13 8a5 5 0 0 1-5 5H4.5"/><path d="M6.5 14.8 4.3 13l2.2-1.8"/></svg></button>
+        </div>
+        <div class="bigvol">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.2 5.2 5.8H3v4.4h2.2L8 12.8z"/><path d="M10.4 5.6a3.4 3.4 0 0 1 0 4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M12.4 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <div class="vol"><i style="inset:0 30% 0 0"></i></div>
+        </div>
+      </div>
+
+      <div class="pcol2">
+        <div class="tabs">
+          <button class="on" onclick="tab('lyr',this)">歌词</button>
+          <button onclick="tab('queue',this)">播放队列</button>
+        </div>
+        <div class="lyr" id="tab-lyr">
+          <p>作词 : VAGARY</p>
+          <p>嘲笑谁恃美扬威 没了心如何相配</p>
+          <p class="on">盘铃声清脆 帷幕间灯火幽微</p>
+          <p>我和你 最天生一对</p>
+          <p>没了你才算原罪 没了心才好相配</p>
+          <p>你褴褛我彩绘 并肩行过山与水</p>
+          <p>你憔悴 我替你明媚</p>
+          <p>是你吻开笔墨 染我眼角珠泪</p>
+          <p>演离合相遇悲喜为谁</p>
+          <p>他们迂回误会 我却只由你支配</p>
+          <p>问世间哪有更完美</p>
+          <p>兰花指捻红尘似水</p>
+          <p>三尺红台 万事入歌吹</p>
+        </div>
+        <div class="qlist" id="tab-queue" hidden></div>
       </div>
     </div>
   </section>
@@ -405,7 +518,7 @@ const NAV = [
   ['artists','歌手','M8 2.8a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM3.2 13.4a4.9 4.9 0 0 1 9.6 0'],
   ['playlists','歌单','M2 4h12M2 8h12M2 12h7'],
   ['favorites','收藏','M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z'],
-  ['tasks','任务','M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3.2l2.2 1.4'],
+  ['settings','设置','M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3.2l2.2 1.4'],
 ];
 const shelf = 'M2 4h12M2 8h12M2 12h7';
 
@@ -441,32 +554,44 @@ let cur = null;
 function go(p){
   document.querySelectorAll('.page').forEach(s=>s.hidden = s.id !== 'p-'+p);
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.p===p));
-  document.querySelector('.page:not([hidden])').scrollTop = 0;
+  const shown = document.querySelector('.page:not([hidden])');
+  if (shown) shown.scrollTop = 0;
+  // 播放页自己就是播放器，底栏在那儿是重复的
+  document.querySelector('footer').style.display = (p === 'now') ? 'none' : 'flex';
 }
 function showLogin(){ document.getElementById('login').hidden = false; }
 function enter(){
   const u = document.getElementById('lu').value || 'zackdk';
   document.querySelector('.me').textContent = u[0];
   document.getElementById('login').hidden = true;
-  playRow(null, 7);
+  playRow(null, 7);   // 建队列 + 填大播放器
 }
 function playRow(tr, i){
   const s = SONGS[i];
   document.querySelectorAll('tbody tr').forEach(r=>r.classList.remove('playing'));
   if (tr) tr.classList.add('playing');
-  cur = { t:s[0], a:s[1], dur:s[3] };
+  cur = { t:s[0], a:s[1], dur:s[3], i };
   document.getElementById('pTitle').textContent = s[0];
   document.getElementById('pArtist').textContent = s[1];
   document.getElementById('pDur').textContent = s[3];
+  // 大播放器同步
+  document.getElementById('nTitle').textContent = s[0];
+  document.getElementById('nArtist').textContent = s[1];
+  document.getElementById('nAlbum').textContent = s[2] + ' · ' + s[4];
+  document.getElementById('nDur').textContent = s[3];
+  buildQueue(i);
   playing = true; syncIcon(); tick = 0;
   document.getElementById('pCur').textContent = '0:00';
   document.querySelector('#pFill').style.inset = '0 100% 0 0';
 }
 let playing = false, tick = 0, timer = null;
 function syncIcon(){
-  document.getElementById('pIcon').innerHTML = playing
+  const icon = playing
     ? '<path d="M5 3.5h2.4v9H5zM8.6 3.5H11v9H8.6z"/>'
     : '<path d="M5 3.5v9L13 8z"/>';
+  document.getElementById('pIcon').innerHTML = icon;
+  const ni = document.getElementById('nIcon');
+  if (ni) ni.innerHTML = icon;
   clearInterval(timer);
   if (playing) timer = setInterval(tickFn, 500);
 }
@@ -475,7 +600,11 @@ function tickFn(){
   const [m,s] = cur.dur.split(':').map(Number);
   const total = m*60+s, now = Math.min(tick*0.5, total);
   document.getElementById('pCur').textContent = Math.floor(now/60)+':'+String(Math.floor(now%60)).padStart(2,'0');
-  document.getElementById('pFill').style.inset = `0 ${(100-now/total*100).toFixed(2)}% 0 0`;
+  const pct = (100-now/total*100).toFixed(2);
+  document.getElementById('pFill').style.inset = `0 ${pct}% 0 0`;
+  const nf = document.getElementById('nFill'), nk = document.getElementById('nKnob');
+  if (nf) { nf.style.inset = `0 ${pct}% 0 0`; nk.style.left = (100-Number(pct)) + '%'; }
+  document.getElementById('nCur').textContent = document.getElementById('pCur').textContent;
   if (now >= total) { playing = false; syncIcon(); }
 }
 function togglePlay(){ if(!cur) return playRow(null,7); playing = !playing; syncIcon(); }
@@ -496,6 +625,34 @@ function startJob(){
     document.getElementById('jobBar').style.width = p+'%';
     document.getElementById('jobStat').textContent = `已处理 ${n} / 8`; }, 700);
 }
+function seekBig(e){
+  if (!cur) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  const [m, sec] = cur.dur.split(':').map(Number);
+  tick = p * (m*60+sec) * 2; tickFn();
+}
+function tab(id, btn){
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('tab-lyr').hidden = id !== 'lyr';
+  document.getElementById('tab-queue').hidden = id !== 'queue';
+}
+function flip(el){ el.classList.toggle('on'); }
+function buildQueue(from){
+  const q = document.getElementById('tab-queue');
+  q.innerHTML = SONGS.map((s, i) =>
+    `<div class="qrow ${i===from?'on':''}" onclick="playRow(null,${i})">
+       <span class="thumb">${i===from?'▶':'♪'}</span>
+       <span style="min-width:0"><div class="tt">${s[0]}</div><div class="ar">${s[1]}</div></span>
+       <span class="num" style="margin-left:auto">${s[3]}</span></div>`).join('');
+}
+function startScan(){
+  const row = document.getElementById('scanRow'); row.hidden = false;
+  let n = 0;
+  const t = setInterval(() => { n += 431; if (n >= 2657) { n = 2657; clearInterval(t); }
+    document.getElementById('scanStat').textContent = `遍历 ${n} 个文件 · 新增 ${Math.min(12, Math.floor(n/221))}`; }, 250);
+}
 function filterSongs(){
   const q = document.getElementById('q').value.trim().toLowerCase();
   document.querySelectorAll('#libSongs tr').forEach((tr,i)=>{
@@ -505,7 +662,7 @@ function filterSongs(){
   document.getElementById('libCount').textContent = q ? `筛选出 ${n} 首` : '共 2657 首歌 · 1125 位歌手';
 }
 /* 原型初始状态：直接进首页（不看登录页），播放条预置一首 */
-playRow(null, 7);
+playRow(null, 7);   // 建队列 + 填大播放器
 
 document.addEventListener('keydown', e=>{
   if (e.key === 'Escape') document.getElementById('login').hidden = false;
