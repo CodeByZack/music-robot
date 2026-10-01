@@ -32,7 +32,7 @@
 | 库用例（`cargo test --lib`） | **508 passed / 0 failed / 1 ignored** |
 | 集成用例（`tests/`，11 个文件） | **125 passed / 0 failed** |
 | 合计 | **633 passed / 0 failed / 1 ignored** |
-| 端到端 API 脚本 | `node scripts/api_test.mjs` → **150 通过 / 0 失败** |
+| 端到端 API 脚本 | `node scripts/api_test.mjs` → **162 通过 / 0 失败** |
 | `Cargo.lock` 包数 | **107** |
 | 画布进度 | **23/28** |
 
@@ -189,7 +189,7 @@ music-robot/
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
 ├── .dsh/skills/         # **项目级 agent skill**（DSH 扫这一层，`<名>/SKILL.md`，不递归）
 │                       # 24 个 Expo 官方 skill（expo-*/eas-*），来源与更新方式见 .dsh/README.md
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，150 项；非交互，给回归用）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，162 项；非交互，给回归用）
 ├── scripts/api_cli.mjs  # 交互式 API 客户端（方向键菜单，连**已在跑**的服务；只用 node:readline，零依赖）
 │                       # 曲库菜单里有：扫描入库 / 刮削 / 重刮失败项 / 重刮单曲
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）
@@ -315,6 +315,65 @@ Set-Cookie: mr_media=<jwt>; HttpOnly; SameSite=Lax; Path=/api; Max-Age=<token_ex
 
 ⚠️ 别把这两条挪回 `protected`：那样媒体就只能在 JS `fetch` 里用，`<audio>`/`<img>` 全失效。
 ⚠️ localStorage 里仍然存着同一个 JWT 供 `fetch` 用（cookie 是 HttpOnly，JS 读不到）。
+
+### 🔴 待确认问题（2026-10-01 铺页面时撞到的，**等用户拍板**）
+
+按原型铺完 PC 端页面后，撞到下面这些。**没有自作主张去改后端**，列在这儿等确认。
+
+#### A. 缺两个列表接口 → 专辑页 / 歌手页做不出来
+
+| 想要 | 后端现状 | 后果 |
+|---|---|---|
+| `GET /api/albums` | **没有**，只有 `GET /api/albums/{id}` | 列不出专辑 |
+| `GET /api/artists` | **没有**，只有 `GET /api/artists/{name}`（参数是**名字**不是 id） | 列不出歌手 |
+
+**也不能在前端硬凑**：
+- `/api/library` 的曲目只给 `album_id`，**不给专辑名** —— 连名字都显示不出来
+- 按 id 去重能拿到 id 列表，但每个都要再打一次详情 → N+1
+- 曲目里的 `artists` 是字符串（可能是 `A / B`），客户端切分去重**不等价于后端的歌手实体**，
+  凑出来的列表和点进去的详情会对不上
+
+两个页面现在**如实写明「缺后端接口」**，没摆假页面。
+
+#### B. `/api/library` 不返回专辑名
+
+曲目 JSON 只有 `album_id`。所以音乐库列表**没有「专辑」列** ——
+要么后端加上专辑名，要么前端再拉一次专辑数据做 join。**先没做，也没摆一列 `—` 充数。**
+
+#### C. 历史 / 收藏没有「带曲目信息」的联合端点
+
+`/api/history` 只给 `song_id`，要显示标题得再拿一次曲目。首页现在把
+`/api/library?page_size=200` 拉回来按 id 对上 —— **库大于 200 首时会漏**。
+建议后端让 history 直接带曲目摘要。
+
+#### D. 刮削没有「只入库不写文件」档位（之前已记，现在 UI 已落地一半）
+
+后端没有 dry-run。设置页现在只能做**二次确认**（勾选「我确认要写入音乐文件」才能开始），
+**拦不住写入本身**。要真做到，得后端加档位。
+
+#### E. 播放状态刷新即丢
+
+播放队列 + 进度都在内存里。`settings` 里能存 `resume:<song_id>`，
+但**前端还没接**（设置页已如实标「未实现」，没写成自动记录）。
+
+#### F. core 的 API 层此前**零测试覆盖** → 6 处猜错
+
+`packages/core/src/api/index.ts` 是我照后端源码手写的转写层。
+**响应 JSON 的形状抄得到，但「路径 + HTTP 方法」那行注册代码很容易被忽略**，于是：
+
+| 错法 | 实际 |
+|---|---|
+| `favorites.add` = `POST /api/favorites` + body | `POST /api/favorites/{song_id}` → **405** |
+| `playlists.list` 返回 `{items, count}` | `{items, total}` |
+| `playlists.create` 返回裸 `Playlist` | `{playlist}` |
+| `playlists.addSong` 收数组 | 只收**单个** `song_id` |
+| `settings.get` 返回扁平对象 | `{settings, total}` |
+| `history.record` 返回 `{written}` | `{history}` |
+
+**已全部改正**，并补了真机冒烟断言（`api_test.mjs` 里 import `packages/core` 直接对真服务跑），
+150 → 162 条。**变异验证**：把 `favorites.add` 改回错的路径 → 立刻报失败。
+
+⚠️ 教训：**手写的 API 转写层必须对着跑起来的服务验一遍**，只读后端源码不够。
 
 ### ⚠️ 两个已知缺口（别误当成 bug）
 
@@ -882,7 +941,7 @@ timeout 600 cargo build && timeout 900 node scripts/api_test.mjs   # 端到端
 | `tests/plugin_e2e.rs` | 3 | **真拉起 `node` / `python3` / `sh`** 跑插件协议 |
 | **合计** | **124** | |
 
-另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**150 通过 / 0 失败**，
+另有 `scripts/api_test.mjs`：起临时服务、逐条打 HTTP，**162 通过 / 0 失败**，
 分 9 组（鉴权 / 扫描 / 曲库 / Range / 封面 / 转码 / 歌单 / 播放周边 / 点歌）。
 它自带两个防呆：**拒绝陈旧二进制**（§1）、**转码缓存目录已隔离**（不会写脏 `~/.local/share/music-robot/transcode`）。
 

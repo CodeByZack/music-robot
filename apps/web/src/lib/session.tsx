@@ -47,8 +47,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
+        // ⚠️ /api/auth/me 返回的是 { user }，不是裸 User（照后端真形状改的）
         const me = await api.auth.me();
-        if (alive) setUser(me);
+        if (alive) setUser(me.user);
       } catch {
         tokens.clear();
       } finally {

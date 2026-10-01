@@ -539,6 +539,60 @@ async function main() {
       );
     }
 
+    // ── ⭐ packages/core 的 API 层对着**真服务**跑一遍 ──────────────
+    //
+    // 为什么必须有这一节：core 的 `api/*` 是「路径 + 方法 + 响应形状」的手写转写，
+    // 光看后端源码很容易把**路径/方法**猜错（响应 JSON 抄得到，路由注册那行常被忽略）。
+    // 已经栽过一次：`favorites.add` 写成 `POST /api/favorites` + body，
+    // 实际是 `POST /api/favorites/{song_id}` → 405，而那时 core 完全没被测过。
+    try {
+      const { createHttp, createApi, createMemoryTokenStore } = await import(
+        '../packages/core/src/index.ts'
+      );
+      const coreTokens = createMemoryTokenStore(c.token);
+      const core = createApi(createHttp({ baseUrl: base, tokens: coreTokens }));
+
+      const lib = await core.library.list({ page_size: 3 });
+      checkTrue('core: library.list 返回 items/total_pages', Array.isArray(lib.items) && typeof lib.total_pages === 'number', brief(lib));
+
+      const one = await core.library.song(lib.items[0].id);
+      checkTrue('core: library.song 返回 { song }', Boolean(one?.song?.id), brief(one));
+
+      // ⚠️ 这一条就是上面说的那个 405 —— 别再改回 body 形式
+      const fav = await core.favorites.add(lib.items[0].id);
+      checkTrue('core: favorites.add 走路径参数（曾是 405）', fav?.song_id === lib.items[0].id, brief(fav));
+      const favs = await core.favorites.list();
+      checkTrue('core: favorites.list 能读到刚加的', favs.items.some((x) => x.id === lib.items[0].id), `total=${favs.total}`);
+      await core.favorites.remove(lib.items[0].id);
+
+      const hist = await core.history.list({ limit: 5 });
+      checkTrue('core: history.list 返回 items/limit/offset', Array.isArray(hist.items) && typeof hist.offset === 'number', brief(hist));
+
+      const st = await core.settings.get();
+      checkTrue('core: settings.get 返回 { settings, total }', typeof st.settings === 'object' && typeof st.total === 'number', brief(st));
+
+      const me = await core.auth.me();
+      checkTrue('core: auth.me 返回 { user }', Boolean(me?.user?.username), brief(me));
+
+      const pls = await core.playlists.list();
+      checkTrue('core: playlists.list 返回 items/total', Array.isArray(pls.items), brief(pls));
+
+      const made = await core.playlists.create('core 冒烟歌单');
+      checkTrue('core: playlists.create 返回 { playlist }', Boolean(made?.playlist?.id), brief(made));
+      const detail = await core.playlists.get(made.playlist.id);
+      checkTrue('core: playlists.get 返回 { playlist, songs }', Boolean(detail?.playlist) && Array.isArray(detail?.songs), brief(detail));
+      const addedItem = await core.playlists.addSong(made.playlist.id, lib.items[0].id);
+      checkTrue('core: playlists.addSong 接受单个 song_id', addedItem?.song_id === lib.items[0].id, brief(addedItem));
+      await core.playlists.remove(made.playlist.id);
+
+      const jobs = await core.jobs.list();
+      checkTrue('core: jobs.list 返回 items', Array.isArray(jobs.items), brief(jobs));
+    } catch (e) {
+      // ⚠️ 必须包住：core 的 api 层要是把路径/方法写错，抛出来会把**后面一百多条断言
+      //    全带不跑**，报错还只是一个异常栈。改成记一条失败断言继续跑。
+      bad('core: API 层冒烟失败（路径 / 方法 / 形状对不上后端）', String(e?.message ?? e));
+    }
+
     // ───────────────────────── 曲库接口 ─────────────────────────
     section('3. 曲库接口（S16）');
     [st, , body] = await c.json('GET', '/api/library');

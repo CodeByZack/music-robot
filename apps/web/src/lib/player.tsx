@@ -20,7 +20,7 @@ import {
   type Song,
 } from '@music-robot/core';
 import { createAudioAdapter, type AudioAdapter } from '@/adapters/audio.web.ts';
-import { resolveMediaUrl } from '@/lib/client.ts';
+import { api, resolveMediaUrl } from '@/lib/client.ts';
 
 interface PlayerValue {
   queue: QueueState;
@@ -35,6 +35,10 @@ interface PlayerValue {
   prev: () => void;
   seek: (ms: number) => void;
   cycleMode: () => void;
+  /** 队列里的曲目（按播放顺序），给「正在播放」页的队列标签用。 */
+  queueSongs: Song[];
+  /** 跳到队列里的第 i 个（按播放顺序）。 */
+  jumpToQueueIndex: (index: number) => void;
 }
 
 const PlayerContext = createContext<PlayerValue | null>(null);
@@ -77,6 +81,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const currentTrackId = currentId(queue);
 
+  // 队列里的曲目，按**播放顺序**排（随机会打乱 order）
+  const queueSongs = queue.order
+    .map((idx) => queue.trackIds[idx])
+    .map((id) => (id === undefined ? undefined : songs.get(id)))
+    .filter((s): s is Song => Boolean(s));
+
   // 队列光标一变就换源。`playing` 由 audio 的 playing/paused 事件回报，
   // 不在这里猜 —— 猜会导致 UI 与实际出声不一致。
   useEffect(() => {
@@ -90,6 +100,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         await audio.load(`/api/stream/${currentTrackId}`);
         if (!alive) return;
         await audio.play();
+        // 记一条播放历史。失败不打断播放 —— 历史是锦上添花，不该影响听歌。
+        void api.history.record(currentTrackId).catch(() => {});
       } catch {
         if (alive) setPlaying(false);
       }
@@ -149,8 +161,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev: () => setQueue((q) => prev(q)),
       seek,
       cycleMode,
+      queueSongs,
+      jumpToQueueIndex: (index: number) => setQueue((q) => ({ ...q, cursor: index })),
     }),
-    [queue, currentTrackId, songs, playing, positionMs, durationMs, playList, toggle, seek, cycleMode],
+    [
+      queue,
+      currentTrackId,
+      songs,
+      playing,
+      positionMs,
+      durationMs,
+      playList,
+      toggle,
+      seek,
+      cycleMode,
+      queueSongs,
+    ],
   );
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;

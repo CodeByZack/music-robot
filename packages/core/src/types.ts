@@ -74,12 +74,13 @@ export interface ArtistSummary {
   album_count: number;
 }
 
-/** 分页列表的统一外壳。 */
+/** 分页列表的统一外壳（`paginated_json` 产出）。 */
 export interface Page<T> {
   items: T[];
   page: number;
   page_size: number;
   total: number;
+  total_pages: number;
 }
 
 export interface Playlist {
@@ -91,9 +92,10 @@ export interface Playlist {
   updated_at?: number;
 }
 
-export interface PlaylistDetail extends Playlist {
+/** `GET /api/playlists/{id}` → 歌单与曲目是**并列**的，不是一个扁平对象。 */
+export interface PlaylistDetail {
+  playlist: Playlist;
   songs: Song[];
-  total: number;
 }
 
 export interface HistoryEntry {
@@ -103,9 +105,25 @@ export interface HistoryEntry {
   duration_listened_ms: number | null;
 }
 
-export interface UserSettings {
-  play_mode: string | null;
-  volume: number | null;
+export interface HistoryPage {
+  items: HistoryEntry[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+/**
+ * 设置是**自由形态的字符串键值表**，不是固定结构。
+ *
+ * 后端 `settings_map` 直接把数据库里的行拼成 JSON 对象，已知的键有
+ * `volume`（音量）、`play_mode`（播放模式）、`resume:<song_id>`（断点续播位置）。
+ * 值一律是字符串 —— 别按数字处理。
+ */
+export type SettingsMap = Record<string, string>;
+
+export interface SettingsResponse {
+  settings: SettingsMap;
+  total: number;
 }
 
 /** 后台任务（扫描 / 刮削共用同一种形状）。 */

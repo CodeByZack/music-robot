@@ -1,24 +1,23 @@
-import { Navigate, Route, Routes } from 'react-router';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 import PlayerBar from '@/components/player-bar.tsx';
 import { Shell } from '@/components/shell.tsx';
+import AlbumsPage from '@/pages/albums.tsx';
+import ArtistsPage from '@/pages/artists.tsx';
+import FavoritesPage from '@/pages/favorites.tsx';
+import HomePage from '@/pages/home.tsx';
 import LibraryPage from '@/pages/library.tsx';
 import LoginPage from '@/pages/login.tsx';
+import NowPage from '@/pages/now.tsx';
+import PlaylistPage from '@/pages/playlist.tsx';
+import PlaylistsPage from '@/pages/playlists.tsx';
+import SettingsPage from '@/pages/settings.tsx';
 import { PlayerProvider } from '@/lib/player.tsx';
 import { SessionProvider, useSession } from '@/lib/session.tsx';
 
-/** 还没做的页面先用它占位 —— 比空白页好，也比假装做好了诚实。 */
-function Todo({ what }: { what: string }) {
-  return (
-    <>
-      <header className="h-[58px] shrink-0" />
-      <div className="flex-1 px-[22px]">
-        <h1 className="pt-2.5 text-2xl leading-8 font-semibold">{what}</h1>
-        <p className="mt-3 max-w-[60ch] text-[13px] leading-5 text-ink-3">
-          还没做。原型见 <code className="text-ink-2">apps/web/design/prototype.html</code>。
-        </p>
-      </div>
-    </>
-  );
+/** 播放页自带一整套控件，底部悬浮条在那儿是重复的（原型同此处理）。 */
+function PlayerBarOrNothing() {
+  const { pathname } = useLocation();
+  return pathname === '/now' ? null : <PlayerBar />;
 }
 
 function Gate() {
@@ -34,16 +33,18 @@ function Gate() {
     <PlayerProvider>
       <Shell>
         <Routes>
-        <Route path="/" element={<Todo what="首页" />} />
-        <Route path="/library" element={<LibraryPage />} />
-        <Route path="/albums" element={<Todo what="专辑" />} />
-        <Route path="/artists" element={<Todo what="歌手" />} />
-        <Route path="/playlists" element={<Todo what="歌单" />} />
-        <Route path="/favorites" element={<Todo what="收藏" />} />
-        <Route path="/settings" element={<Todo what="设置" />} />
+          <Route path="/" element={<HomePage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/albums" element={<AlbumsPage />} />
+          <Route path="/artists" element={<ArtistsPage />} />
+          <Route path="/playlists" element={<PlaylistsPage />} />
+          <Route path="/playlists/:id" element={<PlaylistPage />} />
+          <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/now" element={<NowPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <PlayerBar />
+        <PlayerBarOrNothing />
       </Shell>
     </PlayerProvider>
   );

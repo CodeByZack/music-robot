@@ -4,6 +4,7 @@ import type {
   AlbumSummary,
   ArtistSummary,
   HistoryEntry,
+  HistoryPage,
   Job,
   JobAccepted,
   LoginResponse,
@@ -11,96 +12,131 @@ import type {
   Playlist,
   PlaylistDetail,
   ScrapeRequest,
+  SettingsResponse,
   Song,
   User,
-  UserSettings,
 } from '../types.ts';
 
 /**
  * REST 端点的薄封装。
  *
- * **放一处的理由**：它们几乎是机械转写（路径 + 类型）。按路由组拆成 16 个文件只会多 16 次跳转，
- * 换不来任何东西。等某一组长出真实逻辑（分页游标、重试、缓存）再拆出去。
+ * ⚠️ **每个方法的返回类型都是照 `src/server/routes/*.rs` 里的 `json!` 抄的**，
+ * 不是照感觉写的。之前这文件里有好几处猜错的形状（`playlists.list` 写成 `count`、
+ * `settings.get` 以为是扁平结构、`add_item` 以为收数组…），已全部对着后端改正。
+ * **改这里之前先去看后端对应的 handler。**
  *
- * 只实现**当前页面用得到的**。剩下的等页面来了再加 —— 先把 33 条全写完是提前付账。
+ * 只实现**当前页面用得到的**端点。先把 31 条全写完是提前付账。
  */
 export function createApi(http: Http) {
   return {
     auth: {
-      /** 仅在库为空时可用（初始化引导）；库非空返回 403。 */
+      /** 仅在库为空时可用（初始化引导）；库非空返回 403。**不返回令牌**，之后要再调 login。 */
       register: (username: string, password: string) =>
         http.post<{ user: User }>('/api/auth/register', { username, password }),
+      /** 登录。同时下发 `mr_media` cookie（`<audio>`/`<img>` 靠它鉴权）。 */
       login: (username: string, password: string) =>
         http.post<LoginResponse>('/api/auth/login', { username, password }),
-      me: () => http.get<User>('/api/auth/me'),
-      /** 管理员建号（`role` 可选，默认 user）。 */
+      /** 清媒体 cookie。**不要求令牌**（过期后更需要能登出）。 */
+      logout: () => http.post<{ ok: boolean }>('/api/auth/logout'),
+      me: () => http.get<{ user: User }>('/api/auth/me'),
       adminCreateUser: (username: string, password: string, role?: string) =>
-        http.post<{ user: User }>('/api/admin/users', { username, password, ...(role ? { role } : {}) }),
+        http.post<{ user: User }>('/api/admin/users', {
+          username,
+          password,
+          ...(role ? { role } : {}),
+        }),
     },
 
     library: {
+      /** `sort` 只支持「字段」或「-字段」（减号 = 降序）；`page_size` 硬上限 200。 */
       list: (params: { page?: number; page_size?: number; sort?: string } = {}) =>
         http.get<Page<Song>>(`/api/library${qs(params)}`),
-      song: (id: number) => http.get<Song & { has_cover?: boolean }>(`/api/songs/${id}`),
-      /** 封面是二进制，直接给 img 用这个 URL（要走令牌时由适配层处理）。 */
-      coverUrl: (id: number) => `/api/songs/${id}/cover`,
-      /** 音频流地址；支持 Range，播放器直接丢给 `<audio>`。 */
+      song: (id: number) => http.get<{ song: Song }>(`/api/songs/${id}`),
+      /** 音频流地址。鉴权靠 cookie（`<audio src>` 带不了请求头）。 */
       streamUrl: (id: number) => `/api/stream/${id}`,
+      /** 封面地址。同上，靠 cookie。 */
+      coverUrl: (id: number) => `/api/songs/${id}/cover`,
     },
 
+    // ⚠️ 没有 `albums.list` / `artists.list` —— 后端**没有**这两个列表端点，
+    //    只有 `/api/albums/{id}` 与 `/api/artists/{name}`。
+    //    所以「专辑页 / 歌手页」目前做不出来，见 HANDOFF 的待确认问题。
     albums: {
-      list: (params: { page?: number; page_size?: number } = {}) =>
-        http.get<Page<Album>>(`/api/albums${qs(params)}`),
       get: (id: number) => http.get<{ album: Album; songs: Song[] }>(`/api/albums/${id}`),
     },
 
     artists: {
-      list: () => http.get<{ items: ArtistSummary[]; total: number }>('/api/artists'),
-      get: (id: number) =>
-        http.get<{ artist: ArtistSummary; albums: AlbumSummary[]; songs: Song[] }>(`/api/artists/${id}`),
+      /** ⚠️ 参数是**歌手名**，不是 id（路由是 `/api/artists/{name}`）。 */
+      get: (name: string) =>
+        http.get<{ artist: ArtistSummary; songs: Song[]; albums: AlbumSummary[] }>(
+          `/api/artists/${encodeURIComponent(name)}`,
+        ),
     },
 
-    search: (q: string, limit?: number) =>
-      http.get<{ songs: Song[]; albums: Album[]; artists: ArtistSummary[] }>(
-        `/api/search${qs({ q, limit })}`,
-      ),
+    search: (q: string, params: { page?: number; page_size?: number } = {}) =>
+      http.get<Page<Song>>(`/api/search${qs({ q, ...params })}`),
 
     playlists: {
-      list: () => http.get<{ items: Playlist[]; count: number }>('/api/playlists'),
+      list: () => http.get<{ items: Playlist[]; total: number }>('/api/playlists'),
       get: (id: number) => http.get<PlaylistDetail>(`/api/playlists/${id}`),
       create: (name: string, description?: string) =>
-        http.post<Playlist>('/api/playlists', { name, ...(description ? { description } : {}) }),
-      addSongs: (id: number, songIds: number[]) =>
-        http.post<{ added: number }>(`/api/playlists/${id}/items`, { song_ids: songIds }),
+        http.post<{ playlist: Playlist }>('/api/playlists', {
+          name,
+          ...(description ? { description } : {}),
+        }),
+      update: (id: number, patch: { name?: string; description?: string; is_public?: boolean }) =>
+        http.put<{ playlist: Playlist }>(`/api/playlists/${id}`, patch),
+      remove: (id: number) => http.del<{ id: number; deleted: boolean }>(`/api/playlists/${id}`),
+      /** ⚠️ 一次**只加一首**（`song_id` 是整数不是数组）；`position` 省略表示追加到末尾。 */
+      addSong: (id: number, songId: number, position?: number) =>
+        http.post<{ added: number; song_id: number; position: number }>(
+          `/api/playlists/${id}/items`,
+          { song_id: songId, ...(position === undefined ? {} : { position }) },
+        ),
       removeSong: (id: number, songId: number) =>
-        http.del<{ removed: boolean }>(`/api/playlists/${id}/items/${songId}`),
-      remove: (id: number) => http.del<{ deleted: boolean }>(`/api/playlists/${id}`),
+        http.del<{ song_id: number; removed: boolean }>(`/api/playlists/${id}/items/${songId}`),
+      reorder: (id: number, songIds: number[]) =>
+        http.put<{ song_ids: number[]; count: number }>(`/api/playlists/${id}/items`, {
+          song_ids: songIds,
+        }),
     },
 
     favorites: {
       list: () => http.get<{ items: Song[]; total: number }>('/api/favorites'),
-      add: (songId: number) => http.post<{ favorited: boolean }>('/api/favorites', { song_id: songId }),
-      remove: (songId: number) => http.del<{ removed: boolean }>(`/api/favorites/${songId}`),
+      /**
+       * 幂等：已收藏再调一次不会重复插。
+       * ⚠️ song_id 在**路径**里，不是请求体 —— 路由是 `POST /api/favorites/{song_id}`。
+       * （写成 `POST /api/favorites` + body 会得到 405，实测踩过。）
+       */
+      add: (songId: number) =>
+        http.post<{ song_id: number; favorited: boolean; created: boolean }>(
+          `/api/favorites/${songId}`,
+        ),
+      remove: (songId: number) =>
+        http.del<{ song_id: number; favorited: boolean; removed: boolean }>(
+          `/api/favorites/${songId}`,
+        ),
     },
 
     history: {
       list: (params: { limit?: number; offset?: number } = {}) =>
-        http.get<{ items: HistoryEntry[]; total: number }>(`/api/history${qs(params)}`),
+        http.get<HistoryPage>(`/api/history${qs(params)}`),
       record: (songId: number, durationListenedMs?: number) =>
-        http.post<{ written: boolean }>('/api/history', {
+        http.post<{ history: HistoryEntry }>('/api/history', {
           song_id: songId,
           ...(durationListenedMs === undefined ? {} : { duration_listened_ms: durationListenedMs }),
         }),
     },
 
     settings: {
-      get: () => http.get<UserSettings>('/api/settings'),
-      put: (patch: Partial<UserSettings>) => http.put<{ ok: boolean }>('/api/settings', patch),
+      get: () => http.get<SettingsResponse>('/api/settings'),
+      /** 批量写。值为 `null` 表示删除该键。 */
+      put: (patch: Record<string, string | null>) =>
+        http.put<SettingsResponse & { written: number; deleted: number }>('/api/settings', patch),
     },
 
-    /** 扫描与刮削共用同一套「后台任务」形状；`job(id)` 两个都能查。 */
     jobs: {
-      jobs: () => http.get<{ items: Job[]; count: number }>('/api/jobs'),
+      list: () => http.get<{ items: Job[]; count: number }>('/api/jobs'),
       startScan: () => http.post<JobAccepted>('/api/scan'),
       scan: (batchId: string) => http.get<Job>(`/api/scan/${batchId}`),
       /**
