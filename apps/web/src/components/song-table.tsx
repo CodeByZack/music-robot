@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Song } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
 import { usePlayer } from '@/lib/player.tsx';
+import { MenuButton } from '@/components/menu.tsx';
 import { useWriteFiles } from '@/lib/scrape-prefs.ts';
 
 /** 毫秒 → `3:58`。 */
@@ -85,68 +86,45 @@ async function awaitScrape(batchId: string): Promise<{ failed: number; message: 
 }
 
 /**
- * 单曲重刮那颗按钮。四态：待点 / 刮削中 / 成功 / 失败。
+ * 行尾的「⋯」菜单。收藏仍然是左边那颗心（一键可达，不该藏进菜单），
+ * 菜单里放**其余**对这首歌的操作；目前只有「重新刮削」，以后加操作就往这里塞。
  *
- * 提示语必须写清楚**这一下会不会动原文件** —— 它跟着设置页那个开关走，
- * 用户没理由记得住开关当时是开是关。
+ * 为什么不摆一排图标按钮：一列三颗小图标很吵，而且每加一个操作就再挤一颗；
+ * 收进菜单后，操作还能带一句文字说清后果（会不会动原文件、失败原因是什么）。
+ *
+ * 状态只影响**菜单里的那一项**（文字 + 禁用），trigger 始终是「⋯」——
+ * 按钮字形变来变去反而认不出是同一个东西。
  */
-function ScrapeButton({
-  state,
-  writeFiles,
-  onClick,
-}: {
+function RowMenu({ state, writeFiles, onRescrape }: {
   state: ScrapeState | undefined;
   writeFiles: boolean;
-  onClick: (e: React.MouseEvent) => void;
+  onRescrape: () => void;
 }) {
-  const effect = writeFiles ? '会写回原文件（不可撤销）' : '只更新数据库，不碰文件';
-  const title =
-    state?.phase === 'running'
-      ? '刮削中…'
-      : state?.phase === 'ok'
-        ? `刮削完成（${effect}）`
-        : state?.phase === 'err'
-          ? `刮削失败：${state.message}`
-          : `重新刮削这首歌 · ${effect}`;
-
+  const running = state?.phase === 'running';
   return (
-    <button
-      onClick={onClick}
-      disabled={state?.phase === 'running'}
-      title={title}
-      className={[
-        'inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-surface-hover',
-        state?.phase === 'err' ? 'text-accent' : state?.phase === 'ok' ? 'text-ink-2' : 'text-ink-4',
-        state?.phase === 'running' ? 'cursor-wait' : '',
-      ].join(' ')}
+    <MenuButton
+      title="更多操作"
+      header={
+        state?.phase === 'err' ? (
+          <p className="max-w-[230px] text-[11.5px] leading-4 text-accent">{state.message}</p>
+        ) : undefined
+      }
+      items={[
+        {
+          label: running ? '刮削中…' : state?.phase === 'ok' ? '已重新刮削' : '重新刮削这首歌',
+          // 「会不会动原文件」直接写在菜单里 —— 用户没理由记得住设置页那个开关当时开没开
+          hint: writeFiles ? '会写文件' : '只入库',
+          disabled: running,
+          onClick: onRescrape,
+        },
+      ]}
     >
-      {state?.phase === 'ok' ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-          <path d="m3.5 8.4 3 3 6-6.4" />
-        </svg>
-      ) : state?.phase === 'err' ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
-          <path d="M8 2.6 14.2 13H1.8z" />
-          <path d="M8 6.6v3M8 11.4v.1" />
-        </svg>
-      ) : (
-        // 待点 / 刮削中共用同一个回转箭头，转起来就是「在跑」
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={state?.phase === 'running' ? 'animate-spin' : ''}
-        >
-          <path d="M13 8a5 5 0 1 1-1.6-3.7" />
-          <path d="M13.4 2.6v3h-3" />
-        </svg>
-      )}
-    </button>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+        <circle cx="3.4" cy="8" r="1.3" />
+        <circle cx="8" cy="8" r="1.3" />
+        <circle cx="12.6" cy="8" r="1.3" />
+      </svg>
+    </MenuButton>
   );
 }
 
@@ -175,8 +153,7 @@ export default function SongTable({
   // 重刮后的新数据。页面传进来的 songs 是旧的，这里按 id 覆盖。
   const [patched, setPatched] = useState<Map<number, Song>>(() => new Map());
 
-  async function rescrape(song: Song, e: React.MouseEvent) {
-    e.stopPropagation(); // 别冒泡到行上 —— 那是「播放」
+  async function rescrape(song: Song) {
     setScrape((m) => new Map(m).set(song.id, { phase: 'running' }));
     try {
       // write_files 跟着设置页那个开关走（见 lib/scrape-prefs.ts），默认只入库。
@@ -283,10 +260,10 @@ export default function SongTable({
               </button>
             </td>
             <td className="border-b border-line-weak px-3 text-center max-[640px]:hidden">
-              <ScrapeButton
+              <RowMenu
                 state={scrape.get(s.id)}
                 writeFiles={writeFiles}
-                onClick={(e) => void rescrape(s, e)}
+                onRescrape={() => void rescrape(s)}
               />
             </td>
             <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">

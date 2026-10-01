@@ -40,6 +40,12 @@ function IconBtn({
 export default function NowPage() {
   const p = usePlayer();
   const [tab, setTab] = useState<'lyr' | 'queue'>('lyr');
+  /**
+   * 窄屏（<900px）下封面和歌词**不能同时铺开** —— 竖着堆要滚很久，
+   * 而且封面巨大、歌词只剩一条缝。所以窄屏只显示一栏，顶上给个切换。
+   * 桌面两栏并排，这个状态不起作用。
+   */
+  const [pane, setPane] = useState<'cover' | 'lyrics'>('cover');
   const songId = p.song?.id;
   const load = useCallback(
     () => (songId ? api.library.song(songId) : Promise.resolve(null)),
@@ -63,8 +69,29 @@ export default function NowPage() {
       {/* 封面取色的氛围背景。⚠️ 封面是占位，所以这层是手挑的紫 —— 接上真封面后应从图里提色 */}
       <div className="pointer-events-none absolute -inset-[120px] z-0 bg-[radial-gradient(60%_55%_at_26%_34%,#7b4bd0_0%,transparent_62%),radial-gradient(50%_50%_at_62%_18%,#c934e1_0%,transparent_60%),radial-gradient(45%_45%_at_40%_70%,#ef6b3c_0%,transparent_62%)] opacity-50 blur-[110px] saturate-150" />
 
-      <div className="relative z-10 flex h-full flex-col gap-6 overflow-auto p-6 min-[901px]:flex-row min-[901px]:items-center min-[901px]:gap-11 min-[901px]:p-[28px_38px_34px]">
-        <div className="flex w-full max-w-[420px] flex-col items-center text-center min-[901px]:w-[330px] min-[901px]:shrink-0">
+      <div className="relative z-10 flex h-full flex-col gap-6 overflow-auto p-6 min-[901px]:flex-row min-[901px]:items-center min-[901px]:justify-center min-[901px]:gap-11 min-[901px]:p-[28px_38px_34px]">
+        {/* 窄屏的封面 / 歌词 切换。桌面两栏都在，所以整块藏掉。 */}
+        <div className="flex shrink-0 gap-1 self-center rounded-full bg-black/25 p-1 min-[901px]:hidden">
+          {(['cover', 'lyrics'] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setPane(k)}
+              className={[
+                'rounded-full px-4 py-[6px] text-[13px] transition-colors',
+                pane === k ? 'bg-surface text-ink' : 'text-ink-3',
+              ].join(' ')}
+            >
+              {k === 'cover' ? '封面' : '歌词'}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className={[
+            'flex w-full max-w-[420px] flex-col items-center text-center min-[901px]:flex min-[901px]:w-[330px] min-[901px]:shrink-0',
+            pane === 'cover' ? '' : 'max-[900px]:hidden',
+          ].join(' ')}
+        >
           <div className="flex size-[170px] items-center justify-center rounded-2xl border border-line bg-surface text-[40px] text-ink-4 shadow-[0_8px_32px_rgba(0,0,0,.42)] min-[901px]:size-[330px] min-[901px]:text-[74px]">
             ♪
           </div>
@@ -137,7 +164,12 @@ export default function NowPage() {
           </div>
         </div>
 
-        <div className="flex w-full min-w-0 flex-col self-stretch pt-1.5 min-[901px]:max-w-[560px] min-[901px]:flex-1">
+        <div
+          className={[
+            'flex w-full min-w-0 flex-col self-stretch pt-1.5 min-[901px]:flex min-[901px]:max-w-[560px] min-[901px]:flex-1',
+            pane === 'lyrics' ? '' : 'max-[900px]:hidden',
+          ].join(' ')}
+        >
           <div className="mb-[18px] flex shrink-0 gap-1">
             {(['lyr', 'queue'] as const).map((t) => (
               <button
@@ -154,7 +186,7 @@ export default function NowPage() {
           </div>
 
           {tab === 'lyr' ? (
-            <div className="min-h-0 flex-1 overflow-auto pr-2 max-[900px]:max-h-[280px]">
+            <div className="min-h-0 flex-1 overflow-auto pr-2">
               {lyrics.length === 0 ? (
                 <p className="text-[13px] text-ink-3">这首歌没有内嵌歌词。</p>
               ) : (
