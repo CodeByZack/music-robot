@@ -187,6 +187,8 @@ music-robot/
 ├── examples/           # 人工排查用的 `cargo run --example`：dump（逐文件打印全字段）
 │                       # + native（MR_NO_FFPROBE=1 强制本地兜底通道）。**不是测试**、不参与 cargo test，
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
+├── .dsh/skills/         # **项目级 agent skill**（DSH 扫这一层，`<名>/SKILL.md`，不递归）
+│                       # 24 个 Expo 官方 skill（expo-*/eas-*），来源与更新方式见 .dsh/README.md
 ├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，140 项；非交互，给回归用）
 ├── scripts/api_cli.mjs  # 交互式 API 客户端（方向键菜单，连**已在跑**的服务；只用 node:readline，零依赖）
 │                       # 曲库菜单里有：扫描入库 / 刮削 / 重刮失败项 / 重刮单曲
@@ -273,7 +275,7 @@ argon2id 口令哈希 + `require_auth` 中间件 + `AdminUser` 403 守卫 ·
 
 | 项目 | 状态 |
 |---|---|
-| **S24–S26 前端**（React + Vite） | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build） |
+| **S24–S26 前端** | 未开始 —— **动之前先问用户**（AGENTS.md：NAS 上不随意装依赖 / 跑全量 build）。**技术选型见 §6.6**：画布写的是 React + Vite，用户 2026-10-01 提出改用 **Expo**（为将来移动端共用代码），调研结论是「Expo 壳可以用，但 PC 页面别用 react-native-web 组件写」 |
 | ↳ **刮削页必须带「是否应用到文件」开关** | 🔴 **用户 2026-09-30 明确要求，做页面时别漏**。理由见 §6.3「刮削默认直写原文件」——现在 `POST /api/scrape` 是**全库无差别覆盖**，页面上必须让用户先选「只入库 / 也写文件」再动手 |
 | S27 文件整理 · S28 集成打包 | 未开始 |
 | **provider（下载）插件 kind** | ❌ 未实现 —— 见下面「两个已知缺口」 |
@@ -520,6 +522,57 @@ TS 仓库 `/vol1/@appshare/dsh/data/tagwash-test` 目前**还在**，所以 §8.
 
 **它不是权限模型**：只回答「路径在不在库根下」，不回答「这个用户有没有权限」。
 多租户隔离要靠上层 token/tenant 映射到不同 root，别在沙箱层做。
+
+### 6.6 前端技术选型：Expo Web 能不能做 PC 页面（2026-10-01 调研）
+
+**背景**：画布 S24 原本写的是 `Vite + React + 路由 + axios 拦截器`。用户 2026-10-01 提出
+改用 **Expo Web**，目的是**和将来的 iOS/Android 客户端共用一份代码逻辑**。以下是调研结论。
+
+**结论：Expo 这个壳可以用，但 `react-native-web`（RNW）那一层组件不该用来写 PC 主界面。**
+推荐 **Expo 单仓库 + Web 端直接写 React DOM**。
+
+#### 证据（都是官方原文或源码，不是二手经验）
+
+- 📗[Expo 官方](https://docs.expo.dev/workflow/web/)逐字：
+  > 「RNW is **optional** when developing for web since you can use React DOM directly」
+  > 「Building web-only components is **fully supported** by Expo」
+  即 「Web 端直接写 `<div>`」是官方支持的一等用法，不是 hack。
+- 📗 官方自己在 [平台分叉文档](https://docs.expo.dev/router/advanced/platform-specific-modules/)
+  的示例里就写 `Platform.OS === 'web' ? <div>…<Slot/></div> : <Tabs>` —— **官方示范的就是「外壳分叉」**。
+- 📗 `expo-router` 官方 skill 里也有 `_layout.web.tsx` 的独立 Web 布局做法（本地已装，见 `.dsh/skills/expo-router/references/tabs.md`）。
+- 🔬 RNW 的 `forwardedProps` 白名单里**没有** `onDrop/onDragStart/onDragOver/onDrop…`，
+  而不在白名单的事件（含 `onCopy/onPaste/onDoubleClick`）会被 **`pick()` 静默丢弃、不报错**。
+  → HTML5 拖放、复制粘贴、双击 在 `<View>` 上不可用，必须降到 DOM 层。
+- 🔬 RNW 的 role→语义标签映射表里**没有 `table/tr/td`**：`<View role="table">` 只得到一个
+  `<div role="table">`，拿不到真表格布局算法。做「曲目列表」这是决定性的。
+- 📗 RNW 官方明确：**不支持 `@`-rules / 伪类 / 伪元素**（所以 `:hover`、`:focus-visible`
+  只能靠 JS 事件 + 重渲染）；**列表组件「not optimized for the web」**；
+  `Animated` 在 Web 上**没有 `useNativeDriver`**。
+- 🔬 `cursor` / `userSelect` 是 **RNW 专有 style**：放进共享 StyleSheet 后，
+  **原生端 `StyleSheet.validate` 会直接抛错**。共享样式文件本身就是雷区。
+- 📊 官方 24 个 skill 正文里：`native` 1199 次 vs `web` 281 次，`desktop` **只出现 1 次**
+  （还是在 `expo-app-clip` 里）。**Expo 官方指导里根本没有「PC 桌面端」这个场景。**
+
+#### 落地形态（等用户拍板后再动手）
+
+```
+apps/web/                  # Expo 项目（唯一前端）
+  app/_layout.web.tsx      # PC 外壳：<div> + CSS grid 侧边栏
+  app/_layout.native.tsx   # 手机外壳：<Tabs>（将来）
+  app/(library)/index.web.tsx   # PC：真 <table> + 虚拟滚动
+packages/core/             # 100% 共用：API client / 类型 / 播放队列状态机 / hooks
+```
+
+硬规则（不管最后选哪个方案都成立）：
+1. **PC 页面不用 `<View>/<Text>` 拼布局**，直接 `<div>` + CSS；`className` 在 RNW 组件上
+   会被静默丢弃，要桥接 CSS 类得用 `style={{ $$css: true, _: 'my-class' }}`。
+2. **共享样式文件里禁止出现 `cursor` / `userSelect`** —— 会让原生端崩，一律放 `.web.ts`。
+3. 全局快捷键（空格播放等）用 `document.addEventListener`，写进 `.web.ts`。
+4. `web.output` 用 `single`（SPA）：路由是 `/:artist/:album/:track`，穷举不了，静态渲染没意义。
+5. 真要上架 App 时先做 PWA 验证，再评估 Capacitor（把 Web 包壳）而不是反过来把 Web 塞进 RN。
+
+⚠️ **没找到可靠来源**的一条：没有任何公开复盘是「某团队用 Expo Web 做了桌面优先的复杂 Web 应用」。
+官方文档全程假设「响应式 Web + 移动 App」，**没有针对桌面宽屏的专门指南**。这本身也是信号。
 
 ---
 
