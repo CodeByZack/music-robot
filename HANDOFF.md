@@ -616,6 +616,41 @@ Next/Vite 等）。认不出就走**手动安装**路径（自己写 `components
 ⚠️ **没找到可靠来源**的一条：没有任何公开复盘是「某团队用 Expo Web 做了桌面优先的复杂 Web 应用」。
 官方文档全程假设「响应式 Web + 移动 App」，**没有针对桌面宽屏的专门指南**。这本身也是信号。
 
+#### 6.6.1 RN 组件库调研补充（2026-10-01）
+
+完整报告见 **[`docs/expo-rn-ui-libs-research.md`](docs/expo-rn-ui-libs-research.md)**（版本/star/下载量均实测自
+npm registry 与 GitHub API）。**结论：这些 RN 组件库对 PC 端零价值，一个都别引。**
+
+理由一句话：它们解决的是「**让 RN 代码在 web 上跑得好**」，而我们**根本不写 RN 代码做 web** —— 价值恒等于 0。
+而且连 web 端最强的 Tamagui / Unistyles 也**绕不开 RNW 组件树**，上面那四条硬限制一条都不会消失。
+
+三个值得单独记的事实：
+
+- **RN 生态在 Table/DataGrid 上是空白**。最靠谱的 `react-native-table-component` 停在 **2022-02**；
+  Paper 的 `DataTable` 是不虚拟化的静态表格；gluestack 的 `Table` 还是 alpha；
+  `expo-flash-datagrid` 周下载 **26**。根因是 RN 没有 `<table>`、没有 CSS grid。→ **PC 表格只能在 DOM 侧做。**
+- **没有 shadcn-admin 级的 Expo 后台模板**：`shadcn-admin` 15,457 star，而最接近的
+  `ixartz/React-Native-Boilerplate` 411 star 且 2025-08 停更、gluestack starter kits 252 star 且 2024-11 停更
+  ——**差两个数量级**。这本身就说明认真做 PC 后台的人不用这个生态。
+- **gluestack v5 已明确放弃 web**（2026-06 stable，官方公告：strategic shift to focus entirely on
+  *native mobile* performance、*Next.js Support Dropped*）。所以**别因为"它长得像 shadcn"就选它**。
+
+**PC 端该补的是这几个（补强，不是换库）**：
+
+| 需求 | 用什么 |
+|---|---|
+| DataGrid | `@tanstack/react-table`（9.2.4）+ shadcn 的 `data-table` |
+| 虚拟滚动 | `@tanstack/react-virtual`（3.14.13）—— 不要用 FlashList，官方不承诺 web |
+| 右键菜单 | Radix `ContextMenu` |
+| 拖拽 | `@dnd-kit/core`（DOM 原生 drag 语义，RNW 给不了） |
+| 表单 | `react-hook-form` + `zod` + shadcn `Form` |
+
+**将来真做移动端 App 时**（现在**不要**为此提前引任何依赖）：
+样式层用 **NativeWind 5.x**（届时等 stable，现在还是 `5.0.0-rc.0`）—— 它基于 Tailwind v4，
+与 PC 端**同一套 token 与心智**，这是唯一真实成立的「复用」；
+组件层参考 **React Native Reusables**（shadcn/ui 的 RN 移植，8.6k star，活跃），
+视觉体系能和 PC 端对齐。**组件库选型届时时点再评估**——gluestack 半年内就从 universal 转向 native-only 了。
+
 ---
 
 ## 7. 设计约定（必须遵守）
