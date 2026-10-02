@@ -365,10 +365,12 @@ fn map_error(e: TagEditError) -> ApiError {
 /// * **不落库、不写文件、不改 `scrape_status`** —— 结果只是一份待用户确认的提议。
 ///   批量那条会直接覆盖原文件（不可撤销），编辑页要的是「先看看」。
 /// * **返回低于阈值的备选**：批量路径里 confidence < 0.80 当未命中，这里交给用户判断。
+/// * **问完所有插件**（批量为「命中即停」），结果**按插件分组**返回 ——
+///   用户要比较的就是「各个源怎么说」，扁平成一个列表就看不出这一点了。
 /// * 未命中时把**插件给的中文原因**原样带回（如「候选里没有一条能和本地歌手或时长对上」），
 ///   它直接告诉用户该先改哪个字段，比一句「刮削失败」有用得多。
 ///
-/// 权限与 `/api/scrape` 同档（admin）—— 它会发起外部网络请求。
+/// 权限与 `/api/scrape` 同档（admin）—— 它会发起外部网络请求，且**每个插件都会跑**。
 pub async fn query_scrape(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -386,11 +388,22 @@ pub async fn query_scrape(
             other => ApiError::internal(other.to_string()),
         })?;
 
-    Ok(Json(json!({
-        // 候选按 confidence 降序 —— 界面把 `[0]` 当默认显示，其余供用户切换。
-        "candidates": query.candidates.iter().map(proposal_json).collect::<Vec<_>>(),
-        "notes": query.notes,
-    })))
+    // 按插件分组，**保留配置里的插件顺序**（即优先级顺序）——
+    // 界面据此展示「先试哪个、谁的答案更可信」，重排就没这个信息了。
+    let plugins: Vec<Value> = query
+        .plugins
+        .iter()
+        .map(|attempt| {
+            json!({
+                "plugin": attempt.plugin,
+                // 候选按 confidence 降序 —— 界面把 `[0]` 当默认选中。
+                "candidates": attempt.candidates.iter().map(proposal_json).collect::<Vec<_>>(),
+                "note": attempt.note,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "plugins": plugins })))
 }
 
 /// 提议 → JSON。
@@ -438,7 +451,6 @@ fn proposal_json(p: &crate::service::ScrapeProposal) -> Value {
     let cover_skipped = p.cover.as_ref().is_some_and(|pic| pic.data.len() > crate::service::max_embed_cover_bytes());
 
     json!({
-        "plugin": p.plugin,
         "confidence": p.confidence,
         "meets_threshold": p.meets_threshold,
         "source": p.source,
@@ -691,7 +703,6 @@ mod scrape_tests {
 
     fn proposal(tags: Tags) -> ScrapeProposal {
         ScrapeProposal {
-            plugin: "fake".into(),
             confidence: 0.9,
             meets_threshold: true,
             source: Some("fake-source".into()),

@@ -412,10 +412,10 @@ struct ScrapedHit {
 ///
 /// 没 derive `PartialEq`：[Picture] 只有 `Debug + Clone`，为了比一个封面字节而给它
 /// 加 Eq 不值得（而且封面本来就该按内容比，不是按结构比）。
+///
+/// **不带插件名**：候选一律挂在 [PluginAttempt] 下，插件名在那儿。
 #[derive(Debug, Clone)]
 pub struct ScrapeProposal {
-    /// 产出这条提议的插件名
-    pub plugin: String,
     /// 插件给出的 confidence
     pub confidence: f64,
     /// 是否达到自动落库阈值（≥ [HIT_CONFIDENCE]）。不到也能给用户看，只是标一下。
@@ -430,18 +430,28 @@ pub struct ScrapeProposal {
     pub cover: Option<Picture>,
 }
 
+/// **一个插件**的查询结果。
+///
+/// 为什么要按插件分组而不是把候选排成一个扁平列表：多插件时用户要判断的是
+/// 「信哪个源」—— 比如 A 插件给出原版专辑名、B 插件给出的是合辑，这是**源之间的差异**，
+/// 不分组就看不出来。分组后界面可以按插件折叠、按插件筛。
+#[derive(Debug, Clone)]
+pub struct PluginAttempt {
+    /// 插件名
+    pub plugin: String,
+    /// 该插件给出的候选，**按 confidence 降序**。空 = 这个插件没给出可用结果。
+    pub candidates: Vec<ScrapeProposal>,
+    /// 中文说明，**总是有值**：命中时说给了几条、未命中时把插件的原因原样带上。
+    /// 插件的原因（如「候选里没有一条能和本地歌手或时长对上」）直接告诉用户该先改哪个字段，
+    /// 比一句「刮削失败」有用得多。
+    pub note: String,
+}
+
 /// [ScrapeService::query_song] 的结果。
 #[derive(Debug, Clone)]
 pub struct ScrapeQuery {
-    /// 候选，**按 confidence 降序**（`[0]` = 最可信）。空 = 全部插件都没给出结果。
-    ///
-    /// 为什么是一组而不是一条：同一歌名在数据源里常对应多条录音，
-    /// 让用户看得见差别、选得出对的那条，比服务端用固定阈值替他决定准。
-    pub candidates: Vec<ScrapeProposal>,
-    /// 每个插件的中文说明（未命中的原因 / 给了几条候选）。
-    /// **没有命中时这一项就是全部价值** —— 插件给的原因（如「候选里没有一条能和本地歌手
-    /// 或时长对上」）比一句「刮削失败」有用得多，它直接告诉用户该先改哪个字段。
-    pub notes: Vec<String>,
+    /// 每个插件一条，**按配置里的插件顺序**（即批量路径的优先级顺序）。
+    pub plugins: Vec<PluginAttempt>,
 }
 
 /// 一条**已读进内存**的命中素材 → 可对外展示的候选。
@@ -454,7 +464,6 @@ fn proposal_of(hit: ScrapedHit) -> ScrapeProposal {
         .as_ref()
         .and_then(|pics| pics.first().cloned());
     ScrapeProposal {
-        plugin: hit.plugin,
         confidence: hit.confidence,
         meets_threshold: hit.confidence >= HIT_CONFIDENCE,
         source: hit.source,
@@ -635,8 +644,10 @@ impl ScrapeService {
     ///    而这里把它当「备选」交给界面 —— 插件自己已经卡了一道闸（低于 0.5 回 NOT_FOUND），
     ///    所以能回来的都是插件认可的候选，该不该用由人判断。
     ///
-    /// 多个插件都给出结果时取 confidence 最高的那条；一旦有达到阈值的就提前停
-    /// （与批量的「命中即停」一致，没必要再问后面的插件）。
+    /// **问完所有插件**（不像批量路径那样命中即停）。这一条是有意与批量不一致的：
+    /// 用户点「刮削」就是想比较「各个源怎么说」，早停就把后面插件的结果静默藏了。
+    /// 代价是慢（每个插件都是一次子进程 + 网络请求），所以这个接口只服务于
+    /// 用户主动触发的低频动作，**不能**被列表页批量调用。
     pub fn query_song(&self, song_id: i64) -> Result<ScrapeQuery, ScrapeError> {
         // 只读一行；**不** claim。
         let song = {
@@ -652,49 +663,49 @@ impl ScrapeService {
             None => None,
         };
 
-        let mut notes: Vec<String> = Vec::new();
-        let mut best: Vec<ScrapeProposal> = Vec::new();
+        let mut plugins: Vec<PluginAttempt> = Vec::with_capacity(self.plugins.len());
         for slot in &self.plugins {
             let now = self.clock.now();
             let cooldown_until = *lock(&slot.cooldown_until);
             if let Some(until) = cooldown_until {
                 if now < until {
-                    notes.push(format!("{}：限流冷却中，本次跳过", slot.name));
+                    plugins.push(PluginAttempt {
+                        plugin: slot.name.clone(),
+                        candidates: Vec::new(),
+                        note: "限流冷却中，本次跳过".to_string(),
+                    });
                     continue;
                 }
                 *lock(&slot.cooldown_until) = None;
             }
             // 阈值给 0.0：插件回来的 Ok 全部收下（插件内部已经拦掉 < 0.5 的）。
-            match self.try_plugin(slot, &song, album_name.as_deref(), 0.0) {
+            plugins.push(match self.try_plugin(slot, &song, album_name.as_deref(), 0.0) {
                 AttemptOutcome::Hit(hits) => {
                     // 同一个插件的多条候选**全部**带给界面（这是「只查不写」的价值所在：
                     // 同一歌名对应多张专辑时，让人来挑比固定阈值准）。
                     let best_conf = hits.first().map(|h| h.confidence).unwrap_or(0.0);
                     let meets = best_conf >= HIT_CONFIDENCE;
-                    notes.push(format!(
-                        "{}：给出 {} 条候选，最高 confidence {:.2}{}",
-                        slot.name,
+                    let note = format!(
+                        "{} 条候选，最高 {:.0}% 可信{}",
                         hits.len(),
-                        best_conf,
+                        best_conf * 100.0,
                         if meets { "（达到自动采用阈值）" } else { "（低于自动采用阈值，仅供参考）" }
-                    ));
-                    let candidates: Vec<ScrapeProposal> = hits.into_iter().map(proposal_of).collect();
-                    if meets {
-                        best = candidates;
-                        break;
-                    }
-                    // 不达标：留着当备选，继续试后面的插件（也许它有更确定的答案）。
-                    // 只有「更可信」时才覆盖 —— 免得拿一组差候选把前面那组好的挤掉。
-                    let better = candidates.first().map(|c| c.confidence).unwrap_or(0.0)
-                        > best.first().map(|c| c.confidence).unwrap_or(0.0);
-                    if better {
-                        best = candidates;
+                    );
+                    PluginAttempt {
+                        plugin: slot.name.clone(),
+                        candidates: hits.into_iter().map(proposal_of).collect(),
+                        note,
                     }
                 }
-                AttemptOutcome::Miss(reason) => notes.push(format!("{}：{reason}", slot.name)),
-            }
+                // 未命中：把插件的原因原样带上（它常直接指出该先改哪个字段）。
+                AttemptOutcome::Miss(reason) => PluginAttempt {
+                    plugin: slot.name.clone(),
+                    candidates: Vec::new(),
+                    note: reason,
+                },
+            });
         }
-        Ok(ScrapeQuery { candidates: best, notes })
+        Ok(ScrapeQuery { plugins })
     }
 
     /// 试一个插件。返回 Miss 表示「这个插件这次不算命中」，调用方继续回退。

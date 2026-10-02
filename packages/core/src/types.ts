@@ -284,9 +284,10 @@ export interface TagPatchRequest {
  *
  * 与批量刮削的区别：批量路径在达到命中阈值时会**直接覆盖原文件**；
  * 这个查询只是把结果拿回来给用户看，由用户决定要不要填进表单。
+ *
+ * **不带插件名** —— 候选一律挂在 {@link PluginAttempt} 下。
  */
 export interface ScrapeProposal {
-  plugin: string;
   confidence: number;
   /**
    * 是否达到自动采用阈值（服务端的 `HIT_CONFIDENCE` = 0.80）。
@@ -312,21 +313,27 @@ export interface ScrapeProposal {
   cover_skipped: boolean;
 }
 
-export interface ScrapeQueryResult {
-  /**
-   * 候选，**按 confidence 降序** —— `[0]` 是最可信的那条（界面默认显示它）。
-   *
-   * 为什么是一组：同一歌名在数据源里常对应多条录音（原版 / 现场 / 重混 / 翻唱），
-   * title 一模一样，只有专辑与年份不同。插件懂数据源的结构（哪个 release 是合辑），
-   * 所以筛选在插件里做；而「用户到底要哪条」由人来定。
-   * 空数组 = 所有插件都没给出结果。
-   */
+/**
+ * **一个插件**的查询结果。
+ *
+ * 为什么要按插件分组而不是把候选排成一个扁平列表：多插件时用户要判断的是
+ * 「信哪个源」—— 比如 A 插件给出的是原版专辑名、B 插件给的是合辑，
+ * 这是**源之间的差异**，不分组就看不出来。
+ */
+export interface PluginAttempt {
+  plugin: string;
+  /** 该插件给出的候选，**按 confidence 降序**。空 = 这个插件没给出可用结果。 */
   candidates: ScrapeProposal[];
   /**
-   * 每个插件的中文说明（未命中的原因 / 给了几条候选）。
-   * **未命中时这一项就是全部价值** —— 它直接告诉用户该先改哪个字段。
+   * 中文说明，**总是有值**：命中时说给了几条，未命中时是插件给的原因。
+   * 插件的原因常直接指出该先改哪个字段（如「没有一条能和本地歌手或时长对上」）。
    */
-  notes: string[];
+  note: string;
+}
+
+export interface ScrapeQueryResult {
+  /** 每个插件一条，**按配置里的插件顺序**（即批量路径的优先级顺序）。 */
+  plugins: PluginAttempt[];
 }
 
 /** 一处改动。`before` / `after` 已经是**给人看的字符串**（没有值显示为「(无)」）。 */
