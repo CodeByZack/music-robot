@@ -36,6 +36,9 @@ interface PlayerValue {
   prev: () => void;
   seek: (ms: number) => void;
   cycleMode: () => void;
+  /** 0~1。**本地**偏好（后端没有 volume 键），不落盘。 */
+  volume: number;
+  setVolume: (v: number) => void;
   /** 队列里的曲目（按播放顺序），给「正在播放」页的队列标签用。 */
   queueSongs: Song[];
   /** 跳到队列里的第 i 个（按播放顺序）。 */
@@ -61,6 +64,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  // 音量是**本地**偏好（后端 settings 里没有 volume 键），元素不重建所以换歌保留。
+  const [volume, setVolumeState] = useState(1);
 
   // 想在「由 ended 推进队列」时读到最新 queue，但 effect 依赖 queue 又会重复触发。
   // 用一个 ref 拿最新值，避免把 next() 塞进 effect 依赖里造成循环。
@@ -188,6 +193,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setVolume = useCallback(
+    (v: number) => {
+      const clamped = Math.max(0, Math.min(1, v));
+      audio.setVolume(clamped);
+      setVolumeState(clamped);
+    },
+    [audio],
+  );
+
   const value = useMemo<PlayerValue>(
     () => ({
       queue,
@@ -201,6 +215,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev: () => setQueue((q) => prev(q)),
       seek,
       cycleMode,
+      volume,
+      setVolume,
       queueSongs,
       jumpToQueueIndex: (index: number) => setQueue((q) => ({ ...q, cursor: index })),
     }),
@@ -215,6 +231,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       toggle,
       seek,
       cycleMode,
+      volume,
+      setVolume,
       queueSongs,
     ],
   );

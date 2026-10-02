@@ -68,3 +68,37 @@
     background: transparent;
   }
 }
+
+/* ── 全屏浮层的进出场 ────────────────────────────────────────────
+   设置页与播放页都盖在整个应用上，硬切会很生硬（用户 2026-10-01 反馈）。
+   只用 **透明度 + 一点点缩放**，不弹跳、不加延迟 —— 对齐 design.md §6 的口径。
+   退场动画由 JS 延迟 ~180ms 再真正导航（见 lib/use-overlay-close.ts）。
+   ───────────────────────────────────────────────────────────── */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes overlay-out {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+@layer utilities {
+  .anim-overlay-in {
+    animation: overlay-in 0.2s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  .anim-overlay-out {
+    animation: overlay-out 0.18s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  /* 系统开了「减弱动态效果」就别动 —— 这是无障碍要求，不是可选项 */
+  @media (prefers-reduced-motion: reduce) {
+    .anim-overlay-in,
+    .anim-overlay-out {
+      animation: none;
+    }
+  }
+}

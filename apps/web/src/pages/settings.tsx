@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RESUME_KEY_PREFIX, type Job } from '@music-robot/core';
+import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { setWriteFiles as setWriteFilesPref, useWriteFiles } from '@/lib/scrape-prefs.ts';
 import { api } from '@/lib/client.ts';
 import { useAsync } from '@/lib/use-async.tsx';
@@ -66,7 +67,29 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
+/** 设置的分节。左边那栏就按这个渲染。 */
+const SECTIONS = [
+  { id: 'library', label: '音乐库' },
+  { id: 'playback', label: '播放' },
+  { id: 'account', label: '账号' },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]['id'];
+
 export default function SettingsPage() {
+  const [section, setSection] = useState<SectionId>('library');
+
+  // 关闭设置：优先回上一页，带动画（见 lib/use-overlay-close.ts）
+  const { closing, close } = useOverlayClose('/');
+
+  // Esc 关闭
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [close]);
   const { user, logout } = useSession();
   const [scanJob, setScanJob] = useJobPoll();
   const [scrapeJob, setScrapeJob] = useJobPoll();
@@ -113,17 +136,54 @@ export default function SettingsPage() {
   const resumeCount = Object.keys(settings.data?.settings ?? {}).filter((k) => k.startsWith(RESUME_KEY_PREFIX)).length;
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
-      <div className="pt-2.5 pb-5">
-        <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">设置</h1>
-        <div className="mt-1 text-[13px] text-ink-3">
-          {user ? `${user.username} · ${user.role === 'admin' ? '管理员' : '普通用户'}` : ''}
+    /* 全屏接管（对齐飞牛的设置页）—— 不弹居中面板、不留遮罩缝隙。
+       关：右上角 ✕ / Esc。进场 / 退场动画见 global.css 的 .anim-overlay-*。 */
+    <div
+      className={[
+        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-[#14121b]',
+        closing ? 'anim-overlay-out' : 'anim-overlay-in',
+      ].join(' ')}
+    >
+      <div className="flex h-[58px] shrink-0 items-center gap-2 border-b border-line-weak px-5">
+          <h2 className="text-[15px] font-medium">设置</h2>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={close}
+            title="关闭"
+            aria-label="关闭设置"
+            className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
         </div>
-      </div>
 
-      {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-[12.5px] text-accent">{err}</p>}
+        <div className="flex min-h-0 flex-1 flex-col min-[701px]:flex-row">
+          {/* 分节导航：窄屏横向 tab，桌面左栏 */}
+          <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line-weak p-2 min-[701px]:w-[186px] min-[701px]:flex-col min-[701px]:border-r min-[701px]:border-b-0 min-[701px]:p-3">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSection(s.id)}
+                className={[
+                  'shrink-0 rounded-md px-3 py-2 text-left text-[13px] transition-colors',
+                  section === s.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
+                ].join(' ')}
+              >
+                {s.label}
+              </button>
+            ))}
+          </nav>
 
-      <Panel title="刮削">
+          <div className="min-h-0 flex-1 overflow-auto p-5">
+            {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-[12.5px] text-accent">{err}</p>}
+
+            {section === 'library' && (
+              <>
+                <Panel title="刮削">
         {/* 这个开关现在**真的有用** —— 后端 POST /api/scrape 支持 write_files。
             以前只能在界面上拦一道，拦不住写入本身。 */}
         <label className="flex cursor-pointer items-center gap-3">
@@ -201,8 +261,11 @@ export default function SettingsPage() {
         </Row>
         {scanJob && <Progress job={scanJob} />}
       </Panel>
+              </>
+            )}
 
-      <Panel title="播放">
+            {section === 'playback' && (
+              <Panel title="播放">
         <Row label="音量" hint={vol === undefined ? '后端没有这个键' : `settings.volume = ${vol}`}>
           <span className="rounded-sm bg-black/30 px-2.5 py-[7px] font-mono text-xs text-ink-3">
             {vol ?? '—'}
@@ -220,8 +283,10 @@ export default function SettingsPage() {
           <span className="text-xs text-ink-3">已记住 {resumeCount} 首</span>
         </Row>
       </Panel>
+            )}
 
-      <Panel title="账号">
+            {section === 'account' && (
+              <Panel title="账号">
         <Row label={user?.username ?? ''} hint={user?.role === 'admin' ? '管理员' : '普通用户'}>
           <button
             onClick={async () => {
@@ -239,6 +304,9 @@ export default function SettingsPage() {
           </button>
         </Row>
       </Panel>
+            )}
+          </div>
+        </div>
     </div>
   );
 }

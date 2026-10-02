@@ -1,5 +1,6 @@
 import type { PlayMode } from '@music-robot/core';
 import { Link } from 'react-router';
+import Cover from '@/components/cover.tsx';
 import { usePlayer } from '@/lib/player.tsx';
 
 /** 毫秒 → `1:12`。 */
@@ -58,10 +59,12 @@ export default function PlayerBar() {
   const pct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 
   return (
+    /* 宽度 720px（飞牛是 768）。以前 880px —— 太长了，两侧留白显得很空。
+       进「正在播放」的入口只有一个：左边那块封面 + 歌名（通行手势，够用了）。 */
     <div
       className={[
         'absolute bottom-[18px] left-1/2 flex h-[62px] -translate-x-1/2 items-center gap-[14px]',
-        'w-[min(880px,calc(100%-56px))] rounded-2xl border border-line px-4',
+        'w-[min(720px,calc(100%-56px))] rounded-2xl border border-line px-4',
         'bg-glass shadow-[0_8px_32px_rgba(0,0,0,.42)] backdrop-blur-[18px] backdrop-saturate-150',
         'max-[900px]:bottom-3 max-[900px]:h-14 max-[900px]:w-[calc(100%-24px)] max-[900px]:gap-2.5 max-[900px]:px-3',
       ].join(' ')}
@@ -74,9 +77,13 @@ export default function PlayerBar() {
         title="正在播放"
         className="group flex shrink-0 cursor-pointer items-center gap-[14px] max-[900px]:min-w-0 max-[900px]:flex-1 max-[900px]:gap-2.5"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-surface text-ink-3 transition-colors group-hover:bg-surface-hover group-hover:text-ink max-[900px]:size-9">
-          ♪
-        </span>
+        {/* 真封面。没内嵌封面的歌由 Cover 自己退回 ♪ 占位。 */}
+        <Cover
+          id={song.id}
+          className="size-10 shrink-0 transition-colors group-hover:brightness-110 max-[900px]:size-9"
+          rounded="rounded-md"
+          glyphClass="text-sm"
+        />
         <div className="w-[150px] min-w-0 shrink-0 max-[900px]:w-auto max-[900px]:flex-1">
           <div className="overflow-hidden font-medium text-ellipsis whitespace-nowrap">
             {song.title ?? '（无标题）'}
@@ -156,19 +163,6 @@ export default function PlayerBar() {
       >
         <ModeIcon mode={queue.mode} />
       </button>
-
-      {/* 明写一个入口（原型里也有这颗）—— 光靠「歌名可点」总有人找不到。
-          窄屏（<900px）藏掉，跟上面那颗模式按钮同一档断点。 */}
-      <Link
-        to="/now"
-        title="正在播放"
-        className="hidden size-[30px] shrink-0 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink min-[901px]:flex"
-      >
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
-          <path d="M2 4.5h12M2 8h12M2 11.5h7" />
-          <circle cx="12.4" cy="11.5" r="1.7" fill="currentColor" stroke="none" />
-        </svg>
-      </Link>
     </div>
   );
 }

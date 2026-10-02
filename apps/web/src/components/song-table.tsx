@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Song } from '@music-robot/core';
+import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
 import { usePlayer } from '@/lib/player.tsx';
 import { MenuButton } from '@/components/menu.tsx';
@@ -192,13 +193,15 @@ export default function SongTable({
             专辑
           </th>
           <th className="w-[42px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
-          <th className="w-[38px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
           <th className="w-[62px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
             时长
           </th>
           <th className="w-[60px] border-b border-line px-3 pb-[9px] text-left text-[11px] tracking-[.06em] text-ink-4 max-[1024px]:hidden">
             格式
           </th>
+          {/* ⋯ 放**最后一列**（以前夹在 ♡ 与 时长 中间，把数据列切断了）。
+              窄屏也保留 —— 它是那一行唯一的操作入口。 */}
+          <th className="w-[38px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4" />
         </tr>
       </thead>
       <tbody>
@@ -219,9 +222,15 @@ export default function SongTable({
             )}
             <td className="overflow-hidden border-b border-line-weak px-3">
               <div className="flex min-w-0 items-center gap-[11px]">
-                <span className="flex size-[30px] shrink-0 items-center justify-center rounded-sm bg-surface text-xs text-ink-4">
-                  {isDirtyArtist(s.artists) ? '⚠' : '♪'}
-                </span>
+                {/* 真封面（没内嵌封面时 Cover 自己退回 ♪ 占位）。
+                    以前这里只是一个 ♪ / ⚠ 方块 —— 列表是音乐，应该有图。
+                    「脏标签」徽标留在下面歌手那行，信息一点没丢。 */}
+                <Cover
+                  id={s.id}
+                  className="size-[34px]"
+                  rounded="rounded-md"
+                  glyphClass="text-[13px]"
+                />
                 <span className="min-w-0">
                   <div
                     className={[
@@ -259,18 +268,18 @@ export default function SongTable({
                 </svg>
               </button>
             </td>
-            <td className="border-b border-line-weak px-3 text-center max-[640px]:hidden">
-              <RowMenu
-                state={scrape.get(s.id)}
-                writeFiles={writeFiles}
-                onRescrape={() => void rescrape(s)}
-              />
-            </td>
             <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">
               {mmss(s.duration_ms)}
             </td>
             <td className="border-b border-line-weak px-3 text-[11px] tracking-[.06em] text-ink-4 max-[1024px]:hidden">
               {s.format ?? '—'}
+            </td>
+            <td className="border-b border-line-weak px-3 text-center">
+              <RowMenu
+                state={scrape.get(s.id)}
+                writeFiles={writeFiles}
+                onRescrape={() => void rescrape(s)}
+              />
             </td>
           </tr>
         ))}

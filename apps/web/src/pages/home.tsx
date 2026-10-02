@@ -1,23 +1,87 @@
 import { useCallback } from 'react';
 import { Link } from 'react-router';
 import type { HistoryPage, Page, Song } from '@music-robot/core';
-import SongTable from '@/components/song-table.tsx';
+import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
 import { ErrorNote, LoadingNote, useAsync } from '@/lib/use-async.tsx';
+import { usePlayer } from '@/lib/player.tsx';
 import { useSession } from '@/lib/session.tsx';
 
+/**
+ * 首页四张 hero 卡。**每张都有渐变**（以前只有「音乐库」一张是彩色的，
+ * 其余三张是暗块 —— 节奏很怪）。渐变直接取飞牛的 `--ds-special-gradient-*`。
+ */
 const TILES = [
-  { to: '/library', label: '音乐库', hero: true, d: 'M2.5 7 8 2.5 13.5 7v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z' },
-  { to: '/favorites', label: '收藏', d: 'M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z' },
-  { to: '/playlists', label: '歌单', d: 'M2 4h12M2 8h12M2 12h7' },
-  { to: '/settings', label: '设置', d: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3.2l2.2 1.4' },
+  {
+    to: '/library',
+    label: '音乐库',
+    grad: 'linear-gradient(135deg,#ef7030,#f28d23)',
+    // 层叠图标。以前是两根竖条，跟暂停键长得一模一样（见 shell.tsx 的 NAV）。
+    d: 'M8 2.4 14.2 5.8 8 9.2 1.8 5.8z M2.6 9.6 8 12.5l5.4-2.9',
+  },
+  {
+    to: '/albums',
+    label: '专辑',
+    grad: 'linear-gradient(135deg,#1a4d2e,#4f9d69)',
+    d: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 6.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z',
+  },
+  {
+    to: '/artists',
+    label: '歌手',
+    grad: 'linear-gradient(135deg,#26356e,#4f6fd0)',
+    d: 'M8 2.8a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM3.2 13.4a4.9 4.9 0 0 1 9.6 0',
+  },
+  {
+    to: '/favorites',
+    label: '收藏',
+    grad: 'linear-gradient(135deg,#8f2f5a,#d9557f)',
+    d: 'M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z',
+  },
 ];
 
-function hoursAgo(ms: number): string {
-  const h = Math.round((Date.now() - ms) / 3_600_000);
-  if (h < 1) return '刚刚';
-  if (h < 24) return `${h} 小时前`;
-  return `${Math.round(h / 24)} 天前`;
+/**
+ * 歌曲网格（封面 + 曲名 + 歌手）。首页用网格而不是表格 —— 飞牛首页就是这么做的，
+ * 表格留给「音乐库」那种要密集浏览的地方。
+ */
+function SongTiles({ songs }: { songs: Song[] }) {
+  const player = usePlayer();
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-5 min-[701px]:grid-cols-3 min-[901px]:grid-cols-4">
+      {songs.map((s, i) => (
+        <button
+          key={`${s.id}-${i}`}
+          type="button"
+          onClick={() => player.playList(songs, i)}
+          className="group min-w-0 text-left"
+          title={`${s.title ?? '（无标题）'} — ${s.artists ?? '（未知歌手）'}`}
+        >
+          <div className="relative">
+            <Cover
+              id={s.id}
+              className="aspect-square w-full transition-shadow group-hover:shadow-[0_8px_32px_rgba(0,0,0,.42)]"
+              rounded="rounded-lg"
+              glyphClass="text-3xl"
+            />
+            {/* 播放按钮：**常显** + 48px。
+                以前是 32px 且只在 hover 时浮现（`opacity-0 group-hover:opacity-100`）——
+                对这么大的卡来说太小（用户 2026-10-02 反馈），而且**触屏上根本没有 hover**，
+                那个按钮永远不出现。 */}
+            <span className="absolute right-2.5 bottom-2.5 flex size-12 items-center justify-center rounded-full bg-accent text-white shadow-[0_4px_16px_rgba(0,0,0,.5)] transition-transform duration-200 group-hover:scale-110">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5 3.5v9L13 8z" />
+              </svg>
+            </span>
+          </div>
+          <div className={['mt-2 overflow-hidden text-[13.5px] font-medium text-ellipsis whitespace-nowrap', player.song?.id === s.id ? 'text-accent' : 'group-hover:text-ink'].join(' ')}>
+            {s.title ?? '（无标题）'}
+          </div>
+          <div className="overflow-hidden text-xs text-ellipsis whitespace-nowrap text-ink-3">
+            {s.artists ?? '（未知歌手）'}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function HomePage() {
@@ -46,32 +110,27 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="mb-2 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+      {/* 四张渐变卡（飞牛同形）：窄屏 2 列，≥901px 4 列 */}
+      <div className="mb-3 grid grid-cols-2 gap-4 min-[901px]:grid-cols-4">
         {TILES.map((t) => (
           <Link
             key={t.to}
             to={t.to}
-            className={[
-              'flex h-[104px] flex-col items-start justify-between rounded-lg p-[14px] transition-colors',
-              t.hero
-                ? 'bg-[linear-gradient(135deg,#f0763a,#c934e1_55%,#5b4bd6)]'
-                : 'bg-surface hover:bg-surface-hover',
-            ].join(' ')}
+            style={{ backgroundImage: t.grad }}
+            className="flex h-[104px] flex-col items-start justify-between rounded-xl p-[14px] text-white transition-[filter] hover:brightness-110 min-[901px]:h-[138px]
+                       max-[640px]:h-[92px] max-[640px]:p-3"
           >
-            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="opacity-90">
               <path d={t.d} />
             </svg>
-            <b className="text-[15px] font-medium">{t.label}</b>
+            <b className="text-[15px] font-medium tracking-[.02em]">{t.label}</b>
           </Link>
         ))}
       </div>
 
       {rec.error && <ErrorNote message={rec.error} />}
 
-      <h2 className="mt-7 mb-3 text-base leading-6 font-medium">最近添加</h2>
-      {rec.loading ? <LoadingNote /> : <SongTable songs={(rec.data?.items ?? []).slice(0, 6)} />}
-
-      <h2 className="mt-7 mb-3 text-base leading-6 font-medium">最近播放</h2>
+      <h2 className="mt-7 mb-3.5 text-base leading-6 font-medium">最近播放</h2>
       {hist.loading ? (
         <LoadingNote />
       ) : recentPlayed.length === 0 ? (
@@ -79,17 +138,11 @@ export default function HomePage() {
           还没有播放记录。{hist.data?.total ? '（有记录但曲目已不在库里）' : '去音乐库点一首试试。'}
         </p>
       ) : (
-        <>
-          <SongTable songs={recentPlayed} />
-          <div className="mt-3 space-y-1 text-xs text-ink-4">
-            {(hist.data?.items ?? []).slice(0, 3).map((h) => (
-              <div key={h.id}>
-                {h.song?.title ?? `曲目 ${h.song_id}`} · {hoursAgo(h.played_at)}
-              </div>
-            ))}
-          </div>
-        </>
+        <SongTiles songs={recentPlayed.slice(0, 12)} />
       )}
+
+      <h2 className="mt-7 mb-3.5 text-base leading-6 font-medium">最近添加</h2>
+      {rec.loading ? <LoadingNote /> : <SongTiles songs={(rec.data?.items ?? []).slice(0, 12)} />}
     </div>
   );
 }

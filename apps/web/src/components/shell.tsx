@@ -1,31 +1,43 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router';
+import { Link, NavLink, useNavigate } from 'react-router';
 import { MenuButton } from '@/components/menu.tsx';
 import { api } from '@/lib/client.ts';
 import { useSession } from '@/lib/session.tsx';
 
 /**
- * 应用外壳：安静侧边栏 + 内容区。
+ * 应用外壳：可收起侧边栏 + 常驻顶栏 + 内容区。
  *
- * 形态来源见 docs/design.md §7.5：**"不像后台"的秘密不在有没有侧边栏，
- * 而在侧边栏长什么样** —— 窄、图标+小字、选中态只是一个 8% 白底的圆角块，
- * 不用粗体、不用色条。
+ * 形态**对齐飞牛音乐**（2026-10-01 对着它的生产页面实测的尺寸）：
+ *   · 侧边栏 **展开 229px / 收起 64px 图标导轨**，底部一颗「收起 / 展开」
+ *   · 顶栏 **76px 常驻**：搜索胶囊 + 头像菜单（以前头像孤零零浮在右上角）
+ *   · 窄屏（<900px）侧边栏整个消失，藏进左上角汉堡按钮的抽屉
  *
- * 三条约定（都是用户 2026-10-02 提的）：
- * 1. **窄屏（<900px）侧边栏整个消失**，藏进左上角的汉堡按钮，以抽屉形式弹出。
- *    以前这里只是缩成 60px 图标条 —— 手机上一列图标仍然占着最宝贵的宽度。
- * 2. 设置**不在侧边栏里**，在右上角头像菜单里。
- * 3. 右上角是**用户头像**（不是齿轮）：点开有用户名/角色 · 设置 · 退出登录。
+ * 静默的秘密（docs/design.md §7.5）：选中态只是一层 8% 白底的圆角块，
+ * **不用粗体、不用左侧色条、不用大字号** —— 那些才是「后台感」的来源。
  */
 
 const NAV: { to: string; label: string; d: string }[] = [
   { to: '/', label: '首页', d: 'M2.5 7 8 2.5 13.5 7v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z' },
-  { to: '/library', label: '音乐库', d: 'M3 3.5h3.2v9H3zM9.8 3.5H13v9H9.8z' },
+  // 音乐库 = 层叠图标。**以前是两根竖条**（`M3 3.5h3.2v9H3zM9.8 3.5H13v9H9.8z`）——
+  // 跟暂停键长得一模一样，用户 2026-10-02 反馈认错。
+  { to: '/library', label: '音乐库', d: 'M8 2.4 14.2 5.8 8 9.2 1.8 5.8z M2.6 9.6 8 12.5l5.4-2.9' },
   { to: '/albums', label: '专辑', d: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 6.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z' },
   { to: '/artists', label: '歌手', d: 'M8 2.8a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM3.2 13.4a4.9 4.9 0 0 1 9.6 0' },
   { to: '/playlists', label: '歌单', d: 'M2 4h12M2 8h12M2 12h7' },
   { to: '/favorites', label: '收藏', d: 'M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z' },
 ];
+
+/** 侧边栏收起与否的持久化键。**UI 偏好，不进 core**（core 不碰 localStorage）。 */
+const RAIL_KEY = 'music-robot.sidebar.rail';
+
+function readRail(): boolean {
+  try {
+    return localStorage.getItem(RAIL_KEY) === 'rail';
+  } catch {
+    // 隐私模式 / 禁用存储 —— 读不到就按展开态，不影响使用
+    return false;
+  }
+}
 
 function Icon({ d, size = 15 }: { d: string; size?: number }) {
   return (
@@ -45,18 +57,29 @@ function Icon({ d, size = 15 }: { d: string; size?: number }) {
   );
 }
 
-/** 侧边栏内容。桌面是常驻的，窄屏是抽屉里的 —— 同一份，不抄两遍。 */
-function SideNav({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * 侧边栏本体。桌面常驻（`rail` 控制图标导轨），窄屏放在抽屉里 ——
+ * **同一份，不抄两遍**（抽屉里永远传 `rail={false}`，图标导轨在窄屏没意义）。
+ */
+function SideNav({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void }) {
   return (
     <>
-      <div className="flex items-center gap-[9px] px-2 pt-1 pb-4">
+      <Link
+        to="/"
+        onClick={onNavigate}
+        title="music-robot"
+        className={[
+          'flex items-center pt-1 pb-4',
+          rail ? 'justify-center' : 'gap-[9px] px-2',
+        ].join(' ')}
+      >
         <span className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-accent text-white">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 12.5a2 2 0 1 1-1.5-1.94V4.2l7-1.6v7.4a2 2 0 1 1-1.5-1.94V5.1L6 6.1z" />
           </svg>
         </span>
-        <b className="text-sm font-semibold tracking-[.1px]">music-robot</b>
-      </div>
+        {!rail && <b className="text-sm font-semibold tracking-[.1px]">music-robot</b>}
+      </Link>
 
       <nav className="flex flex-col gap-px">
         {NAV.map((item) => (
@@ -64,17 +87,18 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
             key={item.to}
             to={item.to}
             end={item.to === '/'}
-            title={item.label}
+            title={rail ? item.label : undefined}
             onClick={onNavigate}
             className={({ isActive }) =>
               [
-                'flex items-center gap-[10px] rounded-md px-[10px] py-2 text-[13px] transition-colors',
+                'flex items-center rounded-md py-2 text-[13px] transition-colors',
+                rail ? 'justify-center' : 'gap-[10px] px-[10px]',
                 isActive ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
               ].join(' ')
             }
           >
             <Icon d={item.d} />
-            <span>{item.label}</span>
+            {!rail && <span>{item.label}</span>}
           </NavLink>
         ))}
       </nav>
@@ -120,11 +144,75 @@ function UserMenu() {
   );
 }
 
+/**
+ * 顶栏的搜索胶囊。回车跳到 `/search?q=`。
+ *
+ * 以前搜索框在「音乐库」页自己的 header 里 —— 只有那一页能搜。飞牛把它提到了
+ * 全局顶栏（每页都在），这里照做：**搜的是整个曲库，不是当前列表的本地过滤**。
+ */
+function SearchBox() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState('');
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const v = q.trim();
+        if (v) navigate(`/search?q=${encodeURIComponent(v)}`);
+      }}
+      className="flex h-9 w-full max-w-[460px] items-center gap-[9px] rounded-full bg-surface px-[14px] text-[13px] text-ink-4 transition-colors focus-within:bg-surface-hover"
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+        <circle cx="7" cy="7" r="4.6" />
+        <path d="m10.6 10.6 3 3" />
+      </svg>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="搜索歌曲 / 歌手 / 专辑"
+        className="min-w-0 flex-1 border-0 bg-transparent text-ink outline-0 placeholder:text-ink-4"
+      />
+    </form>
+  );
+}
+
+/** 常驻顶栏。窄屏左边多一颗汉堡（侧边栏收进抽屉）。 */
+function TopBar({ onMenu }: { onMenu: () => void }) {
+  return (
+    <header className="flex h-[76px] shrink-0 items-center gap-3 px-[22px] max-[1024px]:px-4 max-[900px]:h-[60px] max-[900px]:gap-2 max-[900px]:px-3">
+      <button
+        type="button"
+        title="菜单"
+        aria-label="打开菜单"
+        onClick={onMenu}
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink min-[901px]:hidden"
+      >
+        <Icon d="M2 4h12M2 8h12M2 12h12" size={17} />
+      </button>
+
+      <SearchBox />
+      <span className="flex-1" />
+      <UserMenu />
+    </header>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   // 窄屏抽屉。桌面侧边栏是常驻的，这个状态只在 <900px 有意义。
   const [drawer, setDrawer] = useState(false);
+  // 桌面侧边栏是否收成图标导轨（持久化，见 RAIL_KEY）
+  const [rail, setRail] = useState(readRail);
 
-  // 抽屉开着时按 Esc 关掉；同时锁掉背后页面的滚动
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIL_KEY, rail ? 'rail' : 'full');
+    } catch {
+      /* 存不了就存不了，下次回来按展开态 */
+    }
+  }, [rail]);
+
+  // 抽屉开着时按 Esc 关掉
   useEffect(() => {
     if (!drawer) return;
     const onKey = (e: KeyboardEvent) => {
@@ -136,9 +224,28 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-full">
-      {/* 桌面侧边栏：<900px 整个不渲染（不是缩窄） */}
-      <aside className="hidden w-[158px] shrink-0 flex-col border-r border-line-weak bg-black/15 p-[14px_10px_10px] min-[901px]:flex">
-        <SideNav />
+      {/* 桌面侧边栏：<900px 整个不渲染（不是缩窄）。宽度在展开 / 图标导轨之间切 */}
+      <aside
+        className={[
+          'hidden shrink-0 flex-col border-r border-line-weak bg-black/15 p-[14px_10px_10px] transition-[width] duration-200 min-[901px]:flex',
+          rail ? 'w-[64px]' : 'w-[229px]',
+        ].join(' ')}
+      >
+        <SideNav rail={rail} />
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setRail((v) => !v)}
+          title={rail ? '展开' : '收起'}
+          aria-label={rail ? '展开侧边栏' : '收起侧边栏'}
+          className={[
+            'flex items-center rounded-md py-2 text-[13px] text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
+            rail ? 'justify-center' : 'gap-[10px] px-[10px]',
+          ].join(' ')}
+        >
+          <Icon d={rail ? 'M6 3.5 11 8l-5 4.5' : 'M10 3.5 5 8l5 4.5'} />
+          {!rail && <span>收起</span>}
+        </button>
       </aside>
 
       {/* 窄屏抽屉：盖在内容上，点遮罩 / 点导航 / 按 Esc 都关 */}
@@ -146,33 +253,13 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="fixed inset-0 z-50 min-[901px]:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setDrawer(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[240px] flex-col border-r border-line bg-[#141218] p-[14px_10px_10px] shadow-[0_0_40px_#000a]">
-            <SideNav onNavigate={() => setDrawer(false)} />
+            <SideNav rail={false} onNavigate={() => setDrawer(false)} />
           </aside>
         </div>
       )}
 
       <main className="relative flex min-w-0 flex-1 flex-col">
-        {/* 窄屏顶栏：左边汉堡、右边头像。做成一根真顶栏而不是浮在内容上的按钮 ——
-            浮着一定会压到页面自己的标题和搜索框（试过）。 */}
-        <header className="flex h-[52px] shrink-0 items-center gap-2 px-3 min-[901px]:hidden">
-          <button
-            type="button"
-            title="菜单"
-            aria-label="打开菜单"
-            onClick={() => setDrawer(true)}
-            className="flex size-9 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink"
-          >
-            <Icon d="M2 4h12M2 8h12M2 12h12" size={17} />
-          </button>
-          <span className="flex-1" />
-          <UserMenu />
-        </header>
-
-        {/* 桌面：头像浮在右上角（页面自己有 header 时右边本来就是空的） */}
-        <div className="absolute top-[13px] right-[22px] z-20 hidden min-[901px]:block">
-          <UserMenu />
-        </div>
-
+        <TopBar onMenu={() => setDrawer(true)} />
         {children}
       </main>
     </div>

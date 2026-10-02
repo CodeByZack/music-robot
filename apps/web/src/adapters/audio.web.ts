@@ -18,6 +18,8 @@ export interface AudioAdapter {
   play(): Promise<void>;
   pause(): void;
   seekMs(ms: number): void;
+  /** 0~1。元素不重建，所以换歌时音量自然保留。 */
+  setVolume(v: number): void;
   currentMs(): number;
   durationMs(): number;
   on(ev: AudioEvent, fn: Listener): () => void;
@@ -106,6 +108,9 @@ export function createAudioAdapter({ resolveSrc }: AudioAdapterOptions): AudioAd
     pause: () => el.pause(),
     seekMs(ms) {
       if (Number.isFinite(el.duration)) el.currentTime = ms / 1000;
+    },
+    setVolume(v) {
+      el.volume = Math.max(0, Math.min(1, v));
     },
     currentMs: () => (Number.isFinite(el.currentTime) ? el.currentTime * 1000 : 0),
     durationMs: () => (Number.isFinite(el.duration) ? el.duration * 1000 : 0),
