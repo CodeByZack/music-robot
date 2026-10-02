@@ -26,12 +26,12 @@ export default function ArtistsPage() {
         <table className="w-full border-collapse text-nav">
           <thead>
             <tr>
-              <th className="w-[46px] border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4" />
-              <th className="border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4">歌手</th>
-              <th className="w-[90px] border-b border-line px-3 pb-2 text-right text-xs font-normal text-ink-4">
+              <th className="w-[46px] border-b border-line px-3 pb-3 text-left text-xs font-normal text-ink-4" />
+              <th className="border-b border-line px-3 pb-3 text-left text-xs font-normal text-ink-4">歌手</th>
+              <th className="w-[90px] border-b border-line px-3 pb-3 text-right text-xs font-normal text-ink-4">
                 专辑
               </th>
-              <th className="w-[90px] border-b border-line px-3 pb-2 text-right text-xs font-normal text-ink-4">
+              <th className="w-[90px] border-b border-line px-3 pb-3 text-right text-xs font-normal text-ink-4">
                 歌曲
               </th>
             </tr>
@@ -40,7 +40,7 @@ export default function ArtistsPage() {
             {(data?.items ?? []).map((a, i) => (
               <tr
                 key={a.name}
-                className={['h-[46px] transition-colors hover:bg-surface-hover', i % 2 === 1 ? 'bg-white/[.017]' : ''].join(' ')}
+                className={['h-14 transition-colors hover:bg-surface-hover', i % 2 === 1 ? 'bg-white/[.017]' : ''].join(' ')}
               >
                 <td className="border-b border-line-weak px-3">
                   <Link
@@ -54,8 +54,8 @@ export default function ArtistsPage() {
                   <Link to={`/artists/${encodeURIComponent(a.name)}`} className="block min-w-0">
                     <div className="overflow-hidden font-medium text-ellipsis whitespace-nowrap">{a.name}</div>
                     {isDirtyArtist(a.name) && (
-                      <div className="text-xs leading-4 text-ink-3">
-                        <span className="inline-flex h-[15px] items-center rounded-xs bg-accent-soft px-1 text-micro tracking-[.04em] text-accent">
+                      <div className="text-xs leading-5 text-ink-3">
+                        <span className="inline-flex h-4 items-center rounded-xs bg-accent-soft px-1.5 text-micro tracking-[.04em] text-accent">
                           脏标签
                         </span>
                       </div>

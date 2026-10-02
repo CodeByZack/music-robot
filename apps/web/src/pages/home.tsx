@@ -46,7 +46,11 @@ const TILES = [
 function SongTiles({ songs }: { songs: Song[] }) {
   const player = usePlayer();
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-5 min-[701px]:grid-cols-3 min-[901px]:grid-cols-4">
+    /* 封面网格。
+       以前最宽只有 4 列 —— 在 1500px 视口下每张封面 ~305px，对「最近播放」这种
+       次要区块来说太大、跟页面不协调（用户 2026-10-02 反馈）。
+       现在按宽度加密到 6 列，封面稳定在 ~190px 左右。 */
+    <div className="grid grid-cols-2 gap-x-4 gap-y-5 min-[641px]:grid-cols-3 min-[701px]:grid-cols-4 min-[1101px]:grid-cols-5 min-[1401px]:grid-cols-6">
       {songs.map((s, i) => (
         <button
           key={`${s.id}-${i}`}
