@@ -13,7 +13,7 @@
 |---|---|
 | 项目 | 自托管音乐服务器。Rust 后端（axum + rusqlite，标签读写**全自研**）+ Web 前端（Vite + React） |
 | 后端 | **已完成**，645 个用例全绿，接口 33 条路径 / 42 个操作 |
-| 前端 | **主体已跑通**：15 条路由、16 个页面，真数据真播放。差收尾（见 §3） |
+| 前端 | **主体已跑通**：14 条路由、14 个页面，真数据真播放。差收尾（见 §3） |
 | 你大概率要做的 | ① 前端收尾与 UI 库决策 ② 标签编辑（**卡后端**）③ 点歌请求页 ④ S27/S28 |
 | 不该做的 | 别重写标签引擎，别「顺手修好」§5.2 列出的那些**故意的**行为 |
 
@@ -71,7 +71,7 @@ curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json
 | core 单测（零依赖，node:test） | **34 通过 / 0 失败** | `cd packages/core && node --test 'src/**/*.test.ts'` |
 | Web 构建 | **121 modules**，JS 317.50 kB（gzip 97.10）· CSS 30.57 kB（gzip 6.57） | `pnpm --filter @music-robot/web build` |
 | HTTP 接口 | **33 条路径 / 42 个操作**（`/api/admin/users` 2026-10-02 加了 GET） | 对着 `src/server/routes/mod.rs` 数 |
-| 前端页面 | **15 条路由 + 登录页 = 16 个页面文件**（含 4 个全屏浮层页） | `ls apps/web/src/pages/` |
+| 前端页面 | **14 条路由 = 14 个页面文件**（含 3 个全屏浮层页：`/settings` `/now` `/songs/:id/tags`） | `ls apps/web/src/pages/` |
 | 画布进度 | **24 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数） | `music-server-architecture.excalidraw` |
 | 代码量 | Rust 39864 行 · `apps/web` 2671 行 · `packages/core` 1097 行 | `wc -l` |
 | 前端测试 | **0 个**（`find apps/web -name '*.test.*'` → 空） | 见 §3.4 |
@@ -99,17 +99,19 @@ devDependencies:  vite 8 · @vitejs/plugin-react · tailwindcss 4 + @tailwindcss
 未预览 / 预览已过期 / 已预览 N 处），改之前先读 `src/server/routes/tags.rs` 的头注释。
 
 **② 点歌请求 —— ✅ 已完成（2026-10-02）**
-独立页面 `/requests`（**和 `/settings` 一样是全屏浮层页面**，不是弹层也不是普通页），
-入口有两个：搜索页搜不到时的「请求这首歌」（弹窗填表、预填搜索词）、
-顶栏右上角下拉菜单的「点歌请求」。`packages/core` 的 `api.requests.*`（5 条）已补齐。
+**设置页的一个分节**（不是独立页面，用户 2026-10-02 明确要求并进去）。
+需求侧入口在搜索页搜不到时的「请求这首歌」（弹窗填表、预填搜索词）。
+`packages/core` 的 `api.requests.*`（5 条）已补齐。代码在
+`apps/web/src/pages/settings/requests-section.tsx`。
 注意：`POST /api/requests/{id}/fetch` **恒返回 503 是故意的** —— 它要的是
 `provider`（下载）插件 kind，而注册表目前只加载 `kind = "scraper"`。别当 bug 修。
 （前端**故意没放这个按钮**：点了只会弹一条 503。）
 
 **②b 用户管理 —— ✅ 已完成（2026-10-02，含一个后端新接口）**
-独立页面 `/users`（同样全屏浮层），入口在顶栏下拉菜单（**仅 admin 可见**该项）。
+也是**设置页的一个分节**（标了 `adminOnly`，普通用户看不到该项）。
 `GET /api/admin/users`（仅 admin，**复用 `user_json`、绝不带 password_hash**）
-是本次补的；`POST` 那条本来就有。
+是本次补的；`POST` 那条本来就有。代码在
+`apps/web/src/pages/settings/users-section.tsx`。
 **不做**改密码 / 删号：前者后端没接口，后者会牵动 playlists / favorites /
 history / song_requests 一串 CASCADE —— 没有需求就别动。
 
@@ -170,8 +172,10 @@ src/                      Rust 后端（39864 行）
   tag/                    自研标签引擎（ID3v2/v1 · FLAC · WAV · APEv2）
   plugin/                 插件宿主（清单 / 协议 / 进程池 / 沙箱）
 apps/web/                 PC 前端（**主战场**）
-  src/pages/              16 个页面，对着 15 条路由；其中 /settings /now /requests /users
-                          是 `fixed inset-0` 全屏浮层（浮层外壳见 components/overlay.tsx）
+  src/pages/              14 个页面，对着 14 条路由；其中 /settings /now /songs/:id/tags
+                          是 `fixed inset-0` 全屏浮层
+                          （标签编辑拆到 settings/ 那样子的子目录：tag-edit/）
+                          点歌请求与用户管理**不是页面** —— 是设置页的两个分节
   src/components/         shell（侧边栏+抽屉+头像菜单）· player-bar · song-table · menu
   src/lib/                client / session / player / resume / scrape-prefs / use-async
   src/adapters/           **core 唯一碰宿主的地方**：token-store.web.ts · audio.web.ts
@@ -332,5 +336,5 @@ gh api repos/CodeByZack/music-robot/commits/<远端SHA> --jq '.commit.tree.sha,.
 | 待用户确认 | ① `pnpm install` 在他机器上到底过没过 ② shadcn 换不换、换哪几个 |
 
 **建议的第一步**：先跑 §1 的命令把服务起起来，用 `fixtures/` 当曲库（9 个真音频，
-扫进去 8 首），把 16 个页面点一遍。**亲眼看过再动手** —— 这个项目里
+扫进去 8 首），把 14 个页面点一遍。**亲眼看过再动手** —— 这个项目里
 「看着能跑」和「真能跑」差得挺远的。
