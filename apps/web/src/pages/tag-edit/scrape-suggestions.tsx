@@ -28,24 +28,19 @@ import { useMemo, useState } from 'react';
 import type { ScrapeProposal, ScrapeQueryResult } from '@music-robot/core';
 import { SCRAPE_FIELDS, propText } from './parts.tsx';
 
+interface FieldRow {
+  label: string;
+  before: string;
+  after: string;
+  same: boolean;
+}
+
 /** 一条候选的标题：优先「标题 · 专辑」，都没有就退回插件名。 */
 function headline(p: ScrapeProposal, plugin: string): string {
   const title = propText(p.tags.title).trim();
   const album = propText(p.tags.album).trim();
   if (title && album) return `${title} · ${album}`;
   return title || album || `${plugin} 的候选`;
-}
-
-/** 一条候选可被搜索的全部文本。 */
-function haystack(p: ScrapeProposal, plugin: string, label: string): string {
-  return [plugin, label, ...Object.values(p.tags).map((v) => propText(v))].join(' ').toLowerCase();
-}
-
-interface FieldRow {
-  label: string;
-  before: string;
-  after: string;
-  same: boolean;
 }
 
 /** 逐字段比出差异。只算一次，收起与展开共用。 */
@@ -220,15 +215,12 @@ export function ScrapeSuggestions({
   onResearch: () => void;
   onToggleOpen: () => void;
 }) {
-  const [query, setQuery] = useState('');
-  const [pluginFilter, setPluginFilter] = useState('');
   // 展开的是哪一条（`插件#序号`）。默认展开第一条 —— 它是最可信的。
   const [detail, setDetail] = useState<string | null>(null);
 
   const attempts = data?.plugins ?? [];
   const total = attempts.reduce((n, a) => n + a.candidates.length, 0);
   const hasResult = data !== null || busy || error !== null;
-
   const rowsOf = useMemo(() => {
     const map = new Map<string, FieldRow[]>();
     for (const a of attempts) {
@@ -237,23 +229,10 @@ export function ScrapeSuggestions({
     return map;
   }, [attempts, currentOf]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return attempts
-      .filter((a) => !pluginFilter || a.plugin === pluginFilter)
-      .map((a) => ({
-        ...a,
-        candidates: a.candidates
-          .map((c, i) => ({ c, key: `${a.plugin}#${i}` }))
-          .filter(({ c }) => !q || haystack(c, a.plugin, headline(c, a.plugin)).includes(q)),
-      }));
-  }, [attempts, query, pluginFilter]);
-
-  const shown = filtered.reduce((n, a) => n + a.candidates.length, 0);
   const firstKey = (() => {
-    for (const a of filtered) {
+    for (const a of attempts) {
       const first = a.candidates[0];
-      if (first) return first.key;
+      if (first) return `${a.plugin}#0`;
     }
     return null;
   })();
@@ -266,9 +245,7 @@ export function ScrapeSuggestions({
         <b className="shrink-0 text-note font-medium">刮削建议</b>
 
         {hasResult && (
-          <span className="shrink-0 text-cap text-ink-4">
-            {query || pluginFilter ? `筛出 ${shown}` : `共 ${total} 条`}
-          </span>
+          <span className="shrink-0 text-cap text-ink-4">{total} 条</span>
         )}
 
         <span className="flex-1" />
@@ -328,73 +305,28 @@ export function ScrapeSuggestions({
       {/* 列表：自己有滚动，不把下面的改动预览挤没。 */}
       {open && hasResult && (
         <div className="min-h-0 flex-1 overflow-auto px-3 pb-2.5">
-          {/* 筛选：窄栏里分两行。默认只在候选≥2 时出现，免得只有一个结果时也占地方。 */}
-          {total > 1 && (
-            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-              <div className="relative min-w-0 flex-1">
-                <svg
-                  className="ico-xs pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-ink-4"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.6}
-                  strokeLinecap="round"
-                >
-                  <circle cx="7" cy="7" r="4.2" />
-                  <path d="M10.2 10.2 14 14" />
-                </svg>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="筛选候选"
-                  className="h-6.5 w-full rounded-full bg-black/25 pr-2 pl-6.5 text-cap text-ink outline-none transition-colors placeholder:text-ink-4 focus:bg-black/40"
-                />
-              </div>
-              {attempts.length > 1 && (
-                <select
-                  value={pluginFilter}
-                  onChange={(e) => setPluginFilter(e.target.value)}
-                  className="h-6.5 max-w-[120px] shrink-0 rounded-full bg-black/25 px-2 text-cap text-ink outline-none transition-colors focus:bg-black/40"
-                >
-                  <option value="">全部插件</option>
-                  {attempts.map((a) => (
-                    <option key={a.plugin} value={a.plugin}>
-                      {a.plugin}（{a.candidates.length}）
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
-
           {error && <p className="mb-1.5 rounded-md bg-accent-soft px-2.5 py-2 text-cap text-accent">{error}</p>}
 
           {busy && !data && <p className="py-3 text-cap text-ink-4">正在问插件…</p>}
 
-          {data && shown === 0 && (
+          {data && total === 0 && (
             <div className="rounded-lg bg-black/20 px-2.5 py-2">
-              <p className="mb-1 text-cap text-ink-2">
-                {total === 0 ? '插件没有给出可用的结果。' : '没有候选匹配这个筛选。'}
-              </p>
+              <p className="mb-1 text-cap text-ink-2">插件没有给出可用的结果。</p>
               {/* 插件给的原因照原样展示 —— 它常直接指出该先改哪个字段。 */}
-              {total === 0 && (
-                <ul className="space-y-0.5 text-cap leading-4 text-ink-3">
-                  {attempts.map((a) => (
-                    <li key={a.plugin}>
-                      <b className="font-medium text-ink-2">{a.plugin}</b>：{a.note}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {total === 0 && (
-                <p className="mt-1.5 text-cap leading-4 text-ink-4">
-                  插件要靠歌手和时长认歌。先把「标题 / 歌手」改对再刮。
-                </p>
-              )}
+              <ul className="space-y-0.5 text-cap leading-4 text-ink-3">
+                {attempts.map((a) => (
+                  <li key={a.plugin}>
+                    <b className="font-medium text-ink-2">{a.plugin}</b>：{a.note}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-cap leading-4 text-ink-4">
+                插件要靠歌手和时长认歌。先把「标题 / 歌手」改对再刮。
+              </p>
             </div>
           )}
 
-          {filtered.map((a) =>
+          {attempts.map((a) =>
             a.candidates.length === 0 ? null : (
               <div key={a.plugin} className="mb-2 last:mb-0">
                 {/* 组头：插件名 + 它自己的结论（多插件时这才是重点） */}
@@ -405,18 +337,21 @@ export function ScrapeSuggestions({
                   <span className="min-w-0 flex-1 text-micro leading-4 text-ink-4">{a.note}</span>
                 </div>
                 <ul className="space-y-1">
-                  {a.candidates.map(({ c, key }) => (
-                    <CandidateCard
-                      key={key}
-                      proposal={c}
-                      plugin={a.plugin}
-                      rows={rowsOf.get(key) ?? []}
-                      expanded={effectiveDetail === key}
-                      onToggle={() => setDetail(effectiveDetail === key ? '' : key)}
-                      onApply={() => onApply(c)}
-                      onUseCover={onUseCover}
-                    />
-                  ))}
+                  {a.candidates.map((c, i) => {
+                    const key = `${a.plugin}#${i}`;
+                    return (
+                      <CandidateCard
+                        key={key}
+                        proposal={c}
+                        plugin={a.plugin}
+                        rows={rowsOf.get(key) ?? []}
+                        expanded={effectiveDetail === key}
+                        onToggle={() => setDetail(effectiveDetail === key ? '' : key)}
+                        onApply={() => onApply(c)}
+                        onUseCover={onUseCover}
+                      />
+                    );
+                  })}
                 </ul>
               </div>
             ),
