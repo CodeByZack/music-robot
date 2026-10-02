@@ -98,7 +98,7 @@ pub fn get_many(conn: &Connection, ids: &[i64]) -> RepoResult<Vec<Song>> {
 /// 查询 / 返回统一使用的列清单，与 [row_to_song] 一一对应。
 const COLUMNS: &str = "id, file_path, album_id, title, artists, album_artist, year, genres, \
      track, disc, duration_ms, bitrate_bps, format, audio_hash, file_size, file_mtime, \
-     search_text, lyrics, scrape_status, scrape_error, scrape_at, deleted_at, added_at, updated_at";
+     search_text, lyrics, timed_lyrics, scrape_status, scrape_error, scrape_at, deleted_at, added_at, updated_at";
 
 /// 插入一首歌，返回新行 id。
 ///
@@ -110,10 +110,10 @@ pub fn insert(conn: &Connection, song: &Song) -> RepoResult<i64> {
         "INSERT INTO songs (
              file_path, album_id, title, artists, album_artist, year, genres, track, disc,
              duration_ms, bitrate_bps, format, audio_hash, file_size, file_mtime,
-             search_text, lyrics, scrape_status, scrape_error, scrape_at, added_at, updated_at
+             search_text, lyrics, timed_lyrics, scrape_status, scrape_error, scrape_at, added_at, updated_at
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-             ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+             ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
          )",
         params![
             song.file_path,
@@ -133,6 +133,7 @@ pub fn insert(conn: &Connection, song: &Song) -> RepoResult<i64> {
             song.file_mtime,
             song.search_text,
             song.lyrics,
+            song.timed_lyrics,
             song.scrape_status.as_str(),
             song.scrape_error,
             song.scrape_at,
@@ -265,7 +266,7 @@ pub fn update_tags(conn: &Connection, song: &Song) -> RepoResult<usize> {
              album_id = ?2, title = ?3, artists = ?4, album_artist = ?5, year = ?6,
              genres = ?7, track = ?8, disc = ?9, duration_ms = ?10, bitrate_bps = ?11,
              format = ?12, audio_hash = ?13, file_size = ?14, file_mtime = ?15,
-             search_text = ?16, lyrics = ?17, updated_at = ?18
+             search_text = ?16, lyrics = ?17, timed_lyrics = ?18, updated_at = ?19
          WHERE id = ?1",
         params![
             song.id,
@@ -285,6 +286,7 @@ pub fn update_tags(conn: &Connection, song: &Song) -> RepoResult<usize> {
             song.file_mtime,
             song.search_text,
             song.lyrics,
+            song.timed_lyrics,
             now,
         ],
     )?;
@@ -383,6 +385,7 @@ fn row_to_song(row: &Row<'_>) -> RepoResult<Song> {
         file_mtime: row.get("file_mtime")?,
         search_text: row.get("search_text")?,
         lyrics: row.get("lyrics")?,
+        timed_lyrics: row.get("timed_lyrics")?,
         scrape_status,
         scrape_error: row.get("scrape_error")?,
         scrape_at: row.get("scrape_at")?,
@@ -629,6 +632,7 @@ mod tests {
             file_mtime: None,
             search_text: None,
             lyrics: None,
+            timed_lyrics: None,
             scrape_status: ScrapeStatus::Pending,
             scrape_error: None,
             scrape_at: None,

@@ -47,8 +47,44 @@ fn f01_key_level_edit_keeps_unnamed_keys_and_blocks() {
 }
 
 #[test]
+fn f06_lyrics_alone_reaches_the_file_and_keeps_the_other_keys() {
+    // FLAC 里歌词是**单一键**（Vorbis 没有 SYLT 的对应物），所以它一对一映射到 `lyrics`。
+    // 这条用例盯两件事：① 只点名 lyrics 真的写进去了；② 未点名的键不受影响。
+    let f = scratch("f06", "牵丝戏 - 白兀.flac");
+    let keys_before = vorbis_keys(&std::fs::read(&f).unwrap());
+
+    let mut m = Id3EditMeta::default();
+    m.lyrics = Some("[00:01.00]第一句\n[00:03.00]第二句".into());
+    write_flac_tags(&f, &m).unwrap();
+
+    let meta = read_tags(&f).unwrap();
+    assert_eq!(
+        meta.lyrics.as_deref(),
+        Some("[00:01.00]第一句\n[00:03.00]第二句"),
+        "只点名歌词时必须真的写进文件"
+    );
+    assert!(meta.lyrics_timed.is_none(), "Vorbis 没有同步歌词，不该凭空多出一份");
+    assert_eq!(meta.artists, vec!["白兀"], "只改歌词不该动歌手");
+    for k in &keys_before {
+        if k != "LYRICS" {
+            assert!(vorbis_keys(&std::fs::read(&f).unwrap()).contains(k), "未点名的 vorbis 键 {k} 必须保留");
+        }
+    }
+}
+
+#[test]
+fn f07_timed_lyrics_rejected_for_flac_without_mutation() {
+    // SYLT 在 Vorbis Comment 里没有落脚点 → 必须明确拒绝，不能静默丢弃。
+    let f = scratch("f07", "牵丝戏 - 白兀.flac");
+    let before = std::fs::read(&f).unwrap();
+    let mut m = Id3EditMeta::default();
+    m.lyrics_timed = Some("[00:01.00]同步歌词".into());
+    assert!(write_flac_tags(&f, &m).is_err(), "FLAC 写同步歌词必须报错");
+    assert_eq!(std::fs::read(&f).unwrap(), before, "被拒绝时不得改动文件一个字节");
+}
+
+#[test]
 fn f02_picture_block_rebuilt_and_audio_intact() {
-    // TS 4/10：PICTURE 块重建 + 音频未动（STREAMINFO md5 与裸区 sha256 双校验）
     let f = scratch("f02", "牵丝戏 - 白兀.flac");
     let orig = std::fs::read(&f).unwrap();
     let h0 = audio_hash_flac(&orig);

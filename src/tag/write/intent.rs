@@ -136,7 +136,10 @@ pub fn diff_fields(before: &AudioMetadata, after: &AfterView) -> Vec<DiffLine> {
         ("genre".into(), fmt_list(&before.genres), after.genres.clone()),
         ("composer".into(), fmt_list(&before.composers), after.composers.clone()),
         ("comment".into(), fmt_opt(&before.comment), fmt_opt(&after.comment)),
-        ("lyrics".into(), fmt_opt(&before.lyrics.clone().or_else(|| before.lyrics_timed.clone())), fmt_opt(&after.lyrics.clone().or_else(|| after.lyrics_timed.clone()))),
+        // 两种歌词各比各的 —— 以前这里把 timed 当成 lyrics 的兜底，于是「只换了带时间轴那份」
+        // 会显示成「歌词」变了，看不出到底动的是哪一个字段。
+        ("lyrics".into(), fmt_opt(&before.lyrics), fmt_opt(&after.lyrics)),
+        ("lyricsTimed".into(), fmt_opt(&before.lyrics_timed), fmt_opt(&after.lyrics_timed)),
         ("cover".into(), fmt(&before.pictures.len().to_string()), fmt(&after.cover_count.to_string())),
     ];
     rows.into_iter().filter(|(_, a, b)| a != b).map(|(key, before, after)| DiffLine { key, before, after }).collect()

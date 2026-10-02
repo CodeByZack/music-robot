@@ -162,13 +162,72 @@ pub fn decode_uslt(data: &[u8]) -> Option<LyricsFrame> {
     let text_buf = &data[text_start.min(data.len())..];
     let text = if utf16 { decode_utf16(text_buf, enc == 2) } else if enc == 3 { utf8_lossy(text_buf) } else { latin1_decode(text_buf) };
     // 与 decode_text 一致：裁掉尾部 NUL。
-    // description 尤其重要 —— dispatch 用 description == "LYRICS" 区分「同步歌词」与
-    // 「普通歌词」，带 NUL 会让这个比较永远不成立，歌词会被归错类。
     Some(LyricsFrame {
         language,
         description: trim_trailing_nuls(&description),
         text: trim_trailing_nuls(&text),
     })
+}
+
+/// 毫秒 → LRC 时间戳 `[mm:ss.xx]`（LRC 惯例用百分秒，两位）。
+fn lrc_stamp(ms: u32) -> String {
+    let cs = ms / 10;
+    format!("[{:02}:{:02}.{:02}]", cs / 6000, (cs / 100) % 60, cs % 100)
+}
+
+/// SYLT（同步歌词）帧 → LRC 文本。
+///
+/// 帧结构（ID3v2.3 / 2.4）：
+///   `enc(1) + lang(3) + 时间戳格式(1) + 内容类型(1) + 描述(NUL 结尾) + 重复{ 文本(NUL 结尾) + 时间戳(4B 大端) }`
+///
+/// 时间戳格式：**1 = 从曲首起的 MPEG 帧号，2 = 毫秒**。
+///
+/// 只支持格式 2。格式 1 是「第 N 个 MPEG 帧」，没有帧长（VBR！）与采样率就换不出真实时间，
+/// 硬转成 LRC 就是编造数据。返回 `None` 的意思是「**读不出可编辑文本**」——
+/// 调用方必须把它当**未知帧原样保留**，绝不能因为「编辑器里是空的」就把它删了。
+/// 这一条是防数据丢失的关键。
+pub fn decode_sylt(data: &[u8]) -> Option<String> {
+    if data.len() < 7 { return None }
+    let enc = data[0];
+    if data[4] != 2 { return None }
+    let utf16 = enc == 1 || enc == 2;
+
+    // enc(1) + lang(3) + 时间戳格式(1) + 内容类型(1) 之后是描述串。
+    let mut p = 6usize;
+    if utf16 {
+        while p + 1 < data.len() && !(data[p] == 0 && data[p + 1] == 0) { p += 2 }
+        p = (p + 2).min(data.len());
+    } else {
+        while p < data.len() && data[p] != 0 { p += 1 }
+        p = (p + 1).min(data.len());
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    while p < data.len() {
+        let start = p;
+        if utf16 {
+            while p + 1 < data.len() && !(data[p] == 0 && data[p + 1] == 0) { p += 2 }
+            if p + 2 > data.len() { break }
+            let text = decode_utf16(&data[start..p], enc == 2);
+            p += 2;
+            if p + 4 > data.len() { break }
+            let ms = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
+            p += 4;
+            let t = trim_trailing_nuls(&text);
+            if !t.is_empty() { out.push(format!("{}{}", lrc_stamp(ms), t)) }
+        } else {
+            while p < data.len() && data[p] != 0 { p += 1 }
+            if p >= data.len() { break }
+            let text = if enc == 3 { utf8_lossy(&data[start..p]) } else { latin1_decode(&data[start..p]) };
+            p += 1;
+            if p + 4 > data.len() { break }
+            let ms = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
+            p += 4;
+            let t = trim_trailing_nuls(&text);
+            if !t.is_empty() { out.push(format!("{}{}", lrc_stamp(ms), t)) }
+        }
+    }
+    if out.is_empty() { None } else { Some(out.join("\n")) }
 }
 
 #[derive(Debug, Clone)]

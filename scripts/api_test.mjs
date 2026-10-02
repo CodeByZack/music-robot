@@ -687,7 +687,17 @@ async function main() {
     check('GET /api/songs/{id}/tags → 200', st, 200);
     checkTrue('返回文件名（不含路径）', typeof tagsBody?.file?.name === 'string' && !tagsBody.file.name.includes('/'), brief(tagsBody?.file?.name));
     checkTrue('返回 tags 对象', tagsBody?.tags !== null && typeof tagsBody?.tags === 'object', brief(Object.keys(tagsBody?.tags ?? {}).length + ' 个字段'));
-    checkTrue('lyrics_source 是三者之一', ['db', 'file', 'none'].includes(tagsBody?.tags?.lyrics_source), brief(tagsBody?.tags?.lyrics_source));
+    // 两种歌词各自如实给文件值，且**不再**有派生字段。
+    // `lyrics_timed` 对 FLAC 恒为 null（Vorbis 没有 SYLT 的落脚点），所以只查类型。
+    checkTrue('lyrics 是字符串或 null', tagsBody?.tags?.lyrics === null || typeof tagsBody?.tags?.lyrics === 'string', brief(tagsBody?.tags?.lyrics?.length));
+    checkTrue('lyrics_timed 是字符串或 null', tagsBody?.tags?.lyrics_timed === null || typeof tagsBody?.tags?.lyrics_timed === 'string', brief(tagsBody?.tags?.lyrics_timed?.length));
+    checkTrue('已不再返回派生字段 lyrics_source', !('lyrics_source' in (tagsBody?.tags ?? {})), 'gone');
+    checkTrue('已不再返回派生字段 db_lyrics', !('db_lyrics' in (tagsBody?.tags ?? {})), 'gone');
+    // 没有时间轴的「同步歌词」必须被拒（写进 SYLT 也放不出来）
+    [st] = await c.json('PATCH', `/api/songs/${firstId}/tags`, {
+      fields: { lyrics_timed: '我根本没有时间轴' },
+    });
+    check('无时间轴的 lyrics_timed → 400', st, 400);
 
     const titleBefore = tagsBody?.tags?.title ?? null;
     // 1) **不传 dry_run** → 必须只算差异、不写盘

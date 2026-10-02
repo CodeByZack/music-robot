@@ -60,9 +60,12 @@ pub fn format_read(meta: &AudioMetadata, file: &str, warnings: &[Warning]) -> St
     if !meta.genres.is_empty() { lines.push(format!("流派: {}", meta.genres.join(" / "))) }
     if !meta.composers.is_empty() { lines.push(format!("作曲: {}", meta.composers.join(" / "))) }
     if let Some(c) = &meta.comment { lines.push(format!("注释: {}", truncate(c, 200))) }
-    if let Some(l) = meta.lyrics_timed.clone().or_else(|| meta.lyrics.clone()) {
-        let nl = l.lines().count();
-        lines.push(format!("歌词: {nl} 行，{}", truncate(&l.replace('\n', " ⏎ "), 240)));
+    if let Some(l) = &meta.lyrics {
+        lines.push(format!("歌词: {} 行，{}", l.lines().count(), truncate(&l.replace('\n', " ⏎ "), 240)));
+    }
+    // 两份歌词分开显示：它们来自不同的帧（USLT / SYLT），不是同一个东西的两种写法。
+    if let Some(l) = &meta.lyrics_timed {
+        lines.push(format!("同步歌词: {} 行，{}", l.lines().count(), truncate(&l.replace('\n', " ⏎ "), 240)));
     }
     if let Some(p) = meta.pictures.first() {
         lines.push(format!("封面: {} {}B", p.mime_type, p.data.len()));

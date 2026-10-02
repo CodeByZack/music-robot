@@ -3,7 +3,7 @@
 //! ⚠️ 全部在**副本**上操作，绝不碰 TS 仓库的 samples/（那是只读 ground truth）。
 //! 隔离手法与 TS 一致：拷到 target/tmp-<test>/ 下再改。
 use music_robot::tag::read::read_tags;
-use music_robot::tag::write::{audio_hash, write_mp3_tags, Id3EditMeta};
+use music_robot::tag::write::{audio_hash, write_mp3_tags, write_tags, Id3EditMeta};
 use std::path::{Path, PathBuf};
 
 fn sample(name: &str) -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name) }
@@ -76,9 +76,92 @@ fn w02b_verify_actually_gates_the_write() {
     assert_eq!(std::fs::read(&f).unwrap(), before, "校验失败后不得写入一个字节");
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// 歌词：两种帧严格一对一
+//
+// 这一组是**回归测试**。旧实现里 USLT 和 SYLT 都映射到 `lyrics` 一个字段，
+// 于是「只改纯歌词」会把 SYLT 帧一并删掉（实测复现：1082 字的带时间轴歌词
+// 被换成 26 字的纯文本）。下面第一条用例就是钉住这个缺陷。
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `lyrics_timed` 的 LRC 文本，用来验证写法与读法对称。
+const LRC: &str = "[00:01.00]第一句\n[00:03.50]第二句";
+
+#[test]
+fn w_editing_plain_lyrics_keeps_the_synced_frame() {
+    let f = scratch("lyr-keep-sylt", "华夏传说 - 凤凰传奇.mp3");
+
+    // 1) 先造出带时间轴的歌词（引擎会把它写成 SYLT 帧）
+    let mut m = Id3EditMeta::default();
+    m.lyrics_timed = Some(LRC.into());
+    write_mp3_tags(&f, &m).unwrap();
+    let after_timed = read_tags(&f).unwrap();
+    assert_eq!(after_timed.lyrics_timed.as_deref(), Some(LRC), "LRC 应能原样读回");
+    assert!(after_timed.lyrics.is_none(), "只写了同步歌词，不该凭空多出一份纯歌词");
+
+    // 2) 只改纯歌词 —— 旧代码在这一步会把上面那帧删掉
+    let mut m2 = Id3EditMeta::default();
+    m2.lyrics = Some("纯文本歌词".into());
+    write_mp3_tags(&f, &m2).unwrap();
+    let after = read_tags(&f).unwrap();
+    assert_eq!(after.lyrics.as_deref(), Some("纯文本歌词"), "纯歌词应已写入");
+    assert_eq!(
+        after.lyrics_timed.as_deref(),
+        Some(LRC),
+        "改纯歌词把带时间轴那帧删掉了 —— 这正是本次要修的缺陷"
+    );
+
+    // 3) 反过来：只改同步歌词，纯歌词也必须留着
+    let mut m3 = Id3EditMeta::default();
+    m3.lyrics_timed = Some("[00:10.00]换掉了".into());
+    write_mp3_tags(&f, &m3).unwrap();
+    let after2 = read_tags(&f).unwrap();
+    assert_eq!(after2.lyrics.as_deref(), Some("纯文本歌词"), "改同步歌词把纯歌词删掉了");
+    assert_eq!(after2.lyrics_timed.as_deref(), Some("[00:10.00]换掉了"));
+}
+
+#[test]
+fn w_plain_lyrics_go_to_uslt_with_empty_description() {
+    let f = scratch("lyr-uslt-desc", "华夏传说 - 凤凰传奇.mp3");
+    let mut m = Id3EditMeta::default();
+    m.lyrics = Some("只改歌词".into());
+    write_mp3_tags(&f, &m).unwrap();
+
+    let meta = read_tags(&f).unwrap();
+    let uslt = meta.raw_frames.iter().find(|x| x.frame_id == "USLT").expect("应有 USLT 帧");
+    // 帧体布局：enc(1) + lang(3) + description(NUL 结尾) + text
+    assert_eq!(uslt.data[4], 0, "description 必须留空 —— 自造 desc 会让别的播放器找不到歌词");
+    assert!(meta.raw_frames.iter().all(|x| x.frame_id != "SYLT"), "没有同步歌词就不该造出 SYLT 帧");
+}
+
+#[test]
+fn w_timed_lyrics_without_timestamps_are_rejected() {
+    let f = scratch("lyr-no-stamp", "华夏传说 - 凤凰传奇.mp3");
+    let before = std::fs::read(&f).unwrap();
+    let mut m = Id3EditMeta::default();
+    m.lyrics_timed = Some("这一行根本没有时间轴".into());
+    assert!(
+        write_tags(&f, &m).is_err(),
+        "没有时间轴的『同步歌词』必须明确拒绝（写进 SYLT 也放不出来）"
+    );
+    assert_eq!(std::fs::read(&f).unwrap(), before, "被拒绝时不得改动文件一个字节");
+}
+
+#[test]
+fn w_flac_has_nowhere_to_put_timed_lyrics() {
+    let f = scratch("lyr-flac-timed", "牵丝戏 - 白兀.flac");
+    let before = std::fs::read(&f).unwrap();
+    let mut m = Id3EditMeta::default();
+    m.lyrics_timed = Some(LRC.into());
+    assert!(
+        write_tags(&f, &m).is_err(),
+        "Vorbis 没有同步歌词的键 —— 必须报错，不能静默丢掉"
+    );
+    assert_eq!(std::fs::read(&f).unwrap(), before, "被拒绝时不得改动文件一个字节");
+}
+
 #[test]
 fn w02c_audio_bytes_survive_verbatim() {
-    // 用"字节区间是否原样存在"独立验证音频未被改动，不依赖被测的 hash 实现
     let src = sample("华夏传说 - 凤凰传奇.mp3");
     let f = scratch("w02c", "华夏传说 - 凤凰传奇.mp3");
     let mut m = Id3EditMeta::default();

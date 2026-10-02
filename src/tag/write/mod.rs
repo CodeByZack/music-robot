@@ -15,12 +15,28 @@ pub use wav_writer::{audio_hash_wav, write_wav_tags, write_wav_tags_fs};
 
 use std::path::Path;
 
+/// 与容器无关的字段级校验 —— 放在分派**之前**，两条入口（路径 / 沙箱）一并覆盖。
+///
+/// 为什么要有：`lyrics_timed` 是「带时间轴的歌词」，没有时间轴的东西写进去
+/// 就是一条放不出来的死数据。宁可在入口拒绝，也不能静默写个空。
+fn validate_meta(meta: &Id3EditMeta) -> Result<(), WriteError> {
+    if let Some(t) = meta.lyrics_timed.as_deref() {
+        if !t.trim().is_empty() && id3v2_editor::parse_lrc(t).is_empty() {
+            return Err(WriteError::BadFormat(
+                "同步歌词里没有一行带时间轴（形如 [00:12.34]歌词），写进去也放不出来".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 统一写入口：按 magic 分派（TS writeTags :15-30）。
 ///
 /// ⚠️ TS 里那段「运行时检测 intent 专属字段误传」（round6 P2-3）**不需要移植**：
 /// Rust 的 `WritableFields` 与 `WriteMeta` 是两个不同类型，编译器已经保证不会混。
 pub fn write_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
     use crate::tag::read::{probe_format, Format, Probe};
+    validate_meta(meta)?;
     // ⚠️ 格式守卫（review §2.1）：未知容器**必须在任何写入动作之前**明确拒绝。
     //   TS 曾经按扩展名盲写，实测把 4KB 假 .m4a 塞成 ID3 头、容器直接损坏。
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();

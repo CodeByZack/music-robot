@@ -203,18 +203,22 @@ impl TagEditService {
 
     /// 把「应用后的文件标签」同步进数据库。
     ///
-    /// `keep_db_lyrics` 里的歌词是**DB 专有**的：刮削的歌词只入 DB、从不写文件
-    /// （见 `service::scrape` 的说明）。所以用户只改标题时，绝不能因为「文件里没有歌词」
-    /// 就把库里辛苦刮来的歌词抹掉。
+    /// 歌词列有个特例：**刮削来的歌词只入 DB、从不写文件**（见 `service::scrape`）。
+    /// 所以不能因为「刚重新读了文件、文件里没歌词」就把库里那份抹掉 ——
+    /// 只有在本次**确实改了**对应的歌词字段时才用文件值覆盖。
+    ///
+    /// 两种歌词**各自判断**：只改纯歌词时绝不能动同步歌词那一列（反之亦然）。
     fn sync_db(
         &self,
         old: &Song,
         fresh: &AudioMetadata,
         intent: &crate::tag::write::Id3EditMeta,
     ) -> Result<(), TagEditError> {
-        let lyrics_touched = intent.lyrics.is_some()
-            || intent.lyrics_timed.is_some()
-            || intent.unset_fields.iter().any(|k| k == "lyrics" || k == "lyricsTimed");
+        let touched = |field: &str, val_set: bool| {
+            val_set || intent.unset_fields.iter().any(|k| k == field)
+        };
+        let lyrics_touched = touched("lyrics", intent.lyrics.is_some());
+        let timed_touched = touched("lyricsTimed", intent.lyrics_timed.is_some());
 
         let mut conn = self.db.acquire().map_err(db_err)?;
         let tx = conn.transaction().map_err(db_err)?;
@@ -239,6 +243,9 @@ impl TagEditService {
         updated.added_at = old.added_at;
         if !lyrics_touched {
             updated.lyrics = old.lyrics.clone();
+        }
+        if !timed_touched {
+            updated.timed_lyrics = old.timed_lyrics.clone();
         }
 
         songs::update_tags(&tx, &updated).map_err(db_err)?;

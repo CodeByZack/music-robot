@@ -112,7 +112,7 @@ fn t05_flac_vorbis_comment_full() {
     assert_eq!(q.title.as_deref(), Some("牵丝戏"));
     assert_eq!(q.artists[0], "白兀");
     assert_eq!(q.albums[0], "T"); // 原样保留，不 trim
-    assert!(q.lyrics_timed.as_deref().unwrap_or("").contains("嘲笑谁恃美扬威"), "FLAC lyrics 应完整");
+    assert!(q.lyrics.as_deref().unwrap_or("").contains("嘲笑谁恃美扬威"), "FLAC 歌词应完整");
     assert_eq!(q.pictures.len(), 1, "FLAC PICTURE block 应被读出");
     assert_eq!(q.pictures[0].pic_type, 3, "FrontCover type = 3");
     assert!(q.pictures[0].data.len() > 100_000, "封面数据应 >100KB");

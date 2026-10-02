@@ -1,9 +1,20 @@
 //! ID3v2 帧级编辑器（局部编辑语义）—— 移植自 src/tag/write/id3v2-editor.ts
 //!
 //! 原则：只动「点名」的字段，其余帧（含未知帧）**payload 原样保留**，重编码为 v2.4 帧头。
-//! 帧组粒度：track/trackTotal 共用 TRCK；disc/discTotal 共用 TPOS；
-//!          lyrics/lyricsTimed 共用 USLT（desc='LYRICS' 区分纯歌词）。
-use super::super::read::{decode_txxx, latin1_encode, Picture, RawFrame};
+//! 帧组粒度：track/trackTotal 共用 TRCK、disc/discTotal 共用 TPOS —— 这是 ID3 规范本身
+//! 就把「号 / 总数」写在同一帧里。
+//!
+//! ## 歌词为什么必须一对一
+//!
+//! 早期版本把 USLT 和 SYLT 都算作 `lyrics` 字段，靠 description 区分「纯歌词 / 带时间轴」。
+//! 两个后果都很严重：
+//!
+//!   1. `field_of_frame` 把 SYLT 也映射成 `"lyrics"`，于是**改一次纯歌词就把 SYLT 帧删了**；
+//!   2. 读写两处对 description 的用法是相反的，同一个字段前后指的不是一回事。
+//!
+//! 现在按 ID3 规范各归各的帧：`USLT` = 无时间轴歌词 → `lyrics`，
+//! `SYLT` = 有时间轴歌词 → `lyrics_timed`。两者不再共享帧，`GROUP_ALIASES` 里也就不需要歌词。
+use super::super::read::{decode_sylt, decode_txxx, latin1_encode, Picture, RawFrame};
 
 /// 编辑意图。`Option` = TS 的 `!== undefined`（未点名即 None），用于决定"替换/删除/保留"。
 #[derive(Debug, Clone, Default)]
@@ -63,13 +74,53 @@ fn com_frame(text: &str) -> Vec<u8> {
     frame("COMM", &b)
 }
 
-/// USLT 帧（desc='LYRICS' → 纯歌词；空 desc → 带时间戳歌词）
-fn uslt_frame(text: &str, desc: &str) -> Vec<u8> {
+/// USLT 帧（无时间轴歌词）。description 留空 —— 这是绝大多数打标器的做法
+///（实测本项目所有下载器产物都是空 desc），自造一个 desc 只会让别的播放器认不出来。
+fn uslt_frame(text: &str) -> Vec<u8> {
     let mut b = vec![3u8];
     b.extend_from_slice(b"eng");
-    b.extend_from_slice(desc.as_bytes()); b.push(0);
+    b.push(0); // 空 description
     b.extend_from_slice(&utf8_bytes(&trim_nul_tail(text)));
     frame("USLT", &b)
+}
+
+/// LRC 文本 → `(毫秒, 文本)` 列表。
+///
+/// 只认 `[mm:ss]` / `[mm:ss.xx]` / `[m:ss.xxx]` 这几种。`[ti:]` / `[offset:0]` 这类
+/// LRC 元数据行解析不出数字，会自然被跳过，不需要特判。
+/// **没有时间轴的行直接丢掉** —— SYLT 的每一条都必须带时间戳，留下也只是无主文本。
+pub(crate) fn parse_lrc(lrc: &str) -> Vec<(u64, String)> {
+    let mut out = Vec::new();
+    for line in lrc.lines() {
+        let Some(close) = line.find(']') else { continue };
+        if !line.starts_with('[') { continue }
+        let text = line[close + 1..].trim();
+        if text.is_empty() { continue }
+        let Some((min, sec)) = line[1..close].split_once(':') else { continue };
+        let (Ok(min), Ok(sec)) = (min.trim().parse::<u64>(), sec.trim().parse::<f64>()) else { continue };
+        out.push((min * 60_000 + (sec * 1000.0).round() as u64, text.to_string()));
+    }
+    out
+}
+
+/// SYLT 帧（有时间轴歌词）。时间戳格式选 2（毫秒），内容类型 1（lyrics）。
+///
+/// 返回 `None` = 这段文本里没有一行带时间轴。**调用方要把它当错误**，
+/// 不能静默跳过 —— 用户以为存上了、实际什么都没写，是最坏的一种失败。
+fn sylt_frame(lrc: &str) -> Option<Vec<u8>> {
+    let pairs = parse_lrc(lrc);
+    if pairs.is_empty() { return None }
+    let mut b = vec![3u8]; // encoding = UTF-8
+    b.extend_from_slice(b"eng"); // language
+    b.push(2); // 时间戳格式 = 毫秒
+    b.push(1); // 内容类型 = lyrics
+    b.push(0); // 空 description
+    for (ms, text) in pairs {
+        b.extend_from_slice(&utf8_bytes(&trim_nul_tail(&text)));
+        b.push(0);
+        b.extend_from_slice(&(ms as u32).to_be_bytes());
+    }
+    Some(frame("SYLT", &b))
 }
 
 /// APIC 帧（encoding=0, mime NUL 结尾, type, desc NUL 结尾）
@@ -106,7 +157,13 @@ pub fn field_of_frame(f: &RawFrame) -> Option<&'static str> {
         "TCON" => "genres",
         "TCOM" | "TEXT" => "composers",
         "COMM" => "comment",
-        "USLT" | "SYLT" => "lyrics",
+        // 歌词两种帧各归各的字段，严格一对一（见文件头「歌词为什么必须一对一」）。
+        "USLT" => "lyrics",
+        // SYLT 只在**能读成 LRC** 时才算已知字段：读不出来的（时间戳用 MPEG 帧号）
+        // 必须当未知帧原样保留，否则改一次歌词就把它删了。
+        "SYLT" => {
+            if decode_sylt(&f.data).is_some() { "lyricsTimed" } else { return None }
+        }
         "APIC" => "pictures",
         "TSRC" => "isrc",
         "TXXX" => {
@@ -150,11 +207,13 @@ fn is_touched(m: &Id3EditMeta, field: &str) -> bool {
     }
 }
 
-/// 共享同一帧组的字段：点名其中任一个，整组按现值重写/删除
+/// 共享同一帧组的字段：点名其中任一个，整组按现值重写/删除。
+///
+/// 只剩编号这两组 —— ID3 本身就把编号与总数写在同一个帧里（`TRCK="5/12"`）。
+/// 歌词**不在**此列：USLT 与 SYLT 是两个独立帧，各改各的（见文件头）。
 const GROUP_ALIASES: &[(&str, &[&str])] = &[
     ("track", &["track", "trackTotal"]),
     ("disc", &["disc", "discTotal"]),
-    ("lyrics", &["lyrics", "lyricsTimed"]),
 ];
 fn field_touched(m: &Id3EditMeta, field: &str) -> bool {
     let aliases = GROUP_ALIASES.iter().find(|(k, _)| *k == field).map(|(_, v)| *v).unwrap_or(std::slice::from_ref(&field));
@@ -229,8 +288,8 @@ fn build_field_frames(m: &Id3EditMeta, cur: (CurPair, CurPair)) -> Vec<Vec<u8>> 
         for c in &composers[1..] { out.push(text_frame("TEXT", c)) }
     }
     if let Some(c) = &m.comment { if !c.is_empty() { out.push(com_frame(c)) } }
-    if let Some(l) = &m.lyrics { if !l.is_empty() { out.push(uslt_frame(l, "LYRICS")) } }
-    if let Some(l) = &m.lyrics_timed { if !l.is_empty() { out.push(uslt_frame(l, "")) } }
+    if let Some(l) = &m.lyrics { if !l.is_empty() { out.push(uslt_frame(l)) } }
+    if let Some(l) = &m.lyrics_timed { if !l.is_empty() { if let Some(f) = sylt_frame(l) { out.push(f) } } }
     if let Some(pics) = &m.pictures { for p in pics { if !p.data.is_empty() { out.push(apic_frame(p)) } } }
     for (key, val) in [
         ("MusicBrainz Artist Id", &m.mbid_artist), ("MusicBrainz Release Id", &m.mbid_release),

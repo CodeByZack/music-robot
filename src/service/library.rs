@@ -856,6 +856,7 @@ pub(crate) fn build_song(
         file_mtime,
         search_text: build_search_text(meta, &file_path),
         lyrics: meta.lyrics.clone(),
+        timed_lyrics: meta.lyrics_timed.clone(),
         // 新入库一律 pending（画布：这是刮削队列的来源）；已有行走 update_tags，
         // 该函数不碰 scrape_status，所以更新路径不会重置它。
         scrape_status: ScrapeStatus::Pending,
@@ -1078,6 +1079,7 @@ mod tests {
             file_mtime: None,
             search_text: None,
             lyrics: None,
+            timed_lyrics: None,
             scrape_status: ScrapeStatus::Pending,
             scrape_error: None,
             scrape_at: None,

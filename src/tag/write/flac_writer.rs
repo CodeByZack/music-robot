@@ -48,7 +48,9 @@ fn keys_of(field: &str) -> &'static [&'static str] {
         "albumArtist" => &["ALBUMARTIST"], "track" => &["TRACKNUMBER"], "trackTotal" => &["TRACKTOTAL"],
         "disc" => &["DISCNUMBER"], "discTotal" => &["DISCTOTAL"], "year" => &["DATE"],
         "genres" => &["GENRE"], "composers" => &["COMPOSER"], "comment" => &["COMMENT"],
-        "lyrics" => &["LYRICS"], _ => &[],
+        // Vorbis Comment 只有「歌词」一个概念（没有 SYLT 的对应键），
+        // 所以两条常见键名都算它 —— 删的时候一并删，写的时候统一写 LYRICS。
+        "lyrics" => &["LYRICS", "UNSYNCEDLYRICS"], _ => &[],
     }
 }
 
@@ -103,9 +105,10 @@ fn edit_vorbis_pairs(existing: &[VorbisPair], m: &Id3EditMeta) -> Vec<VorbisPair
         let keys = keys_of(field);
         out.retain(|p| !keys.contains(&p.key.as_str()));
     }
-    // lyrics 与 lyricsTimed 共用一个 LYRICS 键，任一被点名都整体替换
-    let lyrics_touched = m.lyrics.is_some() || m.lyrics_timed.is_some() || is_unset("lyrics") || is_unset("lyricsTimed");
-    if lyrics_touched { out.retain(|p| p.key != "LYRICS") }
+    // 歌词是**单一键**（Vorbis 没有 SYLT 的对应物，lyrics_timed 在 write_flac_tags 入口就被拒了）。
+    if m.lyrics.is_some() || is_unset("lyrics") {
+        out.retain(|p| !keys_of("lyrics").contains(&p.key.as_str()));
+    }
 
     push_str(&mut out, "TITLE", m.title.as_ref());
     for a in m.artists.clone().unwrap_or_default() { if !a.is_empty() { out.push(VorbisPair { key: "ARTIST".into(), value: a.into_bytes() }) } }
@@ -119,13 +122,7 @@ fn edit_vorbis_pairs(existing: &[VorbisPair], m: &Id3EditMeta) -> Vec<VorbisPair
     for g in m.genres.clone().unwrap_or_default() { if !g.is_empty() { out.push(VorbisPair { key: "GENRE".into(), value: g.into_bytes() }) } }
     for c in m.composers.clone().unwrap_or_default() { if !c.is_empty() { out.push(VorbisPair { key: "COMPOSER".into(), value: c.into_bytes() }) } }
     push_str(&mut out, "COMMENT", m.comment.as_ref());
-    // 与 TS 一致：lyricsTimed 优先，非空则用它；否则退回 lyrics
-    let timed_ok = m.lyrics_timed.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-    if timed_ok {
-        out.push(VorbisPair { key: "LYRICS".into(), value: m.lyrics_timed.clone().unwrap().into_bytes() });
-    } else if let Some(l) = &m.lyrics {
-        if !l.is_empty() { out.push(VorbisPair { key: "LYRICS".into(), value: l.clone().into_bytes() }) }
-    }
+    push_str(&mut out, "LYRICS", m.lyrics.as_ref());
     out
 }
 
@@ -173,6 +170,13 @@ pub fn audio_hash_flac(buf: &[u8]) -> String {
 
 /// FLAC 写入：键级局部编辑（保留全部元数据块），音频字节不动
 pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError> {
+    // Vorbis Comment 没有「同步歌词」这个键 —— ID3 的 SYLT 在 FLAC 里无处安放。
+    // 宁可明确报错，也不静默丢掉（用户会以为存上了）。
+    if meta.lyrics_timed.as_ref().is_some_and(|s| !s.trim().is_empty()) {
+        return Err(WriteError::BadFormat(
+            "FLAC / Vorbis 没有存放同步歌词（SYLT）的位置，这个字段写不进 FLAC".into(),
+        ));
+    }
     let orig = std::fs::read(path).map_err(WriteError::Read)?;
     let blocks = match parse_flac_metadata(&orig) {
         Some(b) if !b.is_empty() => b,
@@ -194,6 +198,22 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
         meta.pictures.clone().unwrap_or_default().into_iter().filter(|p| !p.data.is_empty()).map(|p| picture_payload(&p)).collect()
     };
 
+    // 有没有任何**写进 Vorbis 键**的改动。
+    //
+    // 以前这里在好几处零散地写 `meta.title.is_some() || meta.artists.is_some()`，
+    // 漏掉一个字段的代价是：原文件本来就没有 Vorbis 块、又只点名了那个字段时，
+    // 会走「用空列表重建」的分支，**改动静默丢失**（歌词就是这么被漏掉的）。
+    // 现在收成一个判断，加字段时只改这一处。
+    let any_vorbis = meta.blank_all
+        || !existing.is_empty()
+        || !meta.unset_fields.is_empty()
+        || meta.title.is_some() || meta.artists.is_some() || meta.albums.is_some()
+        || meta.album_artist.is_some() || meta.track.is_some() || meta.track_total.is_some()
+        || meta.disc.is_some() || meta.disc_total.is_some() || meta.year.is_some()
+        || meta.genres.is_some() || meta.composers.is_some() || meta.comment.is_some()
+        || meta.lyrics.is_some()
+        || (meta.pictures.is_some() && !new_pics.is_empty());
+
     // 按原块序重建 metadata：保留 STREAMINFO 及所有非 4/6 块
     #[derive(Clone)]
     struct Piece { ty: u8, payload: Vec<u8> }
@@ -204,7 +224,7 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
             0 => pieces.push(Piece { ty: 0, payload: b.payload.clone() }),
             4 => {
                 if !vc_done {
-                    let payload = if !existing.is_empty() || meta.title.is_some() || meta.artists.is_some() {
+                    let payload = if any_vorbis {
                         payload_from(&edit_vorbis_pairs(&existing, meta), &vendor)
                     } else {
                         payload_from(&[], &vendor)
@@ -221,10 +241,7 @@ pub fn write_flac_tags(path: &Path, meta: &Id3EditMeta) -> Result<(), WriteError
         }
     }
     // 原文件无 vorbis 块：有点名内容或 blank 则补一个（放在 STREAMINFO 之后）
-    let need_vc = meta.blank_all || !existing.is_empty() || meta.title.is_some() || meta.artists.is_some()
-        || meta.albums.is_some() || meta.comment.is_some()
-        || (meta.pictures.is_some() && !new_pics.is_empty());
-    if !vc_done && need_vc {
+    if !vc_done && any_vorbis {
         let payload = payload_from(&edit_vorbis_pairs(&existing, meta), "music-robot");
         let si_idx = pieces.iter().position(|x| x.ty == 0).map(|i| i + 1).unwrap_or(0);
         pieces.insert(si_idx, Piece { ty: 4, payload });

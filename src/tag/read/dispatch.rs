@@ -145,9 +145,12 @@ fn meta_from_frames(frames: &[RawFrame]) -> FramesMeta {
             "TPOS" => { let r = id3v2::parse_number_pair(&dt()); o.disc = r.num; o.disc_total = r.total }
             "TDRC" | "TYER" | "TDOR" => { let t = dt(); if o.year.is_none() { o.year = (!t.is_empty()).then_some(t) } }
             "USLT" => { if let Some(u) = id3v2::decode_uslt(&f.data) {
-                    if !u.text.is_empty() {
-                        if u.description == "LYRICS" { if o.lyrics.is_none() { o.lyrics = Some(u.text) } }
-                        else if o.lyrics_timed.is_none() { o.lyrics_timed = Some(u.text) } } } }
+                    if !u.text.is_empty() && o.lyrics.is_none() { o.lyrics = Some(u.text) } } }
+            // 为什么不再看 description：USLT 就是「无时间轴歌词」这一个概念，
+            // description 只是内容描述（"LYRICS"/"歌词"/空…）。用 desc 区分同步/非同步是
+            // 上一版自创的约定，与 ID3 规范无关，且与写入侧对不上（详见 id3v2_editor 开头）。
+            "SYLT" => { if o.lyrics_timed.is_none() {
+                    if let Some(t) = id3v2::decode_sylt(&f.data) { o.lyrics_timed = Some(t) } } }
             "LYRICS" => { let t = dt(); if o.lyrics.is_none() && !t.is_empty() { o.lyrics = Some(t) } }
             "APIC" => { if let Some(pic) = id3v2::decode_apic(&f.data) { o.pictures.push(pic) } }
             "COMM" => { if let Some(c) = id3v2::decode_uslt(&f.data) { if !c.text.is_empty() && o.comment.is_none() { o.comment = Some(c.text) } } }
@@ -182,7 +185,8 @@ pub struct FramesMeta {
     pub mbid_group: Option<String>, pub mbid_disc: Option<String>, pub isrc: Option<String>,
 }
 
-fn strip_ts(s: &str) -> String { s.lines().filter_map(|l| { let i = l.find(']'); i.map(|j| l[j + 1..].to_string()) }).collect::<Vec<_>>().join("\n") }
+/// Vorbis 只有「歌词」这一个概念（没有 SYLT 的对应键），LYRICS / UNSYNCEDLYRICS
+/// 两条常见键都归 `lyrics`。写回时优先复用已有的那条键名。
 
 pub fn read_mp3(path: &Path) -> Result<AudioMetadata> {
     let buf = std::fs::read(path)?;
@@ -220,7 +224,9 @@ fn apply_frames(m: &mut AudioMetadata, fm: FramesMeta) {
     m.year = fm.year; m.genres = fm.genres; m.composers = fm.composers;
     m.pictures = fm.pictures; m.lyrics_timed = fm.lyrics_timed.clone(); m.comment = fm.comment;
     m.lyrics = fm.lyrics.clone();
-    if m.lyrics_timed.is_some() && m.lyrics.is_none() { m.lyrics = Some(strip_ts(m.lyrics_timed.as_deref().unwrap())); }
+    // 这里**不再**从 lyrics_timed 削出 lyrics（旧代码干了这件事，后果是 lyrics 变成派生值：
+    // 编辑器把那个派生值当「文件里的歌词」展示，一改就删掉了带时间轴的帧）。
+    // 两个字段现在严格一对一：USLT→lyrics，SYLT→lyrics_timed。
     m.musicbrainz_artist_id = fm.mbid_artist; m.musicbrainz_release_id = fm.mbid_release;
     m.musicbrainz_track_id = fm.mbid_track; m.musicbrainz_release_group_id = fm.mbid_group;
     m.musicbrainz_disc_id = fm.mbid_disc; m.isrc = fm.isrc;
@@ -263,11 +269,10 @@ pub fn read_flac(path: &Path) -> Result<AudioMetadata> {
                 "GENRE" => { if !p.value.is_empty() { m.genres.push(p.value) } }
                 "COMPOSER" => { if !p.value.is_empty() { m.composers.push(p.value) } }
                 "COMMENT" => { if m.comment.is_none() && !p.value.is_empty() { m.comment = Some(p.value) } }
-                "LYRICS" | "UNSYNCEDLYRICS" => { if m.lyrics_timed.is_none() && !p.value.is_empty() { m.lyrics_timed = Some(p.value) } }
+                "LYRICS" | "UNSYNCEDLYRICS" => { if m.lyrics.is_none() && !p.value.is_empty() { m.lyrics = Some(p.value) } }
                 _ => { m.raw_frames.push(RawFrame { frame_id: k, size: p.value.len(), data: p.value.into_bytes() }); }
             }
         }
-        if m.lyrics_timed.is_some() && m.lyrics.is_none() { m.lyrics = Some(strip_ts(m.lyrics_timed.as_deref().unwrap())); }
     }
     for b in blocks.iter().filter(|b| b.ty == 6) { if let Some(pic) = flac::flac_picture(&b.payload) { m.pictures.push(pic) } }
     Ok(m)

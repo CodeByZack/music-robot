@@ -266,6 +266,8 @@ pub(crate) fn song_json(song: &Song, with_lyrics: bool) -> Value {
     if with_lyrics {
         if let Some(object) = value.as_object_mut() {
             let _ = object.insert("lyrics".to_string(), json!(song.lyrics));
+            // 两份都带上：播放页优先用带时间轴的那份做真同步，另一份是兜底。
+            let _ = object.insert("timed_lyrics".to_string(), json!(song.timed_lyrics));
         }
     }
     value

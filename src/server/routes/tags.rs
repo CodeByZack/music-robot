@@ -187,7 +187,20 @@ pub(crate) fn parse_fields(body: Option<&Value>) -> Result<(WritableFields, bool
             "year" => fields.year = Some(as_text(value, key)?),
             "comment" => fields.comment = Some(as_text(value, key)?),
             "lyrics" => fields.lyrics = Some(as_text(value, key)?),
-            "lyrics_timed" => fields.lyrics_timed = Some(as_text(value, key)?),
+            "lyrics_timed" => {
+                let text = as_text(value, key)?;
+                // 同步歌词必须是 LRC。没有一行带 [mm:ss] 的东西写进 SYLT 也放不出来。
+                // 在**解析阶段**就拒掉而不是留给写入层，是为了让「预览」也能报错 ——
+                // 否则用户点了预览一切正常、点写入才炸，白写一份自己的文件。
+                if !text.trim().is_empty()
+                    && crate::tag::write::id3v2_editor::parse_lrc(&text).is_empty()
+                {
+                    return Err(ApiError::bad_request(
+                        "同步歌词里没有一行带时间轴（形如 [00:12.34]歌词）",
+                    ));
+                }
+                fields.lyrics_timed = Some(text);
+            }
             "artists" => fields.artists = Some(as_text_list(value, key)?),
             "genres" => fields.genres = Some(as_text_list(value, key)?),
             "composers" => fields.composers = Some(as_text_list(value, key)?),
@@ -285,21 +298,13 @@ fn parse_cover(value: &Value, fields: &mut WritableFields) -> Result<(), ApiErro
 
 /// 把标签 JSON 化（编辑器初值）。
 ///
-/// **歌词以文件为准**：这个编辑器改的就是文件，
-/// 展示库里的值再提交就会把文件里原本的歌词静默覆盖掉（上一版就是这么错的）。
+/// 全部取**文件值** —— 这个编辑器改的就是文件，展示库里的值再提交会把文件里原本的
+/// 内容静默覆盖掉。
 ///
-/// 库里那份**只在和文件不同时**才另外给（`db_lyrics`），供界面提示
-/// 「库里还有一份不一样的歌词，要用它吗」—— 刮削的歌词可能只入过库、从没写过文件。
-fn tags_json(meta: &AudioMetadata, db_lyrics: Option<&str>) -> Value {
-    let file_lyrics = meta.lyrics.as_deref().unwrap_or("").trim().to_string();
-    let db_text = db_lyrics.unwrap_or("").trim();
-    // 内容相同就不重复传（歌词动辄几百字）。
-    let db_extra = if !db_text.is_empty() && db_text != file_lyrics {
-        Some(db_text.to_string())
-    } else {
-        None
-    };
-
+/// 歌词给两份且**互不派生**：`lyrics` 来自 `USLT`（Vorbis 是 `LYRICS` 键），
+/// `lyrics_timed` 来自 `SYLT`（LRC 文本）。以前这里只给一份从 `lyrics_timed`
+/// 削掉时间轴算出来的纯文本，界面还写着「文件内嵌的歌词」—— 等于对着用户说假话。
+fn tags_json(meta: &AudioMetadata) -> Value {
     json!({
         "title": meta.title,
         "artists": meta.artists,
@@ -313,9 +318,7 @@ fn tags_json(meta: &AudioMetadata, db_lyrics: Option<&str>) -> Value {
         "genres": meta.genres,
         "composers": meta.composers,
         "comment": meta.comment,
-        "lyrics": file_lyrics,
-        "lyrics_source": if meta.lyrics.as_deref().unwrap_or("").trim().is_empty() { "none" } else { "file" },
-        "db_lyrics": db_extra,
+        "lyrics": meta.lyrics,
         "lyrics_timed": meta.lyrics_timed,
         "has_cover": !meta.pictures.is_empty(),
         // 封面只给「有没有」与类型，不给字节 —— 图片由 /api/songs/{id}/cover 取。
@@ -418,7 +421,7 @@ pub async fn get_tags(
             "format": song.format,
             "size": song.file_size,
         },
-        "tags": tags_json(&meta, song.lyrics.as_deref()),
+        "tags": tags_json(&meta),
     })))
 }
 

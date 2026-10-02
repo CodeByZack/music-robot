@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
-import type { LyricsSource, SongTagValues, TagDiff, TagFieldPatch, TagPatchResult } from '@music-robot/core';
+import type { SongTagValues, TagDiff, TagFieldPatch, TagPatchResult } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
 import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { ErrorNote, LoadingNote, useAsync } from '@/lib/use-async.tsx';
@@ -38,18 +38,8 @@ const FIELD_LABEL: Record<string, string> = {
   composer: '作曲',
   comment: '注释',
   lyrics: '歌词',
+  lyricsTimed: '同步歌词',
   cover: '封面',
-};
-
-const LYRICS_SOURCE_HINT: Record<LyricsSource, string> = {
-  file: '文件内嵌的歌词（下面就是）。',
-  none: '这个文件里没有歌词 —— 填了就写进去。',
-};
-
-/** 左栏「文件信息」里的短标签。 */
-const LYRICS_SOURCE_LABEL: Record<LyricsSource, string> = {
-  file: '文件内嵌',
-  none: '无',
 };
 
 /** 封面大小上限，与后端 `tags::MAX_COVER_BYTES` 对齐（前端先拦一下，报错更快）。 */
@@ -160,7 +150,7 @@ function buildPatch(
   text('year', '年份');
   text('comment', '注释');
   text('lyrics', '歌词');
-  text('lyrics_timed', '逐字歌词');
+  text('lyrics_timed', '同步歌词');
   list('artists');
   list('genres');
   list('composers');
@@ -523,6 +513,11 @@ export default function TagEditPage() {
   const fileName = data?.file.name ?? '';
   const format = data?.file.format ?? '';
   const sizes = data?.file.size ? `${(data.file.size / 1024 / 1024).toFixed(1)} MB` : '';
+  // Vorbis（FLAC）没有同步歌词的键 —— 那个框直接禁用，免得用户白填一遍再被打回。
+  const noTimedLyrics = format === 'flac';
+  // 帧名按容器说：MP3 里是 ID3 的 USLT，FLAC 里是 Vorbis 的 LYRICS 键。
+  // 在 FLAC 上写「USLT」是不准确的 —— 那里根本没有 ID3 帧。
+  const lyricsFrame = noTimedLyrics ? 'LYRICS' : 'USLT';
 
   return (
     <div
@@ -601,7 +596,11 @@ export default function TagEditPage() {
                         newCover ? '待替换' : dropCover ? '待移除' : data.tags.has_cover ? data.tags.cover_mime ?? '有' : '无'
                       }
                     />
-                    <Meta label="歌词" value={LYRICS_SOURCE_LABEL[data.tags.lyrics_source]} />
+                    <Meta label="歌词" value={data.tags.lyrics ? `有（${lyricsFrame}）` : '无'} />
+                    <Meta
+                      label="同步歌词"
+                      value={noTimedLyrics ? '不支持' : data.tags.lyrics_timed ? '有（SYLT）' : '无'}
+                    />
                   </dl>
                 </aside>
 
@@ -660,36 +659,48 @@ export default function TagEditPage() {
                   </Section>
 
                   <Section title="歌词">
-                    <div className="mb-2.5 text-cap leading-4 text-ink-4">
-                      {LYRICS_SOURCE_HINT[data.tags.lyrics_source]}
-                    </div>
                     {/*
-                      库里那份**和文件不同**时才提示。刮削的歌词可能只入过库、从没写过文件，
-                      而下面这个框里的内容是**文件里**的 —— 不说清楚的话，
-                      用户会以为库里那份已经写进文件了。
+                      两个框，因为文件里就是**两个不同的帧**：
+                        USLT = 无时间轴歌词，SYLT = 有时间轴歌词（LRC）。
+                      以前页面只给一个框，里面还是从带时间轴那份**削掉时间轴**算出来的
+                      副本 —— 看着像「文件里的歌词」，实际不是；一改还会把 SYLT 删了。
                     */}
-                    {data.tags.db_lyrics && (
-                      <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-black/25 px-3 py-2.5">
-                        <span className="text-cap leading-4 text-ink-3">
-                          数据库里另有一份<b className="font-medium text-ink-2">不同</b>的歌词（
-                          {data.tags.db_lyrics.length} 字，文件里这份是 {form.lyrics.length} 字）
-                          —— 多半是刮削时存进库、还没写回文件的。
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => set('lyrics', data.tags.db_lyrics ?? '')}
-                          className="h-7 shrink-0 rounded-full bg-surface px-3 text-cap text-ink-2 transition-colors hover:bg-surface-hover"
-                        >
-                          用库里的这份
-                        </button>
+                    <div className="space-y-4">
+                      <div>
+                        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-nav text-ink-2">歌词</span>
+                          <span className="text-cap text-ink-4">
+                            {lyricsFrame} · {form.lyrics.length} 字
+                          </span>
+                        </div>
+                        <textarea
+                          className={`${INPUT} h-[180px] w-full resize-y py-2.5 font-mono text-note leading-5`}
+                          value={form.lyrics}
+                          onChange={(e) => set('lyrics', e.target.value)}
+                          placeholder="（文件里没有这一帧）"
+                        />
                       </div>
-                    )}
-                    <textarea
-                      className={`${INPUT} h-[200px] w-full resize-y py-2.5 font-mono text-note leading-5`}
-                      value={form.lyrics}
-                      onChange={(e) => set('lyrics', e.target.value)}
-                      placeholder="（没有歌词）"
-                    />
+                      <div>
+                        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-nav text-ink-2">同步歌词</span>
+                          <span className="text-cap text-ink-4">
+                            SYLT · 每行形如 [00:12.34]歌词
+                          </span>
+                        </div>
+                        <textarea
+                          className={`${INPUT} h-[180px] w-full resize-y py-2.5 font-mono text-note leading-5 disabled:cursor-not-allowed disabled:opacity-40`}
+                          value={form.lyrics_timed}
+                          onChange={(e) => set('lyrics_timed', e.target.value)}
+                          placeholder={noTimedLyrics ? '（FLAC 没有存放位置）' : '（文件里没有这一帧）'}
+                          disabled={noTimedLyrics}
+                        />
+                        {noTimedLyrics && (
+                          <p className="mt-1.5 text-cap leading-4 text-ink-4">
+                            Vorbis（FLAC）只有「歌词」一个键，没有同步歌词的存放位置。
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </Section>
 
                   {/* 改动预览：只有真的点过「预览」才显示，且改动一变就作废 */}

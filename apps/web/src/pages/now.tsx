@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayMode, Song } from '@music-robot/core';
 import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
@@ -6,7 +6,24 @@ import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { usePlayer } from '@/lib/player.tsx';
 import { useAsync } from '@/lib/use-async.tsx';
 
-type SongWithLyrics = Song & { lyrics?: string | null };
+type SongWithLyrics = Song & { lyrics?: string | null; timed_lyrics?: string | null };
+
+/** 一行歌词：`ms` 为 -1 表示这行没有时间轴。 */
+interface LyricLine {
+  ms: number;
+  text: string;
+}
+
+/** `[mm:ss]` / `[mm:ss.xx]` / `[m:ss.xxx]` 行解析成带时间轴的歌词。没有时间轴的行丢掉。 */
+function parseLrc(raw: string): LyricLine[] {
+  const out: LyricLine[] = [];
+  for (const line of raw.split('\n')) {
+    const m = /^\s*\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)$/.exec(line);
+    const text = m?.[3]?.trim();
+    if (m && text) out.push({ ms: Number(m[1]) * 60_000 + Math.round(Number(m[2]) * 1000), text });
+  }
+  return out;
+}
 
 function clock(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0:00';
@@ -144,16 +161,49 @@ export default function NowPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, [back]);
 
-  const lyrics = (data?.song.lyrics ?? '').split('\n').filter((l) => l.trim());
   /**
-   * 歌词**没有时间轴** —— 库里的歌词是纯文本（实测 6/8 首有词，全是连 LRC 头都没有的
-   * 裸文本）。所以做不了真正的逐句同步，只能按播放进度**等比**推当前行。
-   * 这是近似，不是同步；以后支持 LRC 再换成真的。
+   * 歌词行。优先用**同步歌词**（SYLT）；没有就看看普通歌词里是不是本来就带着
+   * LRC 时间轴 —— 下载器（QQ / 酷我）就是这种：把 LRC 当纯文本写进 USLT，实测
+   * 本项目的库全是这样。两样都没有，才退回「按进度等比猜行」。
+   *
+   * 后一步看着像在「猜」，但它是在**解读已有的内容**，不是凭空造数据 ——
+   * 引擎层已经不再把两个歌词字段互相派生了。
    */
-  const activeLine =
-    lyrics.length > 0 && p.durationMs > 0
-      ? Math.min(lyrics.length - 1, Math.floor((p.positionMs / p.durationMs) * lyrics.length))
-      : -1;
+  const lines = useMemo<LyricLine[]>(() => {
+    const song = data?.song;
+    const timed = parseLrc(song?.timed_lyrics ?? '');
+    if (timed.length > 0) return timed;
+    const plain = parseLrc(song?.lyrics ?? '');
+    if (plain.length > 0) return plain;
+    // 确实没有时间轴：按行铺开，后面用播放进度等比推当前行
+    return (song?.lyrics ?? '')
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((text) => ({ ms: -1, text }));
+  }, [data]);
+
+  /**
+   * 当前行。
+   *
+   * 有时间轴就用**真同步**（取最后一个 `ms <= 当前进度` 的行）；
+   * 没有时间轴才退回「按播放进度等比推」—— 那是近似，不是同步。
+   * （旧注释说「库里的歌词全是裸文本」，那是因为读取层把时间轴剥掉了。）
+   */
+  const activeLine = (() => {
+    if (lines.length === 0) return -1;
+    if ((lines[0]?.ms ?? -1) >= 0) {
+      let idx = 0;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (!line || line.ms > p.positionMs) break;
+        idx = i;
+      }
+      return p.positionMs > 0 ? idx : -1;
+    }
+    if (p.durationMs <= 0) return -1;
+    return Math.min(lines.length - 1, Math.floor((p.positionMs / p.durationMs) * lines.length));
+  })();
   const activeRef = useRef<HTMLParagraphElement | null>(null);
   // 歌词自己的滚动容器。**只滚它**，见下面的 effect。
   const lyricsRef = useRef<HTMLDivElement | null>(null);
@@ -335,10 +385,10 @@ export default function NowPage() {
             ].join(' ')}
           >
             <div ref={lyricsRef} className="min-h-0 flex-1 overflow-auto pr-2 min-[901px]:max-h-[70vh]">
-              {lyrics.length === 0 ? (
+              {lines.length === 0 ? (
                 <p className="text-nav text-ink-3">这首歌没有内嵌歌词。</p>
               ) : (
-                lyrics.map((line, i) => (
+                lines.map((line, i) => (
                   <p
                     key={i}
                     ref={i === activeLine ? activeRef : undefined}
@@ -347,7 +397,7 @@ export default function NowPage() {
                       i === activeLine ? 'text-ink' : 'text-ink-4',
                     ].join(' ')}
                   >
-                    {line}
+                    {line.text}
                   </p>
                 ))
               )}

@@ -232,8 +232,14 @@ pub struct Song {
     pub file_mtime: Option<i64>,
     /// 搜索用拼装文本（派生字段的例外：它是查询加速列，不是业务派生）
     pub search_text: Option<String>,
-    /// 歌词全文
+    /// 歌词全文（对应 ID3 的 `USLT` / Vorbis 的 `LYRICS`）
     pub lyrics: Option<String>,
+    /// 同步歌词（对应 ID3 的 `SYLT`），存的是 **LRC 文本**（时间戳为毫秒）。
+    ///
+    /// 为什么存文本而不是原始 SYLT 字节：SYLT 是二进制帧，库里没法比较 / 搜索 / 展示；
+    /// 而 LRC 是同步歌词事实上的文本表示，播放页拿到就能直接对时间轴。
+    /// Vorbis（FLAC）没有对应键，所以这一列对 FLAC 恒为 NULL。
+    pub timed_lyrics: Option<String>,
     /// 刮削状态
     pub scrape_status: ScrapeStatus,
     /// 最近一次刮削错误
@@ -472,6 +478,7 @@ mod tests {
             file_mtime: Some(1_700_000_000_000),
             search_text: Some("标题 歌手".to_string()),
             lyrics: None,
+            timed_lyrics: None,
             scrape_status: ScrapeStatus::Pending,
             scrape_error: None,
             scrape_at: None,

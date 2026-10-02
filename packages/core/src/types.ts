@@ -211,29 +211,27 @@ export interface SongTagValues {
   genres: string[];
   composers: string[];
   comment: string | null;
+  /**
+   * 歌词（ID3 的 `USLT` / Vorbis 的 `LYRICS`）。
+   *
+   * ⚠️ 下载器（QQ / 酷我）常把 **LRC 文本**当纯文本写进这一帧，所以它里面
+   * **可能自带 `[mm:ss.xx]` 时间轴**。要同步显示就解析它，不要指望 `lyrics_timed`。
+   */
   lyrics: string | null;
+  /**
+   * 同步歌词（ID3 的 `SYLT`），内容为 **LRC 文本**。
+   *
+   * 与 `lyrics` 严格一对一、**互不派生**：文件里没有 SYLT 帧时它就是 null。
+   * Vorbis（FLAC）没有对应的键，所以对 FLAC 恒为 null。
+   */
   lyrics_timed: string | null;
 }
-
-/**
- * 歌词在**文件**里的情况。
- *
- * ⚠️ 这里只说文件。库里可能另有一份不同的（刮削时读进来的），
- * 那种情况看 [`SongTags`] 的 `tags.db_lyrics`。
- */
-export type LyricsSource = 'file' | 'none';
 
 export interface SongTags {
   song_id: number;
   /** 文件信息。**只有文件名**，后端不暴露绝对路径。 */
   file: { name: string; format: string | null; size: number | null };
   tags: SongTagValues & {
-    lyrics_source: LyricsSource;
-    /**
-     * 库里那份歌词，**仅当与文件里的不同**时才非 null。
-     * 用途：提示「库里还有一份不一样的，要用它吗」—— 刮削的歌词可能只入过库、没写过文件。
-     */
-    db_lyrics: string | null;
     has_cover: boolean;
     /** 当前封面的 MIME（没有封面就是 null）。 */
     cover_mime: string | null;

@@ -173,6 +173,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "songs_audio_hash_index",
         sql: MIGRATION_3_SONGS_AUDIO_HASH_INDEX,
     },
+    Migration {
+        version: 4,
+        name: "songs_timed_lyrics",
+        sql: MIGRATION_4_SONGS_TIMED_LYRICS,
+    },
 ];
 
 /// 第 1 版迁移：画布 ⑨ 的 10 张表 + 索引。
@@ -362,6 +367,19 @@ ALTER TABLE songs ADD COLUMN deleted_at INTEGER;
 /// 加 UNIQUE 会让「软删行 + 在库行同哈希」这种合法状态插不进去。
 const MIGRATION_3_SONGS_AUDIO_HASH_INDEX: &str = r#"
 CREATE INDEX idx_songs_audio_hash ON songs(audio_hash);
+"#;
+
+/// 第 4 版迁移：把「同步歌词」单独存一列。
+///
+/// 为什么必须单独一列：ID3 规范里歌词是**两个**概念 —— `USLT`（无时间轴）与
+/// `SYLT`（有时间轴）。原先只有 lyrics 一列，读取层只好把 SYLT 削掉时间轴塞进同一列，
+/// 于是「文件里的歌词」在库里变成个派生值；编辑器把它当真值展示，一改就把带时间轴的
+/// 帧删了（实测复现过数据丢失）。列分开之后 `lyrics` ↔ USLT、`timed_lyrics` ↔ SYLT，
+/// 与规范一一对应。
+///
+/// 存量行 timed_lyrics 为 NULL —— 这是**如实**的：那些文件的歌词确实存在 USLT 里。
+const MIGRATION_4_SONGS_TIMED_LYRICS: &str = r#"
+ALTER TABLE songs ADD COLUMN timed_lyrics TEXT;
 "#;
 
 /// 校验迁移列表：版本号必须 >= 1 且严格递增。
