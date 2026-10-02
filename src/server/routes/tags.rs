@@ -20,16 +20,25 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use serde_json::{json, Value};
 
 use crate::server::auth::{AdminUser, AuthUser};
 use crate::server::error::{ApiError, ApiResult};
 use crate::server::state::AppState;
-use crate::service::TagEditError;
-use crate::tag::read::AudioMetadata;
-use crate::tag::write::intent::{is_unset_key, WritableFields};
+use crate::service::{CoverOp, TagEditError};
+use crate::tag::read::{AudioMetadata, Picture};
+use crate::tag::write::intent::{is_unset_key, sniff_image_mime, WritableFields};
 
 use super::library::parse_id;
+
+/// 封面数据的上限。
+///
+/// 为什么要设：封面走 base64 传（**不引新依赖** —— `base64` 本来就在，JWT 在用；
+/// 也不用开 axum 的 multipart 特性），代价是体积膨胀 1/3。
+/// 路由级 body 上限要比它宽（见 `routes/mod.rs` 的 `TAGS_MAX_BODY`）。
+pub(crate) const MAX_COVER_BYTES: usize = 8 * 1024 * 1024;
 
 /// 「JSON 字段名 → CLI 风格的 unset 键」对照表。
 ///
@@ -142,6 +151,11 @@ pub(crate) fn parse_fields(body: Option<&Value>) -> Result<(WritableFields, bool
         if raw_key == "unset" {
             continue;
         }
+        // 封面自己一套：`null` = 删除、对象 = 替换（+ base64 数据）。
+        if raw_key == "cover" {
+            parse_cover(value, &mut fields)?;
+            continue;
+        }
         let key = ALIASES
             .iter()
             .find(|(alias, _)| alias == raw_key)
@@ -219,20 +233,71 @@ pub(crate) fn parse_fields(body: Option<&Value>) -> Result<(WritableFields, bool
     Ok((fields, dry_run, backup))
 }
 
+/// `cover` 字段：
+///
+/// * `null`                         —— **删除**封面
+/// * `{ "data": "<base64>" }`      —— **替换**封面（mime 按**文件头**嗅探，不信声明）
+/// * `{ "data": "data:image/jpeg;base64,..." }` —— 也收 data URL
+///   （前端 `FileReader.readAsDataURL` 拿到的就是这个形状，省得前端再切一刀）
+fn parse_cover(value: &Value, fields: &mut WritableFields) -> Result<(), ApiError> {
+    if value.is_null() {
+        fields.unset_cover = true;
+        return Ok(());
+    }
+    let obj = value
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("cover 期望对象或 null"))?;
+    let mut data = obj
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::bad_request("cover.data 期望 base64 字符串"))?;
+
+    // data URL 前缀剥掉（顺便拿到声明的 mime，但下面以魔数为准）。
+    if let Some(rest) = data.strip_prefix("data:") {
+        if let Some((_, body)) = rest.split_once(',') {
+            data = body;
+        }
+    }
+    let bytes = B64
+        .decode(data.trim())
+        .map_err(|e| ApiError::bad_request(format!("封面的 base64 解不开：{e}")))?;
+    if bytes.is_empty() {
+        return Err(ApiError::bad_request("封面数据是空的"));
+    }
+    if bytes.len() > MAX_COVER_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "封面太大（{:.1} MB），上限 {} MB",
+            bytes.len() as f64 / 1048576.0,
+            MAX_COVER_BYTES / 1048576
+        )));
+    }
+    // 以魔数判定类型，不信请求里声明的 —— 与 CLI `--cover` 同一口径。
+    let mime = sniff_image_mime(&bytes)
+        .ok_or_else(|| ApiError::bad_request("封面不是 JPEG / PNG / GIF（按文件头判断）"))?;
+    fields.replace_cover = Some(Picture {
+        mime_type: mime,
+        pic_type: 3, // 3 = Cover (front)，与 CLI 一致
+        description: "front".to_string(),
+        data: bytes,
+    });
+    Ok(())
+}
+
 /// 把标签 JSON 化（编辑器初值）。
 ///
-/// `lyrics` 特意**不直接取文件值**：刮削来的歌词只入 DB、从不写文件
-/// （见 `service::scrape`），所以库里可能有一份文件里没有的歌词。
-/// 这里给出「库里优先」的有效值，并用 `lyrics_source` 说明来源，界面据此提示。
+/// **歌词以文件为准**：这个编辑器改的就是文件，
+/// 展示库里的值再提交就会把文件里原本的歌词静默覆盖掉（上一版就是这么错的）。
+///
+/// 库里那份**只在和文件不同时**才另外给（`db_lyrics`），供界面提示
+/// 「库里还有一份不一样的歌词，要用它吗」—— 刮削的歌词可能只入过库、从没写过文件。
 fn tags_json(meta: &AudioMetadata, db_lyrics: Option<&str>) -> Value {
-    let file_lyrics = meta.lyrics.as_deref().unwrap_or("").trim();
-    let db_lyrics = db_lyrics.unwrap_or("").trim();
-    let (lyrics, source) = if !db_lyrics.is_empty() {
-        (db_lyrics, "db")
-    } else if !file_lyrics.is_empty() {
-        (file_lyrics, "file")
+    let file_lyrics = meta.lyrics.as_deref().unwrap_or("").trim().to_string();
+    let db_text = db_lyrics.unwrap_or("").trim();
+    // 内容相同就不重复传（歌词动辄几百字）。
+    let db_extra = if !db_text.is_empty() && db_text != file_lyrics {
+        Some(db_text.to_string())
     } else {
-        ("", "none")
+        None
     };
 
     json!({
@@ -248,12 +313,13 @@ fn tags_json(meta: &AudioMetadata, db_lyrics: Option<&str>) -> Value {
         "genres": meta.genres,
         "composers": meta.composers,
         "comment": meta.comment,
-        "lyrics": lyrics,
-        "lyrics_source": source,
+        "lyrics": file_lyrics,
+        "lyrics_source": if meta.lyrics.as_deref().unwrap_or("").trim().is_empty() { "none" } else { "file" },
+        "db_lyrics": db_extra,
         "lyrics_timed": meta.lyrics_timed,
-        // 封面只给「有没有」，不给字节 —— 编辑器目前不改封面。
-        // （换封面要上传图片，CLI 的 --cover 收的是服务端文件路径，Web 侧另说。）
         "has_cover": !meta.pictures.is_empty(),
+        // 封面只给「有没有」与类型，不给字节 —— 图片由 /api/songs/{id}/cover 取。
+        "cover_mime": meta.pictures.first().map(|p| p.mime_type.clone()),
     })
 }
 
@@ -267,7 +333,13 @@ fn diff_json(result: &crate::service::EditResult) -> Value {
         "song_id": result.song_id,
         "file_name": result.file_name,
         "diffs": diffs,
-        "changed": !result.diffs.is_empty(),
+        // 封面操作单独给一个字段：引擎的 diff 只比张数，换封面是 1 → 1、没有 diff 行。
+        "cover_op": match result.cover_op {
+            Some(CoverOp::Replace) => Some("replace"),
+            Some(CoverOp::Remove) => Some("remove"),
+            None => None,
+        },
+        "changed": result.has_changes(),
         "applied": result.applied,
     })
 }
@@ -280,6 +352,41 @@ fn map_error(e: TagEditError) -> ApiError {
         TagEditError::Read(msg) => ApiError::internal(format!("读取标签失败：{msg}")),
         TagEditError::Db(msg) => ApiError::internal(format!("数据库操作失败：{msg}")),
         TagEditError::Io(msg) => ApiError::internal(msg),
+    }
+}
+
+/// GET /api/songs/{id}/tags/cover —— **文件内嵌**封面（不是专辑那张）。
+///
+/// 为什么另开一条而不是复用 `/api/songs/{id}/cover`：那条**优先返回专辑表里的封面**
+/// （见 `routes::cover` 的数据来源表）。对列表 / 播放页那样挺好，但对**标签编辑器**
+/// 是误导 —— 用户以为在看文件的封面，实际看到的是专辑那张，换掉以后界面也不变。
+///
+/// 文件里没有内嵌封面 → 404（界面显示「无内嵌封面」并提示专辑有封面）。
+pub async fn file_cover(
+    _auth: AuthUser,
+    State(state): State<AppState>,
+    Path(raw_id): Path<String>,
+) -> ApiResult<axum::response::Response> {
+    let id = parse_id(&raw_id)?;
+    let found = super::library::run_db(std::sync::Arc::clone(&state.db), move |conn| {
+        Ok(crate::db::repos::songs::get(conn, id, false)?)
+    })
+    .await?;
+    let Some(song) = found else {
+        return Err(ApiError::not_found("请求的歌曲不存在"));
+    };
+
+    let config = std::sync::Arc::clone(&state.config);
+    let path = song.file_path;
+    let extracted = tokio::task::spawn_blocking(move || {
+        super::cover::extract_from_file(&config, &path)
+    })
+    .await
+    .map_err(|join| ApiError::internal(format!("封面提取任务异常退出：{join}")))??;
+
+    match extracted {
+        Some(image) => super::cover::cover_response(image, super::cover::CACHE_NO_STORE),
+        None => Err(ApiError::not_found("这个文件没有内嵌封面")),
     }
 }
 
@@ -339,15 +446,26 @@ pub async fn patch_tags(
 
     // 日志：写盘是重操作，事后必须能查「谁在什么时候改了哪首歌」。
     if result.applied {
-        let keys: Vec<&str> = result.diffs.iter().map(|d| d.key.as_str()).collect();
+        let mut keys: Vec<&str> = result.diffs.iter().map(|d| d.key.as_str()).collect();
+        // 封面不在 diffs 里（引擎只比张数，换封面是 1 → 1），漏掉会记成「0 处改动」。
+        match result.cover_op {
+            Some(crate::service::CoverOp::Replace) => keys.push("cover=替换"),
+            Some(crate::service::CoverOp::Remove) => keys.push("cover=移除"),
+            None => {}
+        }
         crate::serverlog::info(
             "tags",
             format!(
-                "手工编辑曲目 {}（{}）：写入 {} 处改动：{}",
+                "手工编辑曲目 {}（{}）：共 {} 处改动：{}",
                 result.song_id,
                 result.file_name,
-                result.diffs.len(),
-                keys.join(", ")
+                keys.len(),
+                if keys.is_empty() {
+                    // 理论上到不了这里（applied 就说明有改动），留一句兜底比空着强。
+                    "（无）".to_string()
+                } else {
+                    keys.join("、")
+                }
             ),
         );
     }
@@ -461,5 +579,82 @@ mod tests {
     #[test]
     fn non_bool_dry_run_is_rejected() {
         assert!(parse(json!({ "fields": {}, "dry_run": "yes" })).is_err());
+    }
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::*;
+    use base64::engine::general_purpose::STANDARD as B64;
+
+    /// 最小的「JPEG」：嗅探只看前 3 个魔数字节。
+    fn jpeg_b64() -> String {
+        let mut bytes = vec![0xFFu8, 0xD8, 0xFF];
+        bytes.extend_from_slice(b"pretend-image-payload");
+        B64.encode(bytes)
+    }
+
+    fn parse(json: Value) -> Result<(WritableFields, bool, bool), ApiError> {
+        parse_fields(Some(&json))
+    }
+
+    #[test]
+    fn cover_null_means_remove() {
+        let (f, _, _) = parse(json!({ "fields": { "cover": null } })).expect("应解析成功");
+        assert!(f.unset_cover, "cover: null 应表示删除封面");
+        assert!(f.replace_cover.is_none());
+    }
+
+    #[test]
+    fn cover_object_means_replace_and_mime_comes_from_magic_bytes() {
+        let (f, _, _) = parse(json!({ "fields": { "cover": { "data": jpeg_b64() } } }))
+            .expect("应解析成功");
+        let pic = f.replace_cover.expect("应设置了新封面");
+        // 声明的 mime 不被采信，按魔数判定
+        assert_eq!(pic.mime_type, "image/jpeg");
+        assert_eq!(pic.pic_type, 3, "front cover");
+        assert!(pic.data.starts_with(&[0xFF, 0xD8, 0xFF]));
+    }
+
+    #[test]
+    fn cover_accepts_data_url_form() {
+        // 前端 FileReader.readAsDataURL 给的就是这个形状，后端直接收，省得前端切
+        let url = format!("data:image/jpeg;base64,{}", jpeg_b64());
+        let (f, _, _) = parse(json!({ "fields": { "cover": { "data": url } } })).expect("应解析成功");
+        assert!(f.replace_cover.is_some());
+    }
+
+    #[test]
+    fn cover_rejects_bad_base64() {
+        assert!(parse(json!({ "fields": { "cover": { "data": "这显然不是 base64!!" } } })).is_err());
+    }
+
+    #[test]
+    fn cover_rejects_non_image_payload() {
+        let not_an_image = B64.encode(b"just some text, no image magic at all");
+        assert!(parse(json!({ "fields": { "cover": { "data": not_an_image } } })).is_err());
+    }
+
+    #[test]
+    fn cover_rejects_empty_payload() {
+        assert!(parse(json!({ "fields": { "cover": { "data": "" } } })).is_err());
+    }
+
+    #[test]
+    fn cover_must_be_object_or_null() {
+        assert!(parse(json!({ "fields": { "cover": "image.jpg" } })).is_err());
+        assert!(parse(json!({ "fields": { "cover": 42 } })).is_err());
+        // 缺 data 也不行
+        assert!(parse(json!({ "fields": { "cover": { "mime": "image/jpeg" } } })).is_err());
+    }
+
+    #[test]
+    fn cover_and_other_fields_can_go_together() {
+        let (f, _, _) = parse(json!({
+            "fields": { "title": "新标题", "cover": { "data": jpeg_b64() } }
+        }))
+        .expect("应解析成功");
+        assert_eq!(f.title.as_deref(), Some("新标题"));
+        assert!(f.replace_cover.is_some());
     }
 }

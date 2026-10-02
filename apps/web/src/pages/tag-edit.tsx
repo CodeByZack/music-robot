@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import type { LyricsSource, SongTagValues, TagDiff, TagFieldPatch, TagPatchResult } from '@music-robot/core';
-import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
 import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { ErrorNote, LoadingNote, useAsync } from '@/lib/use-async.tsx';
@@ -43,17 +42,18 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 const LYRICS_SOURCE_HINT: Record<LyricsSource, string> = {
-  db: '这份歌词只在数据库里（刮削/入库时读到），文件里没有。修改它会把歌词写进文件。',
-  file: '来自文件内嵌歌词。',
-  none: '这个文件里没有歌词。',
+  file: '文件内嵌的歌词（下面就是）。',
+  none: '这个文件里没有歌词 —— 填了就写进去。',
 };
 
 /** 左栏「文件信息」里的短标签。 */
 const LYRICS_SOURCE_LABEL: Record<LyricsSource, string> = {
-  db: '库内',
   file: '文件内嵌',
   none: '无',
 };
+
+/** 封面大小上限，与后端 `tags::MAX_COVER_BYTES` 对齐（前端先拦一下，报错更快）。 */
+const MAX_COVER_BYTES = 8 * 1024 * 1024;
 
 /** 表单形态：全部用字符串表示，提交时再转成后端的类型。 */
 interface Form {
@@ -122,10 +122,17 @@ function toForm(values: SongTagValues): Form {
 /**
  * 表单 → PATCH 字段。**只输出与初值不同的项**：
  * 没变的省略（后端保持原样）、清空的传 `null`、改过的传新值。
+ *
+ * `cover` 单独传（它在左栏，不在表单里）：`{ data }` = 换封面，`null` = 删封面。
  */
-function buildPatch(form: Form, initial: Form): { fields: TagFieldPatch; invalid: string[] } {
+function buildPatch(
+  form: Form,
+  initial: Form,
+  cover?: { data: string } | null,
+): { fields: TagFieldPatch; invalid: string[] } {
   const fields: TagFieldPatch = {};
   const invalid: string[] = [];
+  if (cover !== undefined) fields.cover = cover;
 
   const text = (key: keyof Form & keyof TagFieldPatch, label: string) => {
     if (form[key] === initial[key]) return;
@@ -217,6 +224,139 @@ function NumberPair({
   );
 }
 
+/**
+ * 左栏的封面：预览 + 选择 / 移除。
+ *
+ * ⚠️ 显示的必须是**文件内嵌封面**，所以走 `/api/songs/{id}/tags/cover`，
+ * 而不是通用的 `/api/songs/{id}/cover` —— 后者**优先返回专辑表里那张**
+ * （见 `routes::cover` 的数据来源表）。用错端点的话，用户以为在看文件的封面、
+ * 实际看的是专辑的，换掉之后界面还不变（这个坑实测踩过）。
+ */
+function CoverEditor({
+  songId,
+  hasCover,
+  nonce,
+  picked,
+  onPick,
+  onRemove,
+  onRefresh,
+}: {
+  songId: number;
+  hasCover: boolean;
+  /** 变化就重新取图（写盘成功后父组件 +1）。 */
+  nonce: number;
+  /** 本地选中的新封面（data URL）。 */
+  picked: string | null;
+  onPick: (dataUrl: string | null) => void;
+  onRemove: () => void;
+  onRefresh: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  // 文件里那张加载失败（没有内嵌封面时端点给 404）→ 显示占位
+  const [fileCoverOk, setFileCoverOk] = useState(true);
+
+  useEffect(() => {
+    setFileCoverOk(true);
+  }, [songId, nonce]);
+
+  async function choose(file: File | null) {
+    setErr(null);
+    if (!file) return;
+    if (file.size > MAX_COVER_BYTES) {
+      setErr(`图片太大（${(file.size / 1048576).toFixed(1)} MB），上限 ${MAX_COVER_BYTES / 1048576} MB`);
+      return;
+    }
+    // readAsDataURL 给的就是 `data:image/jpeg;base64,...`，后端直接收这个形状。
+    const url = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(new Error('读取图片失败'));
+      r.readAsDataURL(file);
+    }).catch((e: Error) => {
+      setErr(e.message);
+      return '';
+    });
+    if (url) onPick(url);
+  }
+
+  const showFileCover = hasCover && fileCoverOk;
+
+  return (
+    <div>
+      <div className="aspect-square w-full max-w-[236px] overflow-hidden rounded-xl bg-surface">
+        {picked ? (
+          // 本地选中的图直接预览（不必等后端），改成什么一目了然
+          <img src={picked} alt="新封面预览" className="size-full object-cover" />
+        ) : showFileCover ? (
+          <img
+            src={`/api/songs/${songId}/tags/cover?v=${nonce}`}
+            alt="文件内嵌封面"
+            className="size-full object-cover"
+            onError={() => setFileCoverOk(false)}
+          />
+        ) : (
+          <div className="grid size-full place-items-center px-4 text-center text-cap leading-5 text-ink-4">
+            文件里没有内嵌封面
+          </div>
+        )}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          void choose(e.target.files?.[0] ?? null);
+          // 清空 value：不然选同一张图不会再触发 change
+          e.target.value = '';
+        }}
+      />
+
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="h-8 rounded-full bg-surface px-3 text-note text-ink-2 transition-colors hover:bg-surface-hover"
+        >
+          {picked || hasCover ? '更换封面' : '选择封面'}
+        </button>
+        {(picked || hasCover) && (
+          <button
+            type="button"
+            onClick={() => {
+              setErr(null);
+              onPick(null);
+              onRemove();
+            }}
+            className="h-8 rounded-full px-3 text-note text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            移除封面
+          </button>
+        )}
+      </div>
+
+      {err && <p className="mt-1.5 text-cap text-accent">{err}</p>}
+      {picked && <p className="mt-1.5 text-cap text-accent">预览的是新封面，写入后才生效。</p>}
+      <p className="mt-2 text-micro leading-4 text-ink-4">支持 JPEG / PNG / GIF，上限 8 MB。</p>
+      {/* 这里显示的是**文件**封面；列表 / 播放页看到的可能是专辑那张，说一句免得对不上 */}
+      <p className="mt-1.5 text-micro leading-4 text-ink-4">
+        这里显示的是文件内嵌的封面，列表和播放页可能显示专辑那张。
+      </p>
+      <button
+        type="button"
+        onClick={onRefresh}
+        className="mt-1.5 text-micro text-ink-4 underline transition-colors hover:text-ink-3"
+      >
+        刷新预览
+      </button>
+    </div>
+  );
+}
+
+/** 左栏的一行文件信息。 */
+
 /** 左栏的一行文件信息。 */
 function Meta({ label, value }: { label: string; value: string }) {
   return (
@@ -275,7 +415,7 @@ export default function TagEditPage() {
   const { closing, close } = useOverlayClose('/');
 
   const load = useCallback(() => api.tags.get(songId), [songId]);
-  const { data, error, loading } = useAsync(load, [songId]);
+  const { data, error, loading, reload } = useAsync(load, [songId]);
 
   const [form, setForm] = useState<Form | null>(null);
   const [initial, setInitial] = useState<Form | null>(null);
@@ -285,6 +425,20 @@ export default function TagEditPage() {
   const [busy, setBusy] = useState(false);
   // 备份默认**打开**：写标签不可撤销，多一个 .bak 是这里最划算的保险。
   const [backup, setBackup] = useState(true);
+  // 封面：选中的新图（data URL），或「要删掉」
+  const [newCover, setNewCover] = useState<string | null>(null);
+  const [dropCover, setDropCover] = useState(false);
+  // 换封面用的缓存失效序号。
+  // 为什么必要：写盘后同一个 URL 在浏览器缓存里还是旧图（已踩）。现在端点已经改成
+  // `no-store`，这里是第二道保险 —— 万一将来有人把缓存策略改回长缓存，界面依然会刷。
+  const [coverNonce, setCoverNonce] = useState(0);
+
+  /** 封面要传给后端的部分。没动封面就是 `undefined`（ = 保持原样）。 */
+  const coverPatch = useMemo(() => {
+    if (newCover) return { data: newCover };
+    if (dropCover) return null;
+    return undefined;
+  }, [newCover, dropCover]);
 
   // 载入完成后初始化表单。只在首次填充，免得用户编辑到一半被覆盖。
   useEffect(() => {
@@ -295,8 +449,8 @@ export default function TagEditPage() {
   }, [data, initial]);
 
   const patch = useMemo(
-    () => (form && initial ? buildPatch(form, initial) : { fields: {}, invalid: [] }),
-    [form, initial],
+    () => (form && initial ? buildPatch(form, initial, coverPatch) : { fields: {}, invalid: [] }),
+    [form, initial, coverPatch],
   );
   const dirty = Object.keys(patch.fields).length > 0;
   // 表单一旦改动，之前那次预览就过期了 —— 必须让用户重新预览再写。
@@ -342,11 +496,20 @@ export default function TagEditPage() {
         // 写成功后：把「初值」挪到新状态，这样再次编辑只比新值。
         // 但**不重读文件** —— 后端的 diff 已经是权威的「改了什么」。
         setNotice(
-          `已写入文件：${result.file_name}。改动 ${result.diffs.length} 处${
+          `已写入文件：${result.file_name}。改动 ${result.diffs.length + (result.cover_op ? 1 : 0)} 处${
             backup ? '，原文件已备份为同名 .bak' : ''
           }。`,
         );
         setInitial(form);
+        // 写成功 = 新封面已经进文件了：本地暂存清掉，回落去读服务端那张。
+        // 必须同时干三件事，少一件界面就会说谎：
+        //   ① 清掉本地预览图（不然一直显示那张 data URL）；
+        //   ② +nonce 换 URL（缓存里那张旧图不能再用）；
+        //   ③ 重取标签（“封面 image/jpeg”那一行、歌词来源都会变）。
+        setNewCover(null);
+        setDropCover(false);
+        setCoverNonce((n) => n + 1);
+        reload();
       } else if (!result.changed) {
         setNotice('没有字段需要改动。');
       }
@@ -418,23 +581,28 @@ export default function TagEditPage() {
               )}
 
               <div className="flex flex-col gap-6 min-[901px]:flex-row min-[901px]:items-start">
-                {/* 左栏：封面 + 文件信息。窄屏落到最上面（封面本来就该先看见）。 */}
+                {/* 左栏：封面（可换 / 可删）+ 文件信息。窄屏落到最上面。 */}
                 <aside className="w-full shrink-0 min-[901px]:w-[236px]">
-                  <Cover
-                    id={songId}
-                    className="aspect-square w-full max-w-[236px]"
-                    rounded="rounded-xl"
-                    glyphClass="text-glyph"
+                  <CoverEditor
+                    songId={songId}
+                    hasCover={data.tags.has_cover && !dropCover}
+                    nonce={coverNonce}
+                    picked={newCover}
+                    onPick={setNewCover}
+                    onRemove={() => setDropCover(true)}
+                    onRefresh={() => setCoverNonce((n) => n + 1)}
                   />
-                  <dl className="mt-3.5 space-y-1.5 text-cap">
+                  <dl className="mt-4 space-y-1.5 text-cap">
                     <Meta label="格式" value={format || '—'} />
                     <Meta label="大小" value={sizes || '—'} />
-                    <Meta label="内嵌封面" value={data.tags.has_cover ? '有' : '无'} />
+                    <Meta
+                      label="封面"
+                      value={
+                        newCover ? '待替换' : dropCover ? '待移除' : data.tags.has_cover ? data.tags.cover_mime ?? '有' : '无'
+                      }
+                    />
                     <Meta label="歌词" value={LYRICS_SOURCE_LABEL[data.tags.lyrics_source]} />
                   </dl>
-                  <p className="mt-3 text-micro leading-4 text-ink-4">
-                    封面取自文件（没有内嵌封面时回退到专辑封面）。本页暂不支持更换封面。
-                  </p>
                 </aside>
 
                 <div className="min-w-0 flex-1 space-y-4">
@@ -495,6 +663,27 @@ export default function TagEditPage() {
                     <div className="mb-2.5 text-cap leading-4 text-ink-4">
                       {LYRICS_SOURCE_HINT[data.tags.lyrics_source]}
                     </div>
+                    {/*
+                      库里那份**和文件不同**时才提示。刮削的歌词可能只入过库、从没写过文件，
+                      而下面这个框里的内容是**文件里**的 —— 不说清楚的话，
+                      用户会以为库里那份已经写进文件了。
+                    */}
+                    {data.tags.db_lyrics && (
+                      <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-black/25 px-3 py-2.5">
+                        <span className="text-cap leading-4 text-ink-3">
+                          数据库里另有一份<b className="font-medium text-ink-2">不同</b>的歌词（
+                          {data.tags.db_lyrics.length} 字，文件里这份是 {form.lyrics.length} 字）
+                          —— 多半是刮削时存进库、还没写回文件的。
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => set('lyrics', data.tags.db_lyrics ?? '')}
+                          className="h-7 shrink-0 rounded-full bg-surface px-3 text-cap text-ink-2 transition-colors hover:bg-surface-hover"
+                        >
+                          用库里的这份
+                        </button>
+                      </div>
+                    )}
                     <textarea
                       className={`${INPUT} h-[200px] w-full resize-y py-2.5 font-mono text-note leading-5`}
                       value={form.lyrics}
@@ -504,12 +693,14 @@ export default function TagEditPage() {
                   </Section>
 
                   {/* 改动预览：只有真的点过「预览」才显示，且改动一变就作废 */}
-                  {preview && preview.diffs.length > 0 && (
+                  {preview && (preview.diffs.length > 0 || preview.cover_op) && (
                     <div className="rounded-xl border border-line bg-surface p-4">
                       <div className="mb-2.5 flex items-center gap-2">
                         <b className="text-note font-medium">改动预览</b>
                         <span className="text-cap text-ink-4">
-                          {preview.applied ? '已写入文件' : `共 ${preview.diffs.length} 处`}
+                          {preview.applied
+                            ? '已写入文件'
+                            : `共 ${preview.diffs.length + (preview.cover_op ? 1 : 0)} 处`}
                         </span>
                       </div>
                       {preview.diffs.map((d: TagDiff) => (
@@ -520,6 +711,23 @@ export default function TagEditPage() {
                           <span className="text-accent">{d.after}</span>
                         </div>
                       ))}
+                      {/*
+                        封面单独一行的原因：引擎的 diff 只比**张数**，换一张封面是新旧都是 1 张、
+                        diffs 里根本没有这一行。不单独显示的话，只换封面的场景预览会是一片空白，
+                        用户看不出会发生什么。
+                      */}
+                      {preview.cover_op && (
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-note">
+                          <span className="w-[86px] shrink-0 text-ink-3">封面</span>
+                          <span className="text-ink-4 line-through">
+                            {preview.cover_op === 'remove' ? '原有封面' : '原封面'}
+                          </span>
+                          <span className="text-ink-4">→</span>
+                          <span className="text-accent">
+                            {preview.cover_op === 'remove' ? '移除' : '换成新选的图'}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

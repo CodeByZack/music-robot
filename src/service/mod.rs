@@ -13,4 +13,4 @@ pub use scrape::{
     BatchProgress, BatchReport, BatchRunner, Clock, ProgressSnapshot, ScrapeError, ScrapeIssue,
     ScrapeOutcome, ScrapePlugin, ScrapeService, SystemClock, HIT_CONFIDENCE,
 };
-pub use tag_edit::{EditResult, TagEditError, TagEditService};
+pub use tag_edit::{CoverOp, EditResult, TagEditError, TagEditService};

@@ -70,7 +70,15 @@ use super::library::{parse_id, run_db};
 /// 反复回源，换图之后客户端也不会长时间看不到新封面。
 ///
 /// 用 private 而不是 public：这是受鉴权保护的接口，响应不该被共享缓存跨用户复用。
-const CACHE_CONTROL: &str = "private, max-age=86400";
+const CACHE_LONG: &str = "private, max-age=86400";
+
+/// **可变**封面的缓存策略：`no-store`。
+///
+/// 给「文件内嵌封面」这条用的。它随时会被标签编辑器重写，而且我们没实现 ETag /
+/// If-None-Match，没有校验器可回落 —— 这时候任何 `max-age` 都意味着用户换完封面、
+/// 编辑器里还是旧图（实测踩过：写盘明明成功了，端点返回的还是缓存里那张 244880 字节的
+/// 旧 JPEG）。这个接口只有编辑页在用，一次请求换一份正确的显示，值。
+pub(crate) const CACHE_NO_STORE: &str = "private, no-store";
 
 /// GET /api/songs/{id}/cover —— 返回这首歌的封面图片。
 ///
@@ -113,7 +121,7 @@ async fn cover_inner(state: AppState, raw_id: String) -> ApiResult<Response> {
         if let Some(stored) = stored {
             let image =
                 cover::from_stored(stored.data, stored.mime.as_deref()).map_err(map_cover_error)?;
-            return cover_response(image);
+            return cover_response(image, CACHE_LONG);
         }
     }
 
@@ -145,7 +153,7 @@ async fn cover_inner(state: AppState, raw_id: String) -> ApiResult<Response> {
         }
     }
 
-    cover_response(image)
+    cover_response(image, CACHE_LONG)
 }
 
 /// 同步的「从音频文件里取封面」：沙箱解析路径 → read_tags → 挑图 → 上限检查 → 定 MIME。
@@ -153,7 +161,10 @@ async fn cover_inner(state: AppState, raw_id: String) -> ApiResult<Response> {
 /// 只接收已构造好的配置，整个函数在调用方的 spawn_blocking 里跑。
 /// 没有可用封面返回 Ok(None)（404）；存储 / 标签 IO 故障按 [map_storage_error] /
 /// [map_read_error] 收敛。
-fn extract_from_file(config: &Config, file_path: &str) -> ApiResult<Option<CoverImage>> {
+///
+/// `pub(crate)`：标签编辑页需要一个**只看文件内嵌封面**的入口
+/// （本模块的 `cover_inner` 会优先返回专辑表里那张，对编辑器是误导）。
+pub(crate) fn extract_from_file(config: &Config, file_path: &str) -> ApiResult<Option<CoverImage>> {
     // 每次请求从配置构造一次 FileStorage：它内部对每个库根做一次 canonicalize
     // （fail-closed，见 storage.rs）。封面是低频请求，这点开销可以忽略，换来的是
     // 不必给 AppState 加状态、也不会缓存住一份过期的库根快照。
@@ -171,7 +182,9 @@ fn extract_from_file(config: &Config, file_path: &str) -> ApiResult<Option<Cover
 }
 
 /// 组装 200 成功响应：图片字节 + 真实 MIME + Content-Length + 缓存策略。
-fn cover_response(image: CoverImage) -> ApiResult<Response> {
+///
+/// 缓存策略由调用方给：专辑封面用 [CACHE_LONG]，**可变**的文件内嵌封面用 [CACHE_NO_STORE]。
+pub(crate) fn cover_response(image: CoverImage, cache: &'static str) -> ApiResult<Response> {
     let length = image.data.len();
     let content_type = HeaderValue::from_str(&image.mime)
         .map_err(|e| ApiError::internal(format!("构造封面 Content-Type 失败：{e}")))?;
@@ -183,7 +196,7 @@ fn cover_response(image: CoverImage) -> ApiResult<Response> {
     headers.insert(header::CONTENT_TYPE, content_type);
     // 显式给出 Content-Length：与 body 字节数严格一致。
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(CACHE_CONTROL));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     Ok(response)
 }
 

@@ -63,6 +63,20 @@ impl std::fmt::Display for TagEditError {
 
 impl std::error::Error for TagEditError {}
 
+/// 封面操作。
+///
+/// 为什么要单独记一笔：标签引擎的 `diff_fields` 对封面**只比张数**
+/// （`("cover", before.pictures.len(), after.cover_count)`）。把一张封面换成另一张是
+/// `1 → 1`，**一行 diff 都不会产生** —— `apply` 于是判定「无变化」而根本不写文件。
+/// 所以封面操作必须在 diff 之外单独标记，两处一起参与「有没有变化」的判断。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverOp {
+    /// 换一张新的
+    Replace,
+    /// 删掉封面
+    Remove,
+}
+
 /// 编辑结果。
 ///
 /// `diffs` 是**给人看的**（`before → after` 都已经是拼好的字符串），与 CLI
@@ -73,9 +87,18 @@ pub struct EditResult {
     /// 只是文件名，**不是绝对路径** —— 对用户的用途是「确认改的是哪个文件」。
     pub file_name: String,
     pub diffs: Vec<DiffLine>,
+    /// 封面操作（换 / 删）。没有就是 None。
+    pub cover_op: Option<CoverOp>,
     /// 真的动过盘没有：preview 恒 false；apply 在「没有任何字段变化」时也是 false
     /// （文件重写不可撤销，不该做无用功）。
     pub applied: bool,
+}
+
+impl EditResult {
+    /// 有没有任何改动。**必须把封面操作也算进来** —— 见 [`CoverOp`] 的说明。
+    pub fn has_changes(&self) -> bool {
+        !self.diffs.is_empty() || self.cover_op.is_some()
+    }
 }
 
 pub struct TagEditService {
@@ -129,8 +152,9 @@ impl TagEditService {
     ) -> Result<EditResult, TagEditError> {
         let (song, before) = self.current(song_id)?;
         let result = self.diff_result(&song, &before, fields.clone());
-        // 没有字段变化：不写盘、不动库。重写文件不可撤销，不做无用功。
-        if result.diffs.is_empty() {
+        // 没有变化就不写盘、不动库。重写文件不可撤销，不做无用功。
+        // ⚠️ 判断必须包含封面操作：换封面是 1 → 1，diffs 是空的。
+        if !result.has_changes() {
             return Ok(result);
         }
 
@@ -158,12 +182,21 @@ impl TagEditService {
 
     /// 用「应用后」的视图算差异。`WritableFields` 会被消费，调用方要 clone。
     fn diff_result(&self, song: &Song, before: &AudioMetadata, fields: WritableFields) -> EditResult {
+        // 封面操作要在 merge_fields 消费 fields 之前取出来。
+        let cover_op = if fields.unset_cover {
+            Some(CoverOp::Remove)
+        } else if fields.replace_cover.is_some() {
+            Some(CoverOp::Replace)
+        } else {
+            None
+        };
         let intent = merge_fields(fields);
         let diffs = diff_fields(before, &preview_view(before, &intent));
         EditResult {
             song_id: song.id,
             file_name: file_name_of(&song.file_path),
             diffs,
+            cover_op,
             applied: false,
         }
     }

@@ -18,7 +18,7 @@
 //! 受保护子 Router；去重键归一化、合并投票、权限口径与状态机见 routes::requests 头注释。
 //! 管理端其余路由属于 S19–S23 中尚未落地的部分，不要提前塞进来。
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{header, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
@@ -118,7 +118,10 @@ pub fn build_router(state: AppState) -> AppRouter {
         // PATCH 会**直接覆盖原文件**且不可撤销（atomic_replace 无备份），所以它
         // 在 handler 里用 AdminUser 提取器要求管理员，与 /api/scrape 同档；
         // 且请求体的 `dry_run` **默认为 true**（忘了传不会误写）。
-        .route("/api/songs/{id}/tags", get(tags::get_tags).patch(tags::patch_tags))
+        //
+        // 它单独成一个子 Router，只为了**放宽 body 上限**：换封面要把图片 base64 塞进
+        // JSON，而 axum 默认上限是 2MB（base64 后只够传 1.5MB 的图）。
+        // 放在这条上而不是全局限，其余接口的请求体依然很小。
         // 列表与详情并存：/api/albums 与 /api/albums/{id}、/api/artists 与 /api/artists/{name}
         .route("/api/albums", get(library::albums_list))
         .route("/api/albums/{id}", get(library::album))
@@ -205,16 +208,29 @@ pub fn build_router(state: AppState) -> AppRouter {
             super::auth::require_auth,
         ));
 
+    // 标签编辑单独成一个子 Router：路径只在这一处注册，另外挂一个更宽的 body 上限。
+    // 8MB 的封面 base64 后约 10.7MB，取 12MB 留余量（真正的字节数上限在
+    // `tags::MAX_COVER_BYTES` 里检查，这里只是别让 axum 提前把请求拒掉）。
+    let tags_router = Router::new()
+        .route("/api/songs/{id}/tags", get(tags::get_tags).patch(tags::patch_tags))
+        .layer(DefaultBodyLimit::max(TAGS_MAX_BODY))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            super::auth::require_auth,
+        ));
+
     // ── 媒体子路由：鉴权与其余 API 不同 ──────────────────────────────────
     //
-    // 这两条的数据要交给 `<audio src>` / `<img src>`，而它们发的是**浏览器自发的
+    // 这几条的数据要交给 `<audio src>` / `<img src>`，而它们发的是**浏览器自发的
     // 裸 GET，带不了 `Authorization` 头**。所以单独挂 `require_auth_media`：
     // 先试请求头，再试登录时下发的 HttpOnly cookie。
     //
-    // ⚠️ 别把这两条挪回 `protected`：那样媒体就只能在 JS fetch 里用，标签全失效。
+    // ⚠️ 别把这几条挪回 `protected`：那样媒体就只能在 JS fetch 里用，标签全失效。
     let media = Router::new()
         .route("/api/stream/{id}", get(stream::stream))
         .route("/api/songs/{id}/cover", get(cover::cover))
+        // 标签编辑页专用：**只看文件内嵌封面**（上面的 cover 会优先给专辑表那张）。
+        .route("/api/songs/{id}/tags/cover", get(tags::file_cover))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             super::auth::require_auth_media,
@@ -228,6 +244,7 @@ pub fn build_router(state: AppState) -> AppRouter {
         // 登出也不要求令牌：令牌过期后更需要能登出（cookie 是 HttpOnly，JS 删不掉）
         .route("/api/auth/logout", post(auth::logout))
         .merge(protected)
+        .merge(tags_router)
         .merge(media)
         // 未知路径与不支持的方法都回统一错误形状，而不是 axum 默认的空 body。
         .fallback(not_found)
@@ -235,6 +252,13 @@ pub fn build_router(state: AppState) -> AppRouter {
         .layer(build_cors())
         .with_state(state)
 }
+
+/// 标签编辑路由的请求体上限。
+///
+/// 比 `tags::MAX_COVER_BYTES`（8MB）宽：封面以 base64 进 JSON，膨胀 4/3，
+/// 8MB 的图约 10.7MB。真正的字节数上限在 `parse_cover` 里检查并给中文报错，
+/// 这里只负责别让 axum 用默认的 2MB 把请求提前拒掉（那样错误信息也没用了）。
+const TAGS_MAX_BODY: usize = 12 * 1024 * 1024;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORS

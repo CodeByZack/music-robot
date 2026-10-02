@@ -216,18 +216,28 @@ export interface SongTagValues {
 }
 
 /**
- * 歌词的来源。
+ * 歌词在**文件**里的情况。
  *
- * `db` 表示这份歌词只在数据库里（刮削来的），**文件里没有** —— 界面要提示，
- * 否则用户会以为歌词已经写进文件了。只改标题时后端会保住库里的歌词。
+ * ⚠️ 这里只说文件。库里可能另有一份不同的（刮削时读进来的），
+ * 那种情况看 [`SongTags`] 的 `tags.db_lyrics`。
  */
-export type LyricsSource = 'db' | 'file' | 'none';
+export type LyricsSource = 'file' | 'none';
 
 export interface SongTags {
   song_id: number;
   /** 文件信息。**只有文件名**，后端不暴露绝对路径。 */
   file: { name: string; format: string | null; size: number | null };
-  tags: SongTagValues & { lyrics_source: LyricsSource; has_cover: boolean };
+  tags: SongTagValues & {
+    lyrics_source: LyricsSource;
+    /**
+     * 库里那份歌词，**仅当与文件里的不同**时才非 null。
+     * 用途：提示「库里还有一份不一样的，要用它吗」—— 刮削的歌词可能只入过库、没写过文件。
+     */
+    db_lyrics: string | null;
+    has_cover: boolean;
+    /** 当前封面的 MIME（没有封面就是 null）。 */
+    cover_mime: string | null;
+  };
 }
 
 /**
@@ -252,6 +262,8 @@ export type TagFieldPatch = Partial<{
   comment: string | null;
   lyrics: string | null;
   lyrics_timed: string | null;
+  /** `null` = **删除**封面；`{ data }` = 替换（base64 或 data URL）。 */
+  cover?: { data: string } | null;
   /** 显式清空（与「传 null」等价，给批量清空用）。 */
   unset: string[];
 }>;
@@ -278,6 +290,11 @@ export interface TagPatchResult {
   song_id: number;
   file_name: string;
   diffs: TagDiff[];
+  /**
+   * 封面操作。**必须单独给**：标签引擎的 diff 只比封面张数，
+   * 把一张换成另一张是 `1 → 1`，`diffs` 里一行都不会有。
+   */
+  cover_op: 'replace' | 'remove' | null;
   /** 有没有字段真的变了。false 时 `applied` 也一定是 false（后端不做无用功）。 */
   changed: boolean;
   /** 真的写盘了没有。 */
