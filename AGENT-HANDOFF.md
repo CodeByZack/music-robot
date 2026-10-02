@@ -13,7 +13,7 @@
 |---|---|
 | 项目 | 自托管音乐服务器。Rust 后端（axum + rusqlite，标签读写**全自研**）+ Web 前端（Vite + React） |
 | 后端 | **已完成**，645 个用例全绿，接口 33 条路径 / 42 个操作 |
-| 前端 | **主体已跑通**：14 条路由、14 个页面，真数据真播放。差收尾（见 §3） |
+| 前端 | **主体已跑通**：15 条路由、15 个页面，真数据真播放。差收尾（见 §3） |
 | 你大概率要做的 | ① 前端收尾与 UI 库决策 ② 标签编辑（**卡后端**）③ 点歌请求页 ④ S27/S28 |
 | 不该做的 | 别重写标签引擎，别「顺手修好」§5.2 列出的那些**故意的**行为 |
 
@@ -70,8 +70,8 @@ curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json
 | 端到端 API 脚本 | **195 通过 / 1 失败**（那 1 条是既有的「封面同样认 cookie」） | `node scripts/api_test.mjs` |
 | core 单测（零依赖，node:test） | **34 通过 / 0 失败** | `cd packages/core && node --test 'src/**/*.test.ts'` |
 | Web 构建 | **121 modules**，JS 317.50 kB（gzip 97.10）· CSS 30.57 kB（gzip 6.57） | `pnpm --filter @music-robot/web build` |
-| HTTP 接口 | **33 条路径 / 42 个操作**（`/api/admin/users` 2026-10-02 加了 GET） | 对着 `src/server/routes/mod.rs` 数 |
-| 前端页面 | **14 条路由 = 14 个页面文件**（含 3 个全屏浮层页：`/settings` `/now` `/songs/:id/tags`） | `ls apps/web/src/pages/` |
+| HTTP 接口 | **34 条路径 / 43 个操作**（`/api/admin/users` 的 GET 与 `/api/history/stats` 是 2026-10-02 新增） | 对着 `src/server/routes/mod.rs` 数 |
+| 前端页面 | **15 条路由 = 15 个页面文件**（含 3 个全屏浮层页：`/settings` `/now` `/songs/:id/tags`） | `ls apps/web/src/pages/` |
 | 画布进度 | **24 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数） | `music-server-architecture.excalidraw` |
 | 代码量 | Rust 39864 行 · `apps/web` 2671 行 · `packages/core` 1097 行 | `wc -l` |
 | 前端测试 | **0 个**（`find apps/web -name '*.test.*'` → 空） | 见 §3.4 |
@@ -132,7 +132,9 @@ history / song_requests 一串 CASCADE —— 没有需求就别动。
 | **shadcn/ui 没装** | 所有 UI 都是手写 Tailwind。**决策没落地** —— 用户说过「换吧」，但装依赖那步一直卡着（§6.3），所以到目前为止全是手写的。见 §3.3 |
 | 设置页的「写文件」开关不持久化 | 内存级（`lib/scrape-prefs.ts`），F5 后回默认的安全档 `false`。要持久化就存进后端 `settings`（通用键值表，`resume:<id>` 就是这么用的） |
 | 设置页的「音量 / 播放模式」是死 UI | 那两行永远显示「后端没有这个键」—— `volume` / `play_mode` **从来没有被写过**（画布 ④ 要求它们存 `user_settings`）。要么接上、要么把两行删掉 |
-| **播放统计没有页面** | 数据基础已经有了（`play_history.duration_listened_ms`，2026-10-02 起为真），但没有聚合接口（总时长 / 播放次数 / Top 歌曲），所以只做了「最近播放」列表 |
+| ~~播放统计没有页面~~ | ✅ **已完成（2026-10-02）**：后端 `GET /api/history/stats`
+（总量 / 歌榜 / 歌手榜 / 按天，带时区切天）+ 前端 `/stats`（入口在首页「最近播放」
+标题行右侧）。⚠️ 「累计时长」会偏小 —— 早于上报功能的历史行是 NULL |
 | ~~播放列表缺一半操作~~ | ✅ **已完成（2026-10-02）**：改名 / 描述 / 可见性、删歌单、
 从歌单移除、拖动排序（含「上移 / 下移」兼容触屏与键盘）全做了。
 一并补了后端的 `is_owner` —— 前端靠它决定给不给编辑入口（见 `routes::playlists.rs`） |
