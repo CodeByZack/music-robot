@@ -19,7 +19,11 @@ import { useAsync } from '@/lib/use-async.tsx';
  */
 const FILTERS: { id: 'all' | RequestStatus; label: string }[] = [
   { id: 'all', label: '全部' },
-  { id: 'pending', label: '待处理' },
+  // ⚠️ `pending` 是后端四个状态之一（新请求的初始值，`pending → processing` 是状态机的
+  // 起点），**不是**可以省掉的一档。标签写「已收到」而不是后端注释里的「待处理」：
+  // 「待处理」读起来像积压的任务，它的实际语义是「收到了、还没开始」——
+  // 用户 2026-10-02 就是被这个词绊住的（以为没有这个状态）。
+  { id: 'pending', label: '已收到' },
   { id: 'processing', label: '处理中' },
   { id: 'done', label: '已添加' },
   { id: 'rejected', label: '已拒绝' },
@@ -187,10 +191,11 @@ export function RequestsSection() {
   );
 }
 
-/** 状态徽标。四个状态四句话 —— 只用一个颜色点，用户看不出「待处理」还是「已拒绝」。 */
+/** 状态徽标。四个状态四句话 —— 只用一个颜色点，用户看不出「已收到」还是「已拒绝」。 */
 function StatusChip({ status }: { status: RequestStatus }) {
   const [label, cls] = {
-    pending: ['待处理', 'bg-surface-hover text-ink-2'],
+    // 与筛选标签同一套措辞（见上方 `FILTERS`）—— 同一状态在两处叫不同名字最容易被误解
+    pending: ['已收到', 'bg-surface-hover text-ink-2'],
     processing: ['处理中', 'bg-accent-soft text-accent'],
     done: ['已添加', 'bg-surface-hover text-ink-4'],
     rejected: ['已拒绝', 'bg-surface-hover text-ink-4'],

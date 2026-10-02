@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { User } from '@music-robot/core';
+import { Dialog } from '@/components/dialog.tsx';
 import { Panel, PanelRow } from '@/components/panel.tsx';
 import { api } from '@/lib/client.ts';
 import { messageOf, useSession } from '@/lib/session.tsx';
@@ -24,7 +25,6 @@ export function UsersSection() {
   const { data, error, loading, reload } = useAsync(load, []);
 
   const items = data?.items ?? [];
-  /** 建号表单的显隐。默认收起 —— 它是低频动作，平时该让「现在有谁」占满这一块。 */
   const [creating, setCreating] = useState(false);
 
   return (
@@ -34,10 +34,10 @@ export function UsersSection() {
         actions={
           <button
             type="button"
-            onClick={() => setCreating((v) => !v)}
-            className="h-[34px] shrink-0 rounded-full bg-surface-hover px-3.5 text-nav transition-colors hover:brightness-125"
+            onClick={() => setCreating(true)}
+            className="h-[34px] shrink-0 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110"
           >
-            {creating ? '收起' : '新建用户'}
+            新建用户
           </button>
         }
       >
@@ -53,12 +53,12 @@ export function UsersSection() {
       </Panel>
 
       {creating && (
-        <CreateUserPanel
+        <CreateUserDialog
+          onClose={() => setCreating(false)}
           onDone={() => {
             setCreating(false);
             reload();
           }}
-          onCancel={() => setCreating(false)}
         />
       )}
     </>
@@ -95,13 +95,14 @@ function UserRow({ user, isMe }: { user: User; isMe: boolean }) {
 }
 
 /**
- * 建号 —— **就是一块 Panel 加几行**，不另做表单样式，也不是弹窗。
+ * 建号弹窗 —— 与「点一首」用同一套弹窗外壳（`components/dialog.tsx`），
+ * 站内的「填完就走」都用它（用户 2026-10-02 要求统一）。
  *
  * 校验只做**前端该做的那一份**（非空、口令长度），真正的规则在后端
  * （`normalize_username` / `validate_password`）—— 前端这层是为了少一次往返，
  * 不是安全边界。用户名重复由后端回 409，文案直接用它给的。
  */
-function CreateUserPanel({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState('');
   const [pw, setPw] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
@@ -117,10 +118,6 @@ function CreateUserPanel({ onDone, onCancel }: { onDone: () => void; onCancel: (
     setErr(null);
     try {
       await api.users.create(name.trim(), pw, role);
-      // 口令立刻从内存里抹掉 —— 建完还留在输入框里没有理由
-      setName('');
-      setPw('');
-      setRole('user');
       onDone();
     } catch (e2) {
       setErr(messageOf(e2));
@@ -130,42 +127,35 @@ function CreateUserPanel({ onDone, onCancel }: { onDone: () => void; onCancel: (
   }
 
   const INPUT =
-    'h-9 w-[220px] shrink-0 rounded-lg border-0 bg-surface-hover px-3 text-nav text-ink outline-0 placeholder:text-ink-4 max-[560px]:w-[140px]';
+    'h-9 w-full rounded-lg border-0 bg-surface px-3 text-nav text-ink outline-0 placeholder:text-ink-4';
 
   return (
-    <form onSubmit={submit}>
-      <Panel title="新建用户">
-        <PanelRow label="用户名" hint="最多 64 个字符，登录名区分大小写">
+    <Dialog title="新建用户" onClose={onClose}>
+      <form onSubmit={submit} className="p-4">
+        <div className="flex flex-col gap-2">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="比如 zhangsan"
+            placeholder="用户名（最多 64 个字符）"
             autoComplete="off"
             className={INPUT}
           />
-        </PanelRow>
-        <PanelRow label="口令" hint="至少 8 位。后端用 argon2 存哈希，不会明文落库">
           <input
             type="password"
             value={pw}
             onChange={(e) => setPw(e.target.value)}
-            placeholder="至少 8 位"
+            placeholder="口令（至少 8 位）"
             autoComplete="new-password"
             className={INPUT}
           />
-        </PanelRow>
-        <PanelRow
-          label="角色"
-          hint="管理员能改标签、跑扫描刮削、管理用户与点歌请求；普通用户只能用曲库与播放"
-        >
-          <div className="flex shrink-0 rounded-full bg-surface-hover p-0.5">
+          <div className="flex rounded-full bg-surface p-0.5">
             {(['user', 'admin'] as const).map((r) => (
               <button
                 key={r}
                 type="button"
                 onClick={() => setRole(r)}
                 className={[
-                  'rounded-full px-3.5 py-1.5 text-cap transition-colors',
+                  'flex-1 rounded-full px-3 py-1.5 text-cap transition-colors',
                   role === r ? 'bg-surface-press text-ink' : 'text-ink-3 hover:text-ink',
                 ].join(' ')}
               >
@@ -173,28 +163,32 @@ function CreateUserPanel({ onDone, onCancel }: { onDone: () => void; onCancel: (
               </button>
             ))}
           </div>
-        </PanelRow>
-
-        {err && <p className="mt-3 text-note text-accent">{err}</p>}
-
-        <div className="mt-4 flex gap-2.5">
+        </div>
+        {/* 两种角色的差别写出来 —— 它是这张表里唯一需要解释的一项 */}
+        <p className="mt-2.5 text-micro leading-4 text-ink-4">
+          {role === 'admin'
+            ? '管理员能改标签、跑扫描刮削、管理用户与点歌请求。'
+            : '普通用户只能用曲库、播放与点歌。口令后端用 argon2 存哈希，不会明文落库。'}
+        </p>
+        {err && <p className="mt-2.5 text-cap text-accent">{err}</p>}
+        <div className="mt-4 flex gap-2">
           <button
             type="submit"
             disabled={!canSubmit || busy}
-            className="h-[34px] rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-9 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110 disabled:opacity-40"
           >
-            {busy ? '创建中…' : '创建用户'}
+            {busy ? '创建中…' : '创建'}
           </button>
           <button
             type="button"
-            onClick={onCancel}
-            className="h-[34px] rounded-full px-4 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+            onClick={onClose}
+            className="h-9 rounded-full px-4 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
           >
             取消
           </button>
         </div>
-      </Panel>
-    </form>
+      </form>
+    </Dialog>
   );
 }
 
