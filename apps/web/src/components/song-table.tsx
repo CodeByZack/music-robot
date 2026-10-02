@@ -112,10 +112,17 @@ function RowMenu({ state, writeFiles, song, onRescrape, onRemove, onMoveUp, onMo
   const running = state?.phase === 'running';
   const { user } = useSession();
   /**
-   * 写标签仅管理员可用（后端 `PATCH /api/songs/{id}/tags` 挂的是 `AdminUser`），
-   * 所以非管理员**干脆不给这个入口** —— 点进去再收 403 是更差的体验。
+   * 这一行里**哪些操作只有管理员能做**。目前两项：
+   *
+   * * 「编辑标签」—— `PATCH /api/songs/{id}/tags` 挂的是 `AdminUser`；
+   * * 「重新刮削这首歌」—— `POST /api/scrape` 同样是 `AdminUser`。
+   *
+   * 两项都**干脆不给入口**，而不是点下去再收 403。
+   * ⚠️ 以前只拦了「编辑标签」，「重新刮削」是**无条件**显示的 ——
+   * 实测普通用户点了就弹 403，既白花一次往返，也会让人以为自己能做。
+   * 新增操作时记得一并判断这个开关。
    */
-  const canEditTags = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
   /**
    * 刚加进去的歌单 id —— 在二级列表里打「已添加」，不然点完没反馈。
    *
@@ -164,17 +171,22 @@ function RowMenu({ state, writeFiles, song, onRescrape, onRemove, onMoveUp, onMo
         ) : undefined
       }
       items={[
-        ...(canEditTags
-          ? [{ label: '编辑标签', to: `/songs/${song.id}/tags` } satisfies MenuItem]
+        ...(isAdmin
+          ? ([{ label: '编辑标签', to: `/songs/${song.id}/tags` }] satisfies MenuItem[])
           : []),
         { label: '添加到歌单', submenu: loadPlaylists },
-        {
-          label: running ? '刮削中…' : state?.phase === 'ok' ? '已重新刮削' : '重新刮削这首歌',
-          // 「会不会动原文件」直接写在菜单里 —— 用户没理由记得住设置页那个开关当时开没开
-          hint: writeFiles ? '会写文件' : '只入库',
-          disabled: running,
-          onClick: onRescrape,
-        },
+        // 刮削同样是 admin-only（`POST /api/scrape`）—— 以前漏了这一重判断
+        ...(isAdmin
+          ? ([
+              {
+                label: running ? '刮削中…' : state?.phase === 'ok' ? '已重新刮削' : '重新刮削这首歌',
+                // 「会不会动原文件」直接写在菜单里 —— 用户没理由记得住设置页那个开关当时开没开
+                hint: writeFiles ? '会写文件' : '只入库',
+                disabled: running,
+                onClick: onRescrape,
+              },
+            ] satisfies MenuItem[])
+          : []),
         // 本行自己能动的位置（拖动排序的兜底入口）。顺序 = 表格里的上下，别写反。
         ...(onMoveUp ? ([{ label: '上移', onClick: onMoveUp }] satisfies MenuItem[]) : []),
         ...(onMoveDown ? ([{ label: '下移', onClick: onMoveDown }] satisfies MenuItem[]) : []),

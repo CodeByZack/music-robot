@@ -164,11 +164,18 @@ function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
             ))}
           </div>
         </div>
-        {/* 两种角色的差别写出来 —— 它是这张表里唯一需要解释的一项 */}
+        {/* 两种角色的差别写出来 —— 它是这张表里唯一需要解释的一项。
+            ⚠️ 措辞要与**实际能力**对得上（后端各路由的守卫见
+            `routes/{library,playback,playlists,jobs,tags}.rs`）：
+            普通用户本来就有曲库 / 播放 / 收藏 / 歌单 / 点歌 / 自己的设置，
+            原句只写「曲库、播放与点歌」漏了歌单与收藏，会让人以为建不了歌单。 */}
         <p className="mt-2.5 text-micro leading-4 text-ink-4">
           {role === 'admin'
-            ? '管理员能改标签、跑扫描刮削、管理用户与点歌请求。'
-            : '普通用户只能用曲库、播放与点歌。口令后端用 argon2 存哈希，不会明文落库。'}
+            ? '管理员：上面这些之外，还能扫描入库、刮削、编辑标签、管理用户与点歌请求。'
+            : '普通用户：曲库、播放、收藏、歌单、点歌。扫描刮削、标签编辑、用户管理只有管理员能操作。'}
+        </p>
+        <p className="mt-1 text-micro leading-4 text-ink-4">
+          口令用 argon2id 存哈希（每个口令独立随机盐），明文既不落库也不进日志。
         </p>
         {err && <p className="mt-2.5 text-cap text-accent">{err}</p>}
         <div className="mt-4 flex gap-2">

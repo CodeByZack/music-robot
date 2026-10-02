@@ -58,7 +58,11 @@ interface SettingsSection {
 }
 
 const SECTIONS: SettingsSection[] = [
-  { id: 'library', label: '音乐库' },
+  // 「音乐库」这一节现在只有**扫描与刮削**两个面板，而两边的接口
+  // （`POST /api/scan`、`POST /api/scrape` 及其状态轮询）全是 `AdminUser`。
+  // 所以整节标 adminOnly —— 普通用户以前能看到「开始刮削」「重新扫描」两个按钮，
+  // 点下去才收 403（实测过）。⛔ 别只藏按钮：这一节里没有别的普通用户能用的东西。
+  { id: 'library', label: '音乐库', adminOnly: true },
   { id: 'playback', label: '播放' },
   // 点歌请求与用户管理**不另开页面**，就是这里的两个分节 —— 用户 2026-10-02
   // 明确要求并进来。理由也成立：它们是「偶尔来一下」的配置 / 管理动作，
@@ -88,6 +92,18 @@ export default function SettingsPage() {
    * 前端这层只是为了不让人白点。
    */
   const visibleSections = SECTIONS.filter((s) => !s.adminOnly || user?.role === 'admin');
+  /**
+   * 真正渲染的分节。
+   *
+   * ⚠️ **不能直接用 `section`**：初始值是 `library`，而它是 `adminOnly` ——
+   * 普通用户看不到那一项，于是所有 `section === 'x'` 都不成立、**内容区一片空白**。
+   * 这里在「当前分节不可见」时退回第一个可见分节（普通用户就是「播放」）。
+   * 另外用户角色是异步拿到的：`user` 还是 null 时普通用户视角先算一遍，
+   * 等角色到位后 `section` 若仍可见就还是它，不会把用户的点击弄丢。
+   */
+  const active = visibleSections.some((s) => s.id === section)
+    ? section
+    : (visibleSections[0]?.id ?? section);
   const [scanJob, setScanJob] = useJobPoll();
   const [scrapeJob, setScrapeJob] = useJobPoll();
   // 默认 **false = 只入库**。危险的那一档必须用户显式打开，
@@ -167,7 +183,7 @@ export default function SettingsPage() {
                 onClick={() => setSection(s.id)}
                 className={[
                   'shrink-0 rounded-md px-3 py-2 text-left text-nav whitespace-nowrap transition-colors',
-                  section === s.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
+                  active === s.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
                 ].join(' ')}
               >
                 {s.label}
@@ -178,7 +194,7 @@ export default function SettingsPage() {
           <div className="min-h-0 flex-1 overflow-auto p-5">
             {err && <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{err}</p>}
 
-            {section === 'library' && (
+            {active === 'library' && (
               <>
                 <Panel title="刮削">
         {/* 这个开关现在**真的有用** —— 后端 POST /api/scrape 支持 write_files。
@@ -261,7 +277,7 @@ export default function SettingsPage() {
               </>
             )}
 
-            {section === 'playback' && (
+            {active === 'playback' && (
               <Panel title="播放">
         <Row label="音量" hint={vol === undefined ? '后端没有这个键' : `settings.volume = ${vol}`}>
           <span className="rounded-sm bg-black/30 px-2.5 py-2 font-mono text-xs text-ink-3">
@@ -282,11 +298,11 @@ export default function SettingsPage() {
       </Panel>
             )}
 
-            {section === 'requests' && <RequestsSection />}
+            {active === 'requests' && <RequestsSection />}
 
-            {section === 'users' && <UsersSection />}
+            {active === 'users' && <UsersSection />}
 
-            {section === 'account' && (
+            {active === 'account' && (
               <Panel title="账号">
         <Row label={user?.username ?? ''} hint={user?.role === 'admin' ? '管理员' : '普通用户'}>
           <button

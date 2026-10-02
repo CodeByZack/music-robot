@@ -98,7 +98,7 @@ export default function TagEditPage() {
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   // 刮削会发起网络请求，后端仅限管理员（与 /api/scrape 同档）—— 非管理员不显示入口。
   const { user } = useSession();
-  const canScrape = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
 
   /** 封面要传给后端的部分。没动封面就是 `undefined`（ = 保持原样）。 */
   const coverPatch = useMemo(() => {
@@ -248,6 +248,44 @@ export default function TagEditPage() {
       return next;
     });
     setNotice('已把这条候选填进表单 —— 还没写盘。看清楚再点「预览改动」。');
+  }
+
+  /**
+   * 非管理员：**整页拦住**，而不是只藏某几个按钮。
+   *
+   * 为什么必须整页：`PATCH /api/songs/{id}/tags` 挂的是 `AdminUser`，
+   * 而「预览改动」是 `dry_run = true` 走的**同一个接口** —— 所以普通用户
+   * 改完表单再点预览只会收到 403。
+   *
+   * 实测过的体验：普通用户能打开这一页、能改字段，「预览改动」按钮也会解禁
+   * （它的 disabled 只看「改没改」，不看权限），点下去才弹「需要管理员权限」。
+   * 这种「看上去能用、点了才拒绝」比不给入口差得多 —— 用户会以为是自己点错了。
+   *
+   * 【可选】后端 `GET tags` 对**登录用户**开放（不是 admin），所以理论上可以做一个
+   * 只读版（看得到当前标签、不能改）。但那是新功能，不在「不给用不了的入口」范围内。
+   */
+  if (!isAdmin) {
+    return (
+      <div
+        className={[
+          'app-bg fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 px-6',
+          closing ? 'anim-overlay-out' : 'anim-overlay-in',
+        ].join(' ')}
+      >
+        <p className="text-lead font-medium">编辑标签仅管理员可用</p>
+        <p className="max-w-[380px] text-center text-nav text-ink-3">
+          标签编辑会直接覆盖原文件、不可撤销，所以只开放给管理员。
+          你可以继续使用曲库、播放、歌单与点歌。
+        </p>
+        <button
+          type="button"
+          onClick={close}
+          className="h-9 rounded-full bg-surface px-4 text-nav transition-colors hover:bg-surface-hover"
+        >
+          返回
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -445,7 +483,7 @@ export default function TagEditPage() {
                 sheetOpen ? '' : 'max-[1099px]:hidden',
               ].join(' ')}
             >
-              {canScrape && (
+              {isAdmin && (
                 <div
                   className={[
                     'flex shrink-0 flex-col border-b border-line-weak',
