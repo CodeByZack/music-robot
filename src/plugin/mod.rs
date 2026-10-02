@@ -27,7 +27,7 @@ pub use protocol::{
     decode_request, decode_response, encode_request, encode_response, validate_cover_path, CoverRef,
     DownloadMvRequest, DownloadOk, DownloadPrefer, DownloadRequest, ErrorCode, FieldUpdate, MvPrefer,
     PluginErrorInfo, PluginErrorResponse, PluginRequest, PluginResponse, RequestOptions,
-    ResponseAction, ScrapeOk, ScrapeRequest, SongRef, TagValue, Tags, TrackMatch, DEFAULT_CONFIDENCE,
+    ResponseAction, ScrapeCandidate, ScrapeOk, ScrapeRequest, SongRef, TagValue, Tags, TrackMatch, DEFAULT_CONFIDENCE,
     PROTOCOL_VERSION,
 };
 pub use registry::{LoadReport, PluginRegistry};

@@ -205,17 +205,59 @@ pub struct CoverRef {
     pub mime: Option<String>,
 }
 
-/// scrape 成功响应
+/// 插件对一首歌给出的**一条**候选理解。
+///
+/// 为什么是「候选」而不是「结果」：同一个歌名在数据源里往往对应多条录音
+/// （原版 / 现场 / 重混 / 翻唱），它们 title 一模一样，只有发行信息不同。
+/// 要说清「哪条才是用户要的那首」得懂数据源的结构（哪些 release 是合辑、
+/// 哪个是原版），那是插件的地盘 —— 所以**筛选交回插件**，
+/// 服务端只负责「按 confidence 取最高」这类通用的事。
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScrapeOk {
-    pub id: String,
-    /// 缺省 0.50
+pub struct ScrapeCandidate {
+    /// 缺省 [DEFAULT_CONFIDENCE]
     pub confidence: f64,
     pub source: Option<String>,
     pub matched: Option<TrackMatch>,
     pub tags: Tags,
     pub cover: FieldUpdate<CoverRef>,
     pub lyrics: FieldUpdate<String>,
+}
+
+/// scrape 成功响应。
+///
+/// `candidates` **按 confidence 降序**（[ScrapeOk::new] 里排好、对外只读）——
+/// 「哪条最可信」是服务端的判断，不依赖插件给的顺序。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScrapeOk {
+    pub id: String,
+    candidates: Vec<ScrapeCandidate>,
+}
+
+impl ScrapeOk {
+    /// 构造：**排一次序**，把「按 confidence 降序」这个不变式钉在类型里。
+    ///
+    /// 用**稳定**排序：confidence 相同时保留插件给的先后（插件通常把更可信的放前面）。
+    pub fn new(id: String, mut candidates: Vec<ScrapeCandidate>) -> ScrapeOk {
+        candidates.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        ScrapeOk { id, candidates }
+    }
+
+    /// 全部候选，按 confidence 降序。
+    pub fn ranked(&self) -> &[ScrapeCandidate] {
+        &self.candidates
+    }
+
+    /// 最可信的那条。
+    ///
+    /// `None` 只可能来自「构造时传了空列表」；解码路径会明确拒掉空 `candidates`，
+    /// 所以正常流程里至少有一条。
+    pub fn best(&self) -> Option<&ScrapeCandidate> {
+        self.candidates.first()
+    }
 }
 
 /// download / download_mv 成功响应
@@ -364,21 +406,10 @@ pub fn encode_response(resp: &PluginResponse) -> String {
             m.insert("protocol".into(), Value::from(PROTOCOL_VERSION));
             m.insert("ok".into(), Value::Bool(true));
             m.insert("action".into(), Value::from(ResponseAction::Scrape.as_str()));
-            m.insert("confidence".into(), Value::from(r.confidence));
-            m.insert("source".into(), opt_value(&r.source));
-            m.insert("matched".into(), matched_to_value(&r.matched));
-            m.insert("tags".into(), tags_to_value(&r.tags));
-            // cover / lyrics 是三态：缺省**不写键**，显式 null 才写 null
-            match &r.cover {
-                FieldUpdate::Absent => {}
-                FieldUpdate::Clear => { m.insert("cover".into(), Value::Null); }
-                FieldUpdate::Set(c) => { m.insert("cover".into(), cover_to_value(c)); }
-            }
-            match &r.lyrics {
-                FieldUpdate::Absent => {}
-                FieldUpdate::Clear => { m.insert("lyrics".into(), Value::Null); }
-                FieldUpdate::Set(s) => { m.insert("lyrics".into(), Value::String(s.clone())); }
-            }
+            m.insert(
+                "candidates".into(),
+                Value::Array(r.ranked().iter().map(candidate_to_value).collect()),
+            );
             Value::Object(m).to_string()
         }
         PluginResponse::DownloadOk(r) => {
@@ -446,6 +477,25 @@ pub fn decode_request(line: &str) -> Result<PluginRequest, ProtocolError> {
     }
 }
 
+/// 解一条候选。
+///
+/// 字段可以平铺在响应根上（协议 v1 的旧形状），也可以在 `candidates` 数组的元素里 ——
+/// 两种形状走**同一个**解码函数，免得两条路径慢慢漂移。
+fn decode_candidate(obj: &Map<String, Value>) -> Result<ScrapeCandidate, ProtocolError> {
+    Ok(ScrapeCandidate {
+        confidence: match obj.get("confidence") {
+            None | Some(Value::Null) => DEFAULT_CONFIDENCE,
+            Some(v) => value_to_f64(v)
+                .ok_or_else(|| ProtocolError::BadJson("\"confidence\" 必须是数字".to_string()))?,
+        },
+        source: opt_str(obj, "source"),
+        matched: decode_matched(obj.get("matched"))?,
+        tags: decode_tags(obj.get("tags"))?,
+        cover: decode_cover(obj.get("cover"))?,
+        lyrics: decode_field(obj, "lyrics", |v| v.as_str().map(str::to_string))?,
+    })
+}
+
 /// 读取响应必填的 action 字段，只接受三个字面量（大小写敏感）。
 fn decode_response_action(obj: &Map<String, Value>) -> Result<ResponseAction, ProtocolError> {
     let raw = match obj.get("action") {
@@ -481,20 +531,35 @@ pub fn decode_response(line: &str) -> Result<PluginResponse, ProtocolError> {
     }
     match action {
         // 即使响应里带了 file_path（回显请求的 song.file_path）也仍按 scrape 解析
-        ResponseAction::Scrape => Ok(PluginResponse::ScrapeOk(ScrapeOk {
-            id,
-            confidence: match obj.get("confidence") {
-                None | Some(Value::Null) => DEFAULT_CONFIDENCE,
-                Some(v) => value_to_f64(v).ok_or_else(|| {
-                    ProtocolError::BadJson("\"confidence\" 必须是数字".to_string())
-                })?,
-            },
-            source: opt_str(obj, "source"),
-            matched: decode_matched(obj.get("matched"))?,
-            tags: decode_tags(obj.get("tags"))?,
-            cover: decode_cover(obj.get("cover"))?,
-            lyrics: decode_field(obj, "lyrics", |v| v.as_str().map(str::to_string))?,
-        })),
+        ResponseAction::Scrape => {
+            let candidates = match obj.get("candidates") {
+                // 新形状：一次给多条候选
+                Some(Value::Array(items)) => {
+                    if items.is_empty() {
+                        return Err(ProtocolError::BadJson(
+                            "ok:true 但 candidates 是空数组 —— 没有候选就该回 ok:false + NOT_FOUND"
+                                .to_string(),
+                        ));
+                    }
+                    items
+                        .iter()
+                        .map(|item| {
+                            let o = as_object(item, "candidates 元素")?;
+                            decode_candidate(o)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                }
+                Some(_) => {
+                    return Err(ProtocolError::BadJson(
+                        "\"candidates\" 必须是数组".to_string(),
+                    ))
+                }
+                // 旧形状（协议 v1 的原始形状）：字段直接平铺在响应根上。
+                // 等价于「只有一条候选」，保留它是为了不把已发布的插件一次性打死。
+                None => vec![decode_candidate(obj)?],
+            };
+            Ok(PluginResponse::ScrapeOk(ScrapeOk::new(id, candidates)))
+        }
         // download_mv 成功复用 DownloadOk，靠 action 字段区分二者
         ResponseAction::Download | ResponseAction::DownloadMv => {
             Ok(PluginResponse::DownloadOk(DownloadOk {
@@ -811,6 +876,29 @@ fn options_to_value(o: &RequestOptions) -> Value {
     Value::Object(m)
 }
 
+/// 一条候选 → JSON 对象（`candidates` 数组的元素）。
+///
+/// `cover` / `lyrics` 是三态：**缺省不写键**，显式 `Clear` 才写 `null` ——
+/// 「不修改」与「清空」在线上必须分得开。
+fn candidate_to_value(c: &ScrapeCandidate) -> Value {
+    let mut m = Map::new();
+    m.insert("confidence".into(), Value::from(c.confidence));
+    m.insert("source".into(), opt_value(&c.source));
+    m.insert("matched".into(), matched_to_value(&c.matched));
+    m.insert("tags".into(), tags_to_value(&c.tags));
+    match &c.cover {
+        FieldUpdate::Absent => {}
+        FieldUpdate::Clear => { m.insert("cover".into(), Value::Null); }
+        FieldUpdate::Set(cover) => { m.insert("cover".into(), cover_to_value(cover)); }
+    }
+    match &c.lyrics {
+        FieldUpdate::Absent => {}
+        FieldUpdate::Clear => { m.insert("lyrics".into(), Value::Null); }
+        FieldUpdate::Set(s) => { m.insert("lyrics".into(), Value::String(s.clone())); }
+    }
+    Value::Object(m)
+}
+
 fn cover_to_value(c: &CoverRef) -> Value {
     let mut m = Map::new();
     m.insert("path".into(), Value::String(c.path.clone()));
@@ -915,6 +1003,11 @@ mod tests {
             PluginResponse::ScrapeOk(r) => r,
             other => panic!("期望 ScrapeOk，实际 {other:?}"),
         }
+    }
+
+    /// 首选候选。多数用例只关心最可信那条（插件只回一条时它就是那条）。
+    fn cand_of(line: &str) -> ScrapeCandidate {
+        scrape_of(line).best().cloned().expect("至少要有一条候选")
     }
 
     fn download_of(line: &str) -> DownloadOk {
@@ -1113,11 +1206,12 @@ mod tests {
 
     #[test]
     fn scrape_ok_decodes_spec_example() {
-        let r = scrape_of(SCRAPE_OK_EXAMPLE);
-        assert_eq!(r.id, "q-8842");
+        let ok = scrape_of(SCRAPE_OK_EXAMPLE);
+        assert_eq!(ok.id, "q-8842");
+        let r = ok.best().expect("至少一条候选");
         assert!((r.confidence - 0.92).abs() < 1e-9);
         assert_eq!(r.source.as_deref(), Some("netease"));
-        let m = r.matched.expect("matched 缺失");
+        let m = r.matched.clone().expect("matched 缺失");
         assert_eq!(m.id.as_deref(), Some("123456"));
         assert_eq!(m.url.as_deref(), Some("u"));
         assert_eq!(r.tags.album, TagValue::Text("x".to_string()));
@@ -1164,9 +1258,110 @@ mod tests {
         let mv = r#"{"id":"q-8844","protocol":1,"action":"download_mv","ok":true,"file_path":"/music/mv/x.mp4","format":"mp4"}"#;
         assert!(matches!(decode_response(mv), Ok(PluginResponse::DownloadOk(_))));
         // 只有 ok 的裸响应按 scrape 处理（tags 全缺省 = 不修改）
-        let bare = scrape_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true}"#);
+        let bare = cand_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true}"#);
         assert_eq!(bare.confidence, 0.50);
         assert_eq!(bare.tags, Tags::default());
+    }
+
+    // ── 多候选（本次改动核心）──
+    //
+    // 同一歌名在数据源里往往对应多条录音（原版 / 现场 / 重混 / 翻唱），
+    // 服务端只负责「按 confidence 取最高」，所以这两条不变式必须钉住：
+    //   ① 解码后**一定**是降序，不依赖插件给的顺序；
+    //   ② 旧的平铺形状仍然能解，且等价于「只有一条候选」。
+
+    #[test]
+    fn candidates_are_sorted_by_confidence_regardless_of_plugin_order() {
+        // 故意把最差的那条放在最前面 —— 服务端不能被插件的顺序带跑
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":[
+            {"confidence":0.55,"tags":{"album":"合辑"}},
+            {"confidence":0.97,"tags":{"album":"原版"}},
+            {"confidence":0.80,"tags":{"album":"现场版"}}
+        ]}"#;
+        let ok = scrape_of(line);
+        let albums: Vec<_> = ok
+            .ranked()
+            .iter()
+            .map(|c| match &c.tags.album {
+                TagValue::Text(t) => t.clone(),
+                other => panic!("album 应是文本，实际 {other:?}"),
+            })
+            .collect();
+        assert_eq!(albums, vec!["原版", "现场版", "合辑"], "必须按 confidence 降序");
+        assert!((ok.best().expect("候选").confidence - 0.97).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ties_keep_the_plugin_order() {
+        // confidence 相同时保留插件给的先后（插件往往把更可信的放前面）。
+        // 用稳定排序才做得到；换成 sort_unstable 这条就会随机翻车。
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":[
+            {"confidence":0.8,"tags":{"title":"先"}},
+            {"confidence":0.8,"tags":{"title":"后"}}
+        ]}"#;
+        let ok = scrape_of(line);
+        let titles: Vec<_> = ok
+            .ranked()
+            .iter()
+            .map(|c| match &c.tags.title {
+                TagValue::Text(t) => t.clone(),
+                other => panic!("title 应是文本，实际 {other:?}"),
+            })
+            .collect();
+        assert_eq!(titles, vec!["先", "后"]);
+    }
+
+    #[test]
+    fn flat_shape_is_a_single_candidate() {
+        // 协议 v1 的原始形状（字段平铺）必须继续能解 —— 已发布的插件不能被这次改动打死。
+        let ok = scrape_of(SCRAPE_OK_EXAMPLE);
+        assert_eq!(ok.ranked().len(), 1, "平铺形状等价于只有一条候选");
+        assert_eq!(ok.best().map(|c| c.source.as_deref()), Some(Some("netease")));
+    }
+
+    #[test]
+    fn empty_candidate_array_is_rejected() {
+        // `ok:true` 却一条候选都没有是自相矛盾的 —— 那种情况该回 ok:false + NOT_FOUND。
+        // 静默接受会让上层拿到一个「成功但没有内容」的结果，比报错更难查。
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":[]}"#;
+        assert!(matches!(decode_response(line), Err(ProtocolError::BadJson(_))));
+    }
+
+    #[test]
+    fn candidates_must_be_an_array() {
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":{}}"#;
+        assert!(matches!(decode_response(line), Err(ProtocolError::BadJson(_))));
+    }
+
+    #[test]
+    fn candidates_roundtrip_and_stay_sorted() {
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":[
+            {"confidence":0.6,"source":"a","tags":{"album":"合辑"}},
+            {"confidence":0.9,"source":"b","tags":{"album":"原版"}}
+        ]}"#;
+        let ok = scrape_of(line);
+        let encoded = encode_response(&PluginResponse::ScrapeOk(ok.clone()));
+        assert!(encoded.contains("\"candidates\""), "编码必须用新形状：{encoded}");
+        assert_eq!(scrape_of(&encoded), ok, "往返后应完全一致（含顺序）");
+    }
+
+    #[test]
+    fn each_candidate_carries_its_own_fields() {
+        // 关键：candidates 里的 tags / cover / lyrics 是**每条各自**的，
+        // 不能从外层继承 —— 每条候选对应不同的 release，专辑名与曲目号本来就不同。
+        let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"candidates":[
+            {"confidence":0.9,"tags":{"album":"A","track":1},"lyrics":"[00:01]a"},
+            {"confidence":0.8,"tags":{"album":"B","track":9}}
+        ]}"#;
+        let ok = scrape_of(line);
+        let first = &ok.ranked()[0];
+        let second = &ok.ranked()[1];
+        assert_eq!(first.tags.album, TagValue::Text("A".to_string()));
+        assert_eq!(first.tags.track, TagValue::Number(1));
+        assert_eq!(second.tags.album, TagValue::Text("B".to_string()));
+        assert_eq!(second.tags.track, TagValue::Number(9));
+        assert_eq!(first.lyrics, FieldUpdate::Set("[00:01]a".to_string()));
+        assert_eq!(second.lyrics, FieldUpdate::Absent, "第二条没给歌词就是缺省，不能继承第一条");
     }
 
     #[test]
@@ -1238,18 +1433,20 @@ mod tests {
         let absent = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{"album":"A"}}"#;
         let null = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{"album":null}}"#;
 
-        let a = scrape_of(absent);
+        let a_ok = scrape_of(absent);
+        let a = a_ok.best().expect("候选");
         assert_eq!(a.tags.album, TagValue::Text("A".to_string()));
         assert_eq!(a.tags.year, TagValue::Absent, "字段缺省 = 不修改");
-        let a_line = encode_response(&PluginResponse::ScrapeOk(a.clone()));
+        let a_line = encode_response(&PluginResponse::ScrapeOk(a_ok.clone()));
         assert!(!a_line.contains("year"), "缺省字段不应出现在编码结果里：{a_line}");
-        assert_eq!(scrape_of(&a_line), a);
+        assert_eq!(scrape_of(&a_line), a_ok);
 
-        let n = scrape_of(null);
+        let n_ok = scrape_of(null);
+        let n = n_ok.best().expect("候选");
         assert_eq!(n.tags.album, TagValue::Clear, "显式 null = 清空");
-        let n_line = encode_response(&PluginResponse::ScrapeOk(n.clone()));
+        let n_line = encode_response(&PluginResponse::ScrapeOk(n_ok.clone()));
         assert!(n_line.contains("\"album\":null"), "显式 null 必须编码成 null：{n_line}");
-        assert_eq!(scrape_of(&n_line), n);
+        assert_eq!(scrape_of(&n_line), n_ok);
 
         // 区分度：两者在类型上就不相等，调用方不会被误导
         assert_ne!(a.tags.album, n.tags.album);
@@ -1258,9 +1455,10 @@ mod tests {
     #[test]
     fn null_vs_absent_does_not_survive_as_same_value() {
         // 反向验证：把显式 null 当成缺省就会踩坑，这里断言它们不同
-        let absent = scrape_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{}}"#);
-        let cleared =
-            scrape_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{"track":null}}"#);
+        let absent = cand_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{}}"#);
+        let cleared = cand_of(
+            r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{"track":null}}"#,
+        );
         assert_eq!(absent.tags.track, TagValue::Absent);
         assert_eq!(cleared.tags.track, TagValue::Clear);
         assert_ne!(absent.tags.track, cleared.tags.track);
@@ -1272,18 +1470,21 @@ mod tests {
             format!("{{\"id\":\"q\",\"protocol\":1,\"action\":\"scrape\",\"ok\":true{cover}}}")
         };
 
-        let absent = scrape_of(&base(""));
+        let absent_ok = scrape_of(&base(""));
+        let absent = absent_ok.best().expect("候选");
         assert_eq!(absent.cover, FieldUpdate::Absent);
-        let line = encode_response(&PluginResponse::ScrapeOk(absent.clone()));
+        let line = encode_response(&PluginResponse::ScrapeOk(absent_ok.clone()));
         assert!(!line.contains("cover"), "缺省 cover 不应出现在编码结果里：{line}");
 
-        let cleared = scrape_of(&base(",\"cover\":null"));
+        let cleared_ok = scrape_of(&base(",\"cover\":null"));
+        let cleared = cleared_ok.best().expect("候选");
         assert_eq!(cleared.cover, FieldUpdate::Clear);
-        let line = encode_response(&PluginResponse::ScrapeOk(cleared.clone()));
+        let line = encode_response(&PluginResponse::ScrapeOk(cleared_ok.clone()));
         assert!(line.contains("\"cover\":null"), "显式 null 必须编码成 null：{line}");
-        assert_eq!(scrape_of(&line).cover, FieldUpdate::Clear);
+        assert_eq!(cand_of(&line).cover, FieldUpdate::Clear);
 
-        let set = scrape_of(&base(",\"cover\":{\"path\":\"cover.jpg\"}"));
+        let set_ok = scrape_of(&base(",\"cover\":{\"path\":\"cover.jpg\"}"));
+        let set = set_ok.best().expect("候选");
         match &set.cover {
             FieldUpdate::Set(c) => {
                 assert_eq!(c.path, "cover.jpg");
@@ -1291,7 +1492,7 @@ mod tests {
             }
             other => panic!("期望 Set，实际 {other:?}"),
         }
-        assert_eq!(scrape_of(&encode_response(&PluginResponse::ScrapeOk(set.clone()))), set);
+        assert_eq!(scrape_of(&encode_response(&PluginResponse::ScrapeOk(set_ok.clone()))), set_ok);
     }
 
     #[test]
@@ -1299,10 +1500,10 @@ mod tests {
         let base = |lyrics: &str| {
             format!("{{\"id\":\"q\",\"protocol\":1,\"action\":\"scrape\",\"ok\":true{lyrics}}}")
         };
-        assert_eq!(scrape_of(&base("")).lyrics, FieldUpdate::Absent);
-        assert_eq!(scrape_of(&base(",\"lyrics\":null")).lyrics, FieldUpdate::Clear);
+        assert_eq!(cand_of(&base("")).lyrics, FieldUpdate::Absent);
+        assert_eq!(cand_of(&base(",\"lyrics\":null")).lyrics, FieldUpdate::Clear);
         assert_eq!(
-            scrape_of(&base(",\"lyrics\":\"[00:01]\"")).lyrics,
+            cand_of(&base(",\"lyrics\":\"[00:01]\"")).lyrics,
             FieldUpdate::Set("[00:01]".to_string())
         );
 
@@ -1315,7 +1516,7 @@ mod tests {
     #[test]
     fn confidence_defaults_to_half() {
         let d = |c: &str| {
-            scrape_of(&format!(
+            cand_of(&format!(
                 "{{\"id\":\"q\",\"protocol\":1,\"action\":\"scrape\",\"ok\":true,\"tags\":{{}}{c}}}"
             ))
             .confidence
@@ -1347,7 +1548,7 @@ mod tests {
     fn cover_path_relative_is_accepted() {
         for p in ["cover.jpg", "sub/cover.jpg", "./cover.jpg", "a/b/c.png"] {
             match scrape_with_cover(p) {
-                Ok(PluginResponse::ScrapeOk(r)) => match r.cover {
+                Ok(PluginResponse::ScrapeOk(r)) => match &r.best().expect("候选").cover {
                     FieldUpdate::Set(c) => assert_eq!(c.path, p),
                     other => panic!("期望 Set，实际 {other:?}"),
                 },
@@ -1455,15 +1656,15 @@ mod tests {
 
     #[test]
     fn matched_absent_and_null_are_both_none() {
-        assert!(scrape_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{}}"#)
+        assert!(cand_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{}}"#)
             .matched
             .is_none());
-        assert!(scrape_of(
+        assert!(cand_of(
             r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{},"matched":null}"#
         )
         .matched
         .is_none());
-        let m = scrape_of(
+        let m = cand_of(
             r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{},"matched":{"id":"1"}}"#,
         )
             .matched
@@ -1497,13 +1698,14 @@ mod tests {
     #[test]
     fn tag_field_types_and_clear_roundtrip() {
         let line = r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":{"title":"T","artist":"A","album":null,"year":2004,"genre":"Rock","track":7}}"#;
-        let r = scrape_of(line);
+        let ok = scrape_of(line);
+        let r = ok.best().expect("候选");
         assert_eq!(r.tags.title, TagValue::Text("T".to_string()));
         assert_eq!(r.tags.artist, TagValue::Text("A".to_string()));
         assert_eq!(r.tags.album, TagValue::Clear);
         assert_eq!(r.tags.year, TagValue::Number(2004));
         assert_eq!(r.tags.track, TagValue::Number(7));
-        assert_eq!(scrape_of(&encode_response(&PluginResponse::ScrapeOk(r.clone()))), r);
+        assert_eq!(scrape_of(&encode_response(&PluginResponse::ScrapeOk(ok.clone()))), ok);
 
         // 非法类型：布尔 / 浮点
         assert!(matches!(
@@ -1519,7 +1721,7 @@ mod tests {
     #[test]
     fn tags_null_means_no_tag_update() {
         // tags 整体为 null：按「不做任何修改」处理，而不是清空全部字段
-        let r = scrape_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":null}"#);
+        let r = cand_of(r#"{"id":"q","protocol":1,"action":"scrape","ok":true,"tags":null}"#);
         assert_eq!(r.tags, Tags::default());
         assert_eq!(r.tags.album, TagValue::Absent);
     }
@@ -1539,11 +1741,12 @@ mod tests {
         // 判类型，会把这条响应当成 DownloadOk，confidence / tags / cover / lyrics
         // 全部被静默丢弃。现在判别只看 action，这些字段一个都不能丢。
         let line = r#"{"id":"q-9001","protocol":1,"action":"scrape","ok":true,"file_path":"/music/a.mp3","confidence":0.92,"source":"netease","matched":{"id":"123456","title":"t","artist":"a","url":"u"},"tags":{"album":"x","year":"2004","genre":"流行","track":1},"cover":{"path":"cover.jpg","mime":"image/jpeg"},"lyrics":"[00:00.00]..."}"#;
-        let r = scrape_of(line);
-        assert_eq!(r.id, "q-9001");
+        let ok = scrape_of(line);
+        assert_eq!(ok.id, "q-9001");
+        let r = ok.best().expect("候选");
         assert!((r.confidence - 0.92).abs() < 1e-9, "confidence 不能被静默丢弃");
         assert_eq!(r.source.as_deref(), Some("netease"), "source 不能被静默丢弃");
-        let m = r.matched.expect("matched 不能被静默丢弃");
+        let m = r.matched.clone().expect("matched 不能被静默丢弃");
         assert_eq!(m.id.as_deref(), Some("123456"));
         assert_eq!(m.title.as_deref(), Some("t"));
         assert_eq!(r.tags.album, TagValue::Text("x".to_string()), "tags 不能被静默丢弃");

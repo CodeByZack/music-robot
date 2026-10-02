@@ -36,11 +36,18 @@ function handle(req) {
     const title = (req.song && req.song.title) || '未知标题';
     respond(Object.assign(base, {
       ok: true,
-      confidence: 0.95,
-      source: 'example-js',
-      matched: { id: 'ex-js-1', title: title },
-      tags: { title: title, artist: '示例歌手', album: '示例专辑', year: '2024' },
-      lyrics: '[00:00.00]示例歌词',
+      // 一次可以给多条候选（好在前），服务端只负责「默认取 confidence 最高」。
+      // 只要一条就在这里写一条 —— 旧的平铺形状（字段直接写在根上）服务端也还认，
+      // 但新插件一律用这个形状：同一歌名对应多张专辑时才有得选。
+      candidates: [
+        {
+          confidence: 0.95,
+          source: 'example-js',
+          matched: { id: 'ex-js-1', title: title },
+          tags: { title: title, artist: '示例歌手', album: '示例专辑', year: '2024' },
+          lyrics: '[00:00.00]示例歌词',
+        },
+      ],
     }));
     return;
   }

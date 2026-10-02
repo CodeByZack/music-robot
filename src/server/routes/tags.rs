@@ -387,7 +387,8 @@ pub async fn query_scrape(
         })?;
 
     Ok(Json(json!({
-        "proposal": query.proposal.as_ref().map(proposal_json),
+        // 候选按 confidence 降序 —— 界面把 `[0]` 当默认显示，其余供用户切换。
+        "candidates": query.candidates.iter().map(proposal_json).collect::<Vec<_>>(),
         "notes": query.notes,
     })))
 }

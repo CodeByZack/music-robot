@@ -26,7 +26,7 @@ while IFS= read -r line; do
   action=$(printf '%s' "$line" | sed -n 's/.*"action":"\([^"]*\)".*/\1/p')
 
   if [ "$action" = "scrape" ]; then
-    printf '{"id":"%s","protocol":1,"action":"scrape","ok":true,"confidence":0.75,"source":"example-sh"}\n' "$id"
+    printf '{"id":"%s","protocol":1,"action":"scrape","ok":true,"candidates":[{"confidence":0.75,"source":"example-sh"}]}\n' "$id"
   else
     printf '{"id":"%s","protocol":1,"action":"%s","ok":false,"error":{"code":"NOT_FOUND","message":"example-sh 不支持该 action"}}\n' "$id" "$action"
   fi

@@ -111,12 +111,21 @@ fn run_e2e(plugin_file: &str, expect_cmd: &str, expect_source: &str, tag: &str) 
     match &first {
         PluginResponse::ScrapeOk(ok) => {
             assert_eq!(ok.id, "e2e-1", "响应必须原样回显请求 id");
-            assert_eq!(ok.source.as_deref(), Some(expect_source), "source 不对");
+            let best = ok.best().expect("至少要有一条候选");
+            assert_eq!(best.source.as_deref(), Some(expect_source), "source 不对");
             assert!(
-                ok.confidence > 0.5,
+                best.confidence > 0.5,
                 "confidence 应当 > 0.5（默认才是 0.50），实际 {}",
-                ok.confidence
+                best.confidence
             );
+            // 候选必须按 confidence 降序 —— 服务端「默认取最高」靠的就是这个不变式。
+            for w in ok.ranked().windows(2) {
+                assert!(
+                    w[0].confidence >= w[1].confidence,
+                    "候选未按 confidence 降序：{:?}",
+                    ok.ranked().iter().map(|c| c.confidence).collect::<Vec<_>>()
+                );
+            }
         }
         other => panic!("期望 ScrapeOk，实际 {:?}", other),
     }

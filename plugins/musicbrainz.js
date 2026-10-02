@@ -496,7 +496,17 @@ function genreOf(cand) {
 }
 
 // ── 组装成功响应 ──
-function buildOk(id, cand, conf, song) {
+
+// 低于它连「候选」都算不上（与服务端 try_plugin 的口径一致）。
+const MIN_CANDIDATE_CONFIDENCE = 0.5;
+// 最多给几条。服务端还会再限一次（MAX_CANDIDATES），两道都便宜，都留着。
+const MAX_CANDIDATES = 5;
+
+/// 一条候选 → 协议里的 candidate 对象。
+///
+/// 注意 tags / matched 都是**每条各自**算的：不同候选对应不同的 release，
+/// 专辑名与曲目号本来就不同（这正是要给多条候选的理由）。
+function buildCandidate(cand, conf, song) {
   const release = releaseOf(cand, song);
   const tags = {};
   if (cand.title) tags.title = cand.title;
@@ -514,10 +524,6 @@ function buildOk(id, cand, conf, song) {
   if (track !== null) tags.track = track;
 
   return {
-    id: id,
-    protocol: 1,
-    action: 'scrape',
-    ok: true,
     confidence: conf,
     source: 'musicbrainz',
     matched: {
@@ -527,6 +533,32 @@ function buildOk(id, cand, conf, song) {
       url: cand.id ? 'https://musicbrainz.org/recording/' + cand.id : null,
     },
     tags: tags,
+  };
+}
+
+/// 组装成功响应：`candidates` 是**排好序的一队**（好在前）。
+///
+/// 为什么不再只给一条：同一歌名常对应多条录音（原版 / 现场 / 重混 / 翻唱），
+/// 它们 title 一模一样。插件比服务端更懂 MusicBrainz 的结构（哪些 release 是合辑、
+/// 哪个是原版），所以筛选在这里做；而「用户到底要哪一条」交给界面 ——
+/// 服务端只负责「默认取 confidence 最高」。
+function buildOk(id, ranked, song) {
+  const candidates = [];
+  const seenIds = new Set();
+  for (const cand of ranked) {
+    if (cand && cand.id && seenIds.has(cand.id)) continue; // 同一条录音不重复出现
+    const conf = confidenceOf(cand, song);
+    if (conf < MIN_CANDIDATE_CONFIDENCE) continue; // 不塞不可信标签
+    if (cand && cand.id) seenIds.add(cand.id);
+    candidates.push(buildCandidate(cand, conf, song));
+    if (candidates.length >= MAX_CANDIDATES) break;
+  }
+  return {
+    id: id,
+    protocol: 1,
+    action: 'scrape',
+    ok: true,
+    candidates: candidates,
   };
 }
 
@@ -622,16 +654,11 @@ async function scrape(req) {
   //   1. 时长吻合度（能区分原版 / 现场 / 重混 —— 最强信号）
   //   2. MusicBrainz 自己的 score
   //   3. first-release-date 最早（原版通常最早）
-  let best = null;
-  let bestKey = null;
-  for (const cand of recordings) {
-    const key = rankKey(cand, song);
-    if (bestKey === null || compareRank(key, bestKey) < 0) {
-      bestKey = key;
-      best = cand;
-    }
-  }
-  const bestConf = confidenceOf(best, song);
+  // 排一队（而不只是挑一条）：界面要把多个候选摆给用户看。
+  // 排序键与原来完全一致，只是从「求最小值」改成「整体排序」。
+  const ranked = recordings.slice().sort((a, b) => compareRank(rankKey(a, song), rankKey(b, song)));
+  const best = ranked.length > 0 ? ranked[0] : null;
+  const bestConf = best ? confidenceOf(best, song) : 0;
   const bestArtist = best ? artistClass(best, song) : 0;
   const bestDuration = best ? durationClass(best, song) : 0;
 
@@ -645,6 +672,8 @@ async function scrape(req) {
   //
   // ⚠️ 光靠 confidence 的加减分拦不住它：那条候选**没有时长字段**，反而躲过了
   // 时长扣分，最终算出 0.9，高于服务端 0.80 的命中阈值。所以闸门必须显式判。
+  // 闸门只卡**首选那条** —— 它决定「这次刮削算不算命中」。
+  // 备选候选（更差的那些）不影响判定：批量路径只写首选，查询路径由人来看。
   if (!best || bestArtist !== 2 && bestDuration !== 2) {
     return buildError(
       req.id,
@@ -667,7 +696,7 @@ async function scrape(req) {
     );
   }
 
-  return buildOk(req.id, best, bestConf, song);
+  return buildOk(req.id, ranked, song);
 }
 
 function handleLine(line) {

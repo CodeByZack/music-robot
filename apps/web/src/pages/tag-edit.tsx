@@ -446,6 +446,8 @@ export default function TagEditPage() {
   // 「刮削 → 提议填进表单 → 用户看一眼、改不改随他 → 预览 → 写入」，
   // 真正落盘仍然走既有的那两道闸。
   const [scrape, setScrape] = useState<ScrapeQueryResult | null>(null);
+  // 当前展示的是第几条候选（结果按 confidence 降序，0 = 最可信）。
+  const [scrapePick, setScrapePick] = useState(0);
   const [scrapeBusy, setScrapeBusy] = useState(false);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   // 刮削会发起网络请求，后端仅限管理员（与 /api/scrape 同档）—— 非管理员不显示入口。
@@ -553,6 +555,7 @@ export default function TagEditPage() {
     setScrapeBusy(true);
     setScrapeError(null);
     setScrape(null);
+    setScrapePick(0);
     try {
       setScrape(await api.tags.queryScrape(songId));
     } catch (e) {
@@ -593,6 +596,9 @@ export default function TagEditPage() {
     setScrape(null);
     setNotice('已把刮削结果填进表单 —— 还没写盘。看清楚再点「预览改动」。');
   }
+
+  /** 当前选中的候选（结果已按 confidence 降序）。 */
+  const picked = scrape?.candidates.length ? scrape.candidates[Math.min(scrapePick, scrape.candidates.length - 1)] : null;
 
   return (
     <div
@@ -669,27 +675,55 @@ export default function TagEditPage() {
               {/* 刮削提议：只列插件确实给出的字段，并把「当前值 → 提议值」摆在一起。 */}
               {scrape && (
                 <div className="mb-5 rounded-xl border border-line bg-surface p-4">
-                  {scrape.proposal ? (
+                  {picked ? (
                     <>
                       <div className="mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1">
                         <b className="text-note font-medium">刮削提议</b>
                         <span className="text-cap text-ink-4">
-                          {scrape.proposal.plugin}
+                          {picked.plugin}
                           {' · '}
-                          {(scrape.proposal.confidence * 100).toFixed(0)}% 可信
+                          {(picked.confidence * 100).toFixed(0)}% 可信
                         </span>
-                        {!scrape.proposal.meets_threshold && (
+                        {!picked.meets_threshold && (
                           <span className="rounded-full bg-black/25 px-2 py-0.5 text-micro text-ink-3">
                             低于自动采用阈值，仅供参考
                           </span>
                         )}
                       </div>
 
+                      {/* 多条候选时给一排切换 —— 同名歌对应多张专辑时，差别就在这里。 */}
+                      {scrape.candidates.length > 1 && (
+                        <div className="mb-3">
+                          <div className="mb-1.5 text-cap leading-4 text-ink-4">
+                            插件给了 {scrape.candidates.length} 条候选（按可信度降序），换一条看看：
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {scrape.candidates.map((c, i) => (
+                              <button
+                                key={`${c.confidence}-${i}`}
+                                type="button"
+                                onClick={() => setScrapePick(i)}
+                                className={[
+                                  'h-7 max-w-[280px] truncate rounded-full px-2.5 text-cap transition-colors',
+                                  i === scrapePick
+                                    ? 'bg-accent text-white'
+                                    : 'bg-black/25 text-ink-3 hover:bg-surface-hover hover:text-ink',
+                                ].join(' ')}
+                              >
+                                {i + 1}. {c.tags.title ? String(c.tags.title) : '(无标题)'}
+                                {c.tags.album ? ` · ${String(c.tags.album)}` : ''}
+                                {` · ${(c.confidence * 100).toFixed(0)}%`}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="space-y-0.5">
-                        {SCRAPE_FIELDS.filter(({ key }) => key in scrape.proposal!.tags).map(
+                        {SCRAPE_FIELDS.filter(({ key }) => key in picked.tags).map(
                           ({ key, formKey, label }) => {
                             const before = currentOf(formKey);
-                            const after = propText(scrape.proposal!.tags[key as keyof typeof scrape.proposal.tags]);
+                            const after = propText(picked.tags[key as keyof typeof picked.tags]);
                             const same = before.trim() === after.trim();
                             return (
                               <div key={key} className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-note">
@@ -708,23 +742,23 @@ export default function TagEditPage() {
                             );
                           })}
                         {/* 封面单独一行：它不在 tags 里，也要单独决定要不要用。 */}
-                        {(scrape.proposal.cover || scrape.proposal.cover_skipped) && (
+                        {(picked.cover || picked.cover_skipped) && (
                           <div className="flex flex-wrap items-center gap-x-2 py-0.5 text-note">
                             <span className="w-[52px] shrink-0 text-ink-3">封面</span>
-                            {scrape.proposal.cover ? (
+                            {picked.cover ? (
                               <>
                                 <img
-                                  src={scrape.proposal.cover.data}
+                                  src={picked.cover.data}
                                   alt="刮削到的封面"
                                   className="size-9 rounded object-cover"
                                 />
                                 <span className="text-ink-4">
-                                  {(scrape.proposal.cover.size / 1024).toFixed(0)} KB
+                                  {(picked.cover.size / 1024).toFixed(0)} KB
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setNewCover(scrape.proposal!.cover!.data);
+                                    setNewCover(picked.cover!.data);
                                     setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
                                   }}
                                   className="h-7 shrink-0 rounded-full bg-black/25 px-2.5 text-cap text-ink-2 transition-colors hover:bg-surface-hover"
@@ -737,10 +771,10 @@ export default function TagEditPage() {
                             )}
                           </div>
                         )}
-                        {scrape.proposal.lyrics && (
+                        {picked.lyrics && (
                           <div className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-note">
                             <span className="w-[52px] shrink-0 text-ink-3">歌词</span>
-                            <span className="text-ink-4">{scrape.proposal.lyrics.length} 字</span>
+                            <span className="text-ink-4">{picked.lyrics.length} 字</span>
                           </div>
                         )}
                       </div>
@@ -748,7 +782,7 @@ export default function TagEditPage() {
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => applyProposal(scrape.proposal!)}
+                          onClick={() => applyProposal(picked)}
                           className="h-8 rounded-full bg-accent px-3.5 text-note text-white transition-opacity hover:opacity-90"
                         >
                           填进表单

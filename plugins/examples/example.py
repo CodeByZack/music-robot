@@ -34,10 +34,14 @@ def handle(req):
         title = song.get("title") or "未知标题"
         base.update({
             "ok": True,
-            "confidence": 0.85,
-            "source": "example-py",
-            "matched": {"id": "ex-py-1", "title": title},
-            "tags": {"title": title, "artist": "示例歌手"},
+            "candidates": [
+                {
+                    "confidence": 0.85,
+                    "source": "example-py",
+                    "matched": {"id": "ex-py-1", "title": title},
+                    "tags": {"title": title, "artist": "示例歌手"},
+                }
+            ],
         })
         respond(base)
         return

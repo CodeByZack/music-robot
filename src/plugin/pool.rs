@@ -869,7 +869,8 @@ done
     #[cfg(target_os = "linux")]
     fn resp_source(resp: &PluginResponse) -> Option<String> {
         match resp {
-            PluginResponse::ScrapeOk(r) => r.source.clone(),
+            // source 现在挂在候选上（`source` 是数据来源，一条候选一个）。
+            PluginResponse::ScrapeOk(r) => r.best().and_then(|c| c.source.clone()),
             _ => None,
         }
     }

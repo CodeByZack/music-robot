@@ -98,6 +98,13 @@ use crate::watcher::suppress::SelfWriteRegistry;
 /// 的兜底值，0.50 < 0.80，因此**插件不返回 confidence 就等于未命中**。
 pub const HIT_CONFIDENCE: f64 = 0.80;
 
+/// 查询接口最多带回几条候选。
+///
+/// 为什么要卡：每条候选的封面都得**在插件 worker 还活着的时候**读进内存
+/// （guard 一析构 work_dir 就没了），不限量的话一个行为不端的插件能让我们
+/// 连续读几百个文件。插件是不可信子进程，上限是必须的。
+const MAX_CANDIDATES: usize = 8;
+
 /// 封面文件大小上限（16 MiB）。插件是不可信子进程，不能让它把任意大的文件读进内存。
 const MAX_COVER_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -379,8 +386,9 @@ struct PluginSlot {
 
 /// 一次插件尝试的结果（内部类型）。
 enum AttemptOutcome {
-    /// 命中：confidence 达标，附加数据（封面）也已备好
-    Hit(Box<ScrapedHit>),
+    /// 命中：**按 confidence 降序**（至少一条）—— 插件可能给了多条候选。
+    /// 落库取 `[0]`（最可信那条），其余留给「只查不写」的查询接口展示。
+    Hit(Vec<ScrapedHit>),
     /// 未命中 / 出错：带上中文原因，继续试下一个插件
     Miss(String),
 }
@@ -425,12 +433,38 @@ pub struct ScrapeProposal {
 /// [ScrapeService::query_song] 的结果。
 #[derive(Debug, Clone)]
 pub struct ScrapeQuery {
-    /// 最佳的哪一条；全部未命中时为 None
-    pub proposal: Option<ScrapeProposal>,
-    /// 每个插件的中文说明（未命中的原因 / 命中了哪个插件）。
+    /// 候选，**按 confidence 降序**（`[0]` = 最可信）。空 = 全部插件都没给出结果。
+    ///
+    /// 为什么是一组而不是一条：同一歌名在数据源里常对应多条录音，
+    /// 让用户看得见差别、选得出对的那条，比服务端用固定阈值替他决定准。
+    pub candidates: Vec<ScrapeProposal>,
+    /// 每个插件的中文说明（未命中的原因 / 给了几条候选）。
     /// **没有命中时这一项就是全部价值** —— 插件给的原因（如「候选里没有一条能和本地歌手
     /// 或时长对上」）比一句「刮削失败」有用得多，它直接告诉用户该先改哪个字段。
     pub notes: Vec<String>,
+}
+
+/// 一条**已读进内存**的命中素材 → 可对外展示的候选。
+///
+/// 抽出来是因为批量与查询两条路都要做这个转换（前者只取第一条，后者全要）——
+/// 抄两遍就会漂移。
+fn proposal_of(hit: ScrapedHit) -> ScrapeProposal {
+    let cover = hit
+        .cover_pictures
+        .as_ref()
+        .and_then(|pics| pics.first().cloned());
+    ScrapeProposal {
+        plugin: hit.plugin,
+        confidence: hit.confidence,
+        meets_threshold: hit.confidence >= HIT_CONFIDENCE,
+        source: hit.source,
+        tags: hit.tags,
+        lyrics: match &hit.lyrics {
+            FieldUpdate::Set(text) if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        },
+        cover,
+    }
 }
 
 /// 刮削服务：持有连接池 + 按顺序排列的插件池 + 配置。
@@ -558,8 +592,10 @@ impl ScrapeService {
                 *lock(&slot.cooldown_until) = None;
             }
             match self.try_plugin(slot, &song, album_name.as_deref(), HIT_CONFIDENCE) {
-                AttemptOutcome::Hit(found) => {
-                    hit = Some(*found);
+                AttemptOutcome::Hit(mut hits) => {
+                    // **取 confidence 最高的那条**落库（hits 已按降序）。
+                    // 其余候选丢弃：批量路径没有「让人挑」的环节，拿不准的就别写。
+                    hit = hits.drain(..).next();
                     break;
                 }
                 AttemptOutcome::Miss(reason) => attempts.push(format!("{}：{reason}", slot.name)),
@@ -617,7 +653,7 @@ impl ScrapeService {
         };
 
         let mut notes: Vec<String> = Vec::new();
-        let mut best: Option<ScrapeProposal> = None;
+        let mut best: Vec<ScrapeProposal> = Vec::new();
         for slot in &self.plugins {
             let now = self.clock.now();
             let cooldown_until = *lock(&slot.cooldown_until);
@@ -630,43 +666,35 @@ impl ScrapeService {
             }
             // 阈值给 0.0：插件回来的 Ok 全部收下（插件内部已经拦掉 < 0.5 的）。
             match self.try_plugin(slot, &song, album_name.as_deref(), 0.0) {
-                AttemptOutcome::Hit(found) => {
-                    let meets = found.confidence >= HIT_CONFIDENCE;
+                AttemptOutcome::Hit(hits) => {
+                    // 同一个插件的多条候选**全部**带给界面（这是「只查不写」的价值所在：
+                    // 同一歌名对应多张专辑时，让人来挑比固定阈值准）。
+                    let best_conf = hits.first().map(|h| h.confidence).unwrap_or(0.0);
+                    let meets = best_conf >= HIT_CONFIDENCE;
                     notes.push(format!(
-                        "{}：给出结果，confidence {:.2}{}",
-                        found.plugin,
-                        found.confidence,
+                        "{}：给出 {} 条候选，最高 confidence {:.2}{}",
+                        slot.name,
+                        hits.len(),
+                        best_conf,
                         if meets { "（达到自动采用阈值）" } else { "（低于自动采用阈值，仅供参考）" }
                     ));
-                    let cover = found
-                        .cover_pictures
-                        .as_ref()
-                        .and_then(|pics| pics.first().cloned());
-                    let proposal = ScrapeProposal {
-                        plugin: found.plugin.clone(),
-                        confidence: found.confidence,
-                        meets_threshold: meets,
-                        source: found.source.clone(),
-                        tags: found.tags.clone(),
-                        lyrics: match &found.lyrics {
-                            FieldUpdate::Set(text) if !text.trim().is_empty() => Some(text.clone()),
-                            _ => None,
-                        },
-                        cover,
-                    };
+                    let candidates: Vec<ScrapeProposal> = hits.into_iter().map(proposal_of).collect();
                     if meets {
-                        best = Some(proposal);
+                        best = candidates;
                         break;
                     }
                     // 不达标：留着当备选，继续试后面的插件（也许它有更确定的答案）。
-                    if best.as_ref().is_none_or(|b| proposal.confidence > b.confidence) {
-                        best = Some(proposal);
+                    // 只有「更可信」时才覆盖 —— 免得拿一组差候选把前面那组好的挤掉。
+                    let better = candidates.first().map(|c| c.confidence).unwrap_or(0.0)
+                        > best.first().map(|c| c.confidence).unwrap_or(0.0);
+                    if better {
+                        best = candidates;
                     }
                 }
                 AttemptOutcome::Miss(reason) => notes.push(format!("{}：{reason}", slot.name)),
             }
         }
-        Ok(ScrapeQuery { proposal: best, notes })
+        Ok(ScrapeQuery { candidates: best, notes })
     }
 
     /// 试一个插件。返回 Miss 表示「这个插件这次不算命中」，调用方继续回退。
@@ -709,29 +737,55 @@ impl ScrapeService {
 
         match response {
             PluginResponse::ScrapeOk(ok) => {
-                if ok.confidence < min_confidence {
+                // 插件可能给多条候选（同一歌名对应多张专辑 / 原版与现场）。
+                // **服务端只做「按 confidence 取最高」** —— 插件能返回的就是它排好序的
+                // （`ScrapeOk::new` 会再排一次，不依赖插件给的顺序）。
+                let ranked = ok.ranked();
+                let Some(best) = ranked.first() else {
+                    return AttemptOutcome::Miss("插件回了 ok 但一条候选都没给".to_string());
+                };
+                if best.confidence < min_confidence {
                     return AttemptOutcome::Miss(format!(
                         "confidence {:.2} 低于命中阈值 {min_confidence:.2}",
-                        ok.confidence
+                        best.confidence
                     ));
                 }
                 // 封面必须在 guard 还活着的时候读：guard 析构会删掉 work_dir。
-                let cover_pictures = match &ok.cover {
-                    FieldUpdate::Absent => None,
-                    FieldUpdate::Clear => Some(Vec::new()),
-                    FieldUpdate::Set(cover) => match load_cover(guard.work_dir(), cover) {
-                        Ok(picture) => Some(vec![picture]),
-                        Err(message) => return AttemptOutcome::Miss(message),
-                    },
-                };
-                AttemptOutcome::Hit(Box::new(ScrapedHit {
-                    plugin: slot.name.clone(),
-                    confidence: ok.confidence,
-                    source: ok.source.clone(),
-                    tags: ok.tags,
-                    lyrics: ok.lyrics,
-                    cover_pictures,
-                }))
+                // 所以这里把**所有**候选的封面一次性读出来（条数受 MAX_CANDIDATES 限制）。
+                let mut hits = Vec::with_capacity(ranked.len().min(MAX_CANDIDATES));
+                for (i, cand) in ranked.iter().take(MAX_CANDIDATES).enumerate() {
+                    let cover_pictures = match &cand.cover {
+                        FieldUpdate::Absent => None,
+                        FieldUpdate::Clear => Some(Vec::new()),
+                        FieldUpdate::Set(cover) => match load_cover(guard.work_dir(), cover) {
+                            Ok(picture) => Some(vec![picture]),
+                            Err(message) => {
+                                // 首选那条的封面坏掉 → **整次尝试算未命中**，回退下一个插件。
+                                // 这是原有保证，别放宽：插件给出不可用的封面说明它这次的数据
+                                // 不可信，而首选正是会被写进文件的那条。
+                                if i == 0 {
+                                    return AttemptOutcome::Miss(message);
+                                }
+                                // 备选候选只是拿来给人挑的，封面读不出来不该连它的标签一起丢
+                                // （那些字段仍然可能有用）。丢掉封面、留个日志，继续。
+                                crate::serverlog::warn(
+                                    "scrape",
+                                    format!("备选候选（第 {} 条）封面读不出来，已跳过该封面：{message}", i + 1),
+                                );
+                                None
+                            }
+                        },
+                    };
+                    hits.push(ScrapedHit {
+                        plugin: slot.name.clone(),
+                        confidence: cand.confidence,
+                        source: cand.source.clone(),
+                        tags: cand.tags.clone(),
+                        lyrics: cand.lyrics.clone(),
+                        cover_pictures,
+                    });
+                }
+                AttemptOutcome::Hit(hits)
             }
             PluginResponse::Error(err) => {
                 if err.error.code == ErrorCode::RateLimited {
@@ -2136,6 +2190,52 @@ mod tests {
             after.pictures.len(),
             before.pictures.len(),
             "不可用的封面绝不能硬塞进文件，原有的封面也不能被动"
+        );
+    }
+
+    /// 插件给多条候选时，**落库取 confidence 最高的那条**。
+    ///
+    /// 这是本次「多候选」改动的核心行为：插件（如 musicbrainz）能分辨出原版与
+    /// 现场/伴奏/重混版，把这些都交上来；而批量路径没有「让人挑」的环节，
+    /// 所以服务端必须自己按 confidence 取第一。
+    #[test]
+    fn batch_writes_the_highest_confidence_candidate() {
+        let env = Env::new("scrape-multi");
+        let song = env.seed_one();
+        // 故意把最差的那条放最前面 —— 服务端不能被插件的顺序带跑。
+        // ⚠️ JSON 必须写在**一行**里：插件协议是按行读的，多行输出会被当成半截消息。
+        let body = r#"printf '{"id":"%s","protocol":1,"action":"scrape","ok":true,"candidates":[{"confidence":0.85,"tags":{"title":"伴奏版"}},{"confidence":0.99,"tags":{"title":"原版"}},{"confidence":0.90,"tags":{"title":"现场版"}}]}\n' "$id""#;
+        let service = env.service(vec![plugin(&env, "multi", body)]);
+        assert!(service.scrape_song(song.id).expect("刮削").is_done());
+
+        let after = read_tags(Path::new(&song.file_path)).expect("读回文件标签");
+        assert_eq!(
+            after.title.as_deref(),
+            Some("原版"),
+            "必须取 confidence 最高的候选，而不是插件排在前面那个"
+        );
+    }
+
+    /// 备选候选的封面读不出来时：**只丢那个封面**，不能连它的标签一起丢，
+    /// 更不能因为备选有问题就放弃首选。
+    ///
+    /// 与上面 `unusable_cover_falls_back_...` 的差别值得注意：那条测的是
+    /// **首选**封面坏掉 → 整体回退；这条测的是**备选**封面坏掉 → 只丢封面。
+    /// 这个不对称是有意的（见 try_plugin 里的说明）。
+    #[test]
+    fn bad_cover_on_an_alternate_candidate_does_not_lose_its_tags() {
+        let env = Env::new("scrape-alt-bad-cover");
+        let song = env.seed_one();
+        let body = r#"printf '{"id":"%s","protocol":1,"action":"scrape","ok":true,"candidates":[{"confidence":0.99,"tags":{"title":"原版"}},{"confidence":0.90,"tags":{"title":"现场版"},"cover":{"path":"nope.jpg","mime":"image/jpeg"}}]}\n' "$id""#;
+        let service = env.service(vec![plugin(&env, "alt", body)]);
+        assert!(service.scrape_song(song.id).expect("刮削").is_done());
+
+        let after = read_tags(Path::new(&song.file_path)).expect("读回文件标签");
+        assert_eq!(after.title.as_deref(), Some("原版"), "首选不受备选封面问题影响");
+        assert_eq!(
+            after.pictures.len(),
+            0,
+            "读不到的封面绝不能进文件（首选本来也没给封面）"
         );
     }
 

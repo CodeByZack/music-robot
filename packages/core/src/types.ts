@@ -313,10 +313,17 @@ export interface ScrapeProposal {
 }
 
 export interface ScrapeQueryResult {
-  /** 最佳那条；全部未命中为 null。 */
-  proposal: ScrapeProposal | null;
   /**
-   * 每个插件的中文说明（未命中的原因 / 命中说明）。
+   * 候选，**按 confidence 降序** —— `[0]` 是最可信的那条（界面默认显示它）。
+   *
+   * 为什么是一组：同一歌名在数据源里常对应多条录音（原版 / 现场 / 重混 / 翻唱），
+   * title 一模一样，只有专辑与年份不同。插件懂数据源的结构（哪个 release 是合辑），
+   * 所以筛选在插件里做；而「用户到底要哪条」由人来定。
+   * 空数组 = 所有插件都没给出结果。
+   */
+  candidates: ScrapeProposal[];
+  /**
+   * 每个插件的中文说明（未命中的原因 / 给了几条候选）。
    * **未命中时这一项就是全部价值** —— 它直接告诉用户该先改哪个字段。
    */
   notes: string[];
