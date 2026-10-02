@@ -279,10 +279,12 @@ export default function TagEditPage() {
         </button>
       </header>
 
-      {/* 危险提示：通栏一行。写在最上面，别让人滑到底才看见。 */}
+      {/* 危险提示：通栏一行。写在最上面，别让人滑到底才看见。
+          措辞注意：原文是「没有备份、不可撤销 —— 写入前可勾选备份」，两句读起来像
+          互相矛盾（到底有没有备份）。现在把关系写清楚：默认没有，勾了才有。 */}
       <div className="shrink-0 border-b border-line-weak bg-accent-soft px-5 py-2 text-cap leading-4 text-accent">
-        写入会直接覆盖原文件，<b className="font-medium">没有备份、不可撤销</b>
-        —— 建议先看清预览；写入前可勾选备份（原文件存成同名 .bak）。
+        写入会<b className="font-medium">直接覆盖原文件，不可撤销</b>
+        —— 请先看清预览；要留退路就勾选「写入前备份」。
       </div>
 
       {/* 刮削建议已移到右栏（与改动预览同栏）。 */}

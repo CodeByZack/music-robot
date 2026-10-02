@@ -248,12 +248,18 @@ export function Section({ title, children }: { title: string; children: ReactNod
   );
 }
 
-/** 一行「标签 : 值」，用在文件信息那种只读列表里。 */
+/**
+ * 一行「标签 : 值」。
+ *
+ * 刻意**左对齐 + 定宽标签**，而不用 `justify-between` 左右分开：
+ * 这个列表会出现在宽度差很大的两种容器里（宽屏 210px 的封面栏、窄屏一半屏宽的
+ * 右侧栏），分开对齐时标签和值会被拉得老远，看着散。定宽标签在两种宽度下都紧凑。
+ */
 export function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
-      <dt className="shrink-0 text-ink-4">{label}</dt>
-      <dd className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-ink-3">{value}</dd>
+    <div className="flex items-baseline gap-2">
+      <dt className="w-[52px] shrink-0 text-ink-4">{label}</dt>
+      <dd className="min-w-0 flex-1 truncate text-ink-3">{value}</dd>
     </div>
   );
 }

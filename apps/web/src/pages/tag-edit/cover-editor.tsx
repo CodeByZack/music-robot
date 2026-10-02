@@ -86,7 +86,7 @@ export function CoverEditor({
       {/* 图。窄屏固定 104px：`max-*:` 变体在 Tailwind 产物里排在基础工具类之后，
           所以这里的宽度能盖住下面的 `w-full`（同一个元素上放两个**基础**宽度类才会争，
           那样谁生效取决于产物里的先后，已踩过）。 */}
-      <div className="aspect-square w-full max-w-[210px] overflow-hidden rounded-xl bg-surface max-[759px]:w-[104px] max-[759px]:max-w-none max-[759px]:shrink-0 max-[759px]:rounded-lg">
+      <div className="relative aspect-square w-full max-w-[210px] overflow-hidden rounded-xl bg-surface max-[759px]:w-[104px] max-[759px]:max-w-none max-[759px]:shrink-0 max-[759px]:rounded-lg">
         {picked ? (
           // 本地选中的图直接预览（不必等后端），改成什么一目了然
           <img src={picked} alt="新封面预览" className="size-full object-cover" />
@@ -101,6 +101,34 @@ export function CoverEditor({
           <div className="grid size-full place-items-center px-2 text-center text-cap leading-4 text-ink-4 max-[759px]:text-micro max-[759px]:leading-3.5">
             文件里没有内嵌封面
           </div>
+        )}
+
+        {/*
+         * 「刷新」本来是混在下面那句说明里的一个链接，看着碎。它其实是
+         * 「重新取这张图」—— 那就放到图自己身上。有图时才出现（没图时重取没意义）。
+         * 半透明底 + 模糊，在浅色封面上也看得清。
+         */}
+        {showFileCover && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            title="重新取这张封面"
+            aria-label="重新取封面"
+            className="absolute right-1.5 bottom-1.5 flex size-6 items-center justify-center rounded-full bg-black/55 text-ink-2 backdrop-blur-sm transition-colors hover:bg-black/75 hover:text-ink max-[759px]:size-5"
+          >
+            <svg
+              className="ico-xs"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.6}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+              <path d="M13.2 3.2v2.7h-2.7" />
+            </svg>
+          </button>
         )}
       </div>
 
@@ -143,19 +171,15 @@ export function CoverEditor({
 
         {err && <p className="text-cap leading-4 text-accent">{err}</p>}
         {picked && <p className="text-cap leading-4 text-accent">预览的是新封面，写入后才生效。</p>}
-        {/* 这里显示的是**文件**封面；列表 / 播放页看到的可能是专辑那张，说一句免得对不上 */}
-        <p className="text-micro leading-4 text-ink-4">
-          这里是文件内嵌封面，列表和播放页可能显示专辑那张。
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="ml-1 underline transition-colors hover:text-ink-3"
-          >
-            刷新
-          </button>
-        </p>
 
         {children}
+
+        {/**
+         * 说明放**最后一行**（而不是夹在按钮与文件信息中间）。夹在中间时它占两行、
+         * 把上下两块隔开，整体看着很乱；放到末尾它就只是一句脚注。
+         * 「刷新」已移到图片角上（它本来就是「重取这张图」）。
+         */}
+        <p className="text-micro leading-4 text-ink-4">列表页可能显示专辑封面</p>
       </div>
     </div>
   );

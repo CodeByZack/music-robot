@@ -295,10 +295,11 @@ export function ScrapeSuggestions({
         )}
       </div>
 
-      {/* 还没查过：一句说明，别让那个按钮来得没头没尾 */}
+      {/* 还没查过：一句说明，别让那个按钮来得没头没尾。
+          刻意只留一行 —— 这个栏宽 330px，说多了就变两行、看着笨重。 */}
       {!hasResult && (
         <p className="shrink-0 px-3 pb-2.5 text-cap leading-4 text-ink-4">
-          让插件查一下这首歌该是什么标签。<b className="font-medium text-ink-3">只填进表单，不写盘。</b>
+          从插件取标签建议，<b className="font-medium text-ink-3">不写盘</b>。
         </p>
       )}
 
