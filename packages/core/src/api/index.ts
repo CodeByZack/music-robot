@@ -10,6 +10,7 @@ import type {
   JobAccepted,
   LoginResponse,
   Page,
+  PlayStats,
   Playlist,
   PlaylistDetail,
   RequestStatus,
@@ -168,6 +169,15 @@ export function createApi(http: Http) {
     history: {
       list: (params: { limit?: number; offset?: number } = {}) =>
         http.get<HistoryPage>(`/api/history${qs(params)}`),
+      /**
+       * 播放统计（**只有自己的行**）。
+       *
+       * ⚠️ `tz_offset_minutes` **必须传**：后端按它切「一天」，不传就是 UTC ——
+       * 那会让凌晨听的东西算到前一天。传 `-new Date().getTimezoneOffset()`
+       * （注意符号相反：Date 接口东八区返回 -480，这里是 +480）。
+       */
+      stats: (params: { days?: number; top?: number; tz_offset_minutes?: number } = {}) =>
+        http.get<PlayStats>(`/api/history/stats${qs(params)}`),
       record: (songId: number, durationListenedMs?: number) =>
         http.post<{ history: HistoryEntry }>('/api/history', {
           song_id: songId,

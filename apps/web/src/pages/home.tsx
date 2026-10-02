@@ -135,7 +135,16 @@ export default function HomePage() {
 
       {rec.error && <ErrorNote message={rec.error} />}
 
-      <h2 className="mt-7 mb-3.5 text-base leading-6 font-medium">最近播放</h2>
+      {/* 标题行右侧给「播放统计」一个入口。
+          ⚠️ **不往侧边栏加一格**：那一栏是导航主路径（首页/音乐库/专辑/歌手/歌单/收藏），
+          统计是“偶尔看一眼”的东西，而且它的数据就在这一段下面 —— 入口放这儿最贴语境。 */}
+      <div className="mt-7 mb-3.5 flex items-baseline gap-3">
+        <h2 className="text-base leading-6 font-medium">最近播放</h2>
+        <span className="flex-1" />
+        <Link to="/stats" className="text-cap text-ink-3 transition-colors hover:text-ink">
+          播放统计 →
+        </Link>
+      </div>
       {hist.loading ? (
         <LoadingNote />
       ) : recentPlayed.length === 0 ? (

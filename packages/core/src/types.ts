@@ -140,6 +140,57 @@ export interface HistoryPage {
   total: number;
 }
 
+/** 汇总：播放次数 / 累计收听毫秒 / 听过多少首不同的歌。 */
+export interface PlayTotals {
+  plays: number;
+  /**
+   * ⚠️ **可能偏小**：`duration_listened_ms` 是后来才由前端上报的，
+   * 更早的历史行是 NULL（按 0 累加，不丢行）。所以「次数」准、
+   * 「时长」是「已知的那部分」。展示时别把它说成精确值。
+   */
+  listened_ms: number;
+  /** 不同的 song_id 个数，**含已软删的歌**（回答「听过多少首」）。 */
+  songs: number;
+}
+
+/** 榜单上的一项（歌 / 歌手共用形状）。 */
+export interface PlayRankRow {
+  plays: number;
+  listened_ms: number;
+}
+
+/** 歌榜的一行：曲目摘要 + 计数。`song` 为 null 表示那首歌刚被软删。 */
+export interface TopSongRow extends PlayRankRow {
+  song: Song | null;
+}
+
+/** 歌手榜的一行。`name` 是 `songs.artists` 的**整串**（与歌手页同一口径）。 */
+export interface TopArtistRow extends PlayRankRow {
+  name: string;
+}
+
+/** 按天聚合的一行。`day` 是 `YYYY-MM-DD`，**已按请求里的时区偏移换算**。 */
+export interface DailyPlayRow extends PlayRankRow {
+  day: string;
+}
+
+/**
+ * `GET /api/history/stats` 的响应。
+ *
+ * ⚠️ `totals.plays` **≥ 各榜单之和**：榜单跳过已软删的歌（放不进榜也没法播），
+ * 而次数照算 —— 两者本来就不相等，别去「修」。
+ */
+export interface PlayStats {
+  totals: PlayTotals;
+  top_songs: TopSongRow[];
+  top_artists: TopArtistRow[];
+  daily: DailyPlayRow[];
+  /** 按天聚合的范围（天），与请求参数一致。 */
+  days: number;
+  /** 切天用的时区偏移（分钟），与请求参数一致 —— 界面可据此显示口径。 */
+  tz_offset_minutes: number;
+}
+
 /**
  * 设置是**自由形态的字符串键值表**，不是固定结构。
  *

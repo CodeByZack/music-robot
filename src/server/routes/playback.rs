@@ -125,6 +125,24 @@ const DEFAULT_HISTORY_LIMIT: i64 = 50;
 /// 内存放大攻击；静默夹取又会让前端以为拿到了想要的大小。
 const MAX_HISTORY_LIMIT: i64 = 200;
 
+/// 播放统计按天聚合的默认 / 最大天数。
+///
+/// 上限 366（一年）而不是随意大：一天一行，366 行在界面上已经画不下，
+/// 再大只是白算。
+const DEFAULT_STATS_DAYS: i64 = 30;
+const MAX_STATS_DAYS: i64 = 366;
+
+/// 播放统计里歌 / 歌手榜的默认与最大条数。
+const DEFAULT_STATS_TOP: i64 = 10;
+const MAX_STATS_TOP: i64 = 50;
+
+/// 时区偏移的允许范围（分钟）：现实世界是 UTC-12:00 ~ UTC+14:00。
+///
+/// 不设这个范围的话，`?tz_offset_minutes=99999999` 会让 SQLite 的 date()
+/// 修饰符把人带到一个毫无意义的日期上（响应里那个 `day` 就成了假数据）。
+const MAX_TZ_OFFSET_MINUTES: i64 = 14 * 60;
+const MIN_TZ_OFFSET_MINUTES: i64 = -12 * 60;
+
 /// 单个设置键的最大字符数。
 ///
 /// 键是标识符（`volume` / `resume:42`），128 个字符已经绰绰有余；
@@ -201,6 +219,65 @@ fn parse_history_offset(raw: Option<&str>) -> Result<i64, ApiError> {
         .map_err(|_| ApiError::bad_request("分页参数 offset 必须是整数"))?;
     if value < 0 {
         return Err(ApiError::bad_request("分页参数 offset 不能为负数"));
+    }
+    Ok(value)
+}
+
+/// 解析 `days`：缺省 [DEFAULT_STATS_DAYS]，允许 **0 = 全部时间**，上限见常量。
+fn parse_stats_days(raw: Option<&str>) -> Result<i64, ApiError> {
+    parse_bounded(raw, DEFAULT_STATS_DAYS, 0, MAX_STATS_DAYS, "days")
+}
+
+/// 解析 `top`：缺省 [DEFAULT_STATS_TOP]，必须 >= 1 且 <= 上限。
+fn parse_stats_top(raw: Option<&str>) -> Result<i64, ApiError> {
+    parse_bounded(raw, DEFAULT_STATS_TOP, 1, MAX_STATS_TOP, "top")
+}
+
+/// 解析 `tz_offset_minutes`：缺省 0，允许负值（西时区），范围见常量。
+///
+/// 这里是**唯一允许负数**的参数 —— 别的分页参数为负一律 400，
+/// 所以没有复用 [parse_bounded]（它从 1 起）。符号在 SQLite 那边由 repo 拼。
+fn parse_tz_offset(raw: Option<&str>) -> Result<i64, ApiError> {
+    let Some(text) = raw else {
+        return Ok(0);
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(0);
+    }
+    let value: i64 = trimmed
+        .parse()
+        .map_err(|_| ApiError::bad_request("tz_offset_minutes 必须是整数（与 UTC 的分钟差）"))?;
+    if !(MIN_TZ_OFFSET_MINUTES..=MAX_TZ_OFFSET_MINUTES).contains(&value) {
+        return Err(ApiError::bad_request(format!(
+            "tz_offset_minutes 必须在 {MIN_TZ_OFFSET_MINUTES} 到 {MAX_TZ_OFFSET_MINUTES} 之间（即 UTC-12:00 到 UTC+14:00）"
+        )));
+    }
+    Ok(value)
+}
+
+/// 「整数 + 闭区间」的通用解析（空串视同缺省，非法 / 越界一律 400，**不静默夹取**）。
+fn parse_bounded(
+    raw: Option<&str>,
+    default: i64,
+    min: i64,
+    max: i64,
+    name: &str,
+) -> Result<i64, ApiError> {
+    let Some(text) = raw else {
+        return Ok(default);
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(default);
+    }
+    let value: i64 = trimmed
+        .parse()
+        .map_err(|_| ApiError::bad_request(format!("参数 {name} 必须是整数")))?;
+    if value < min || value > max {
+        return Err(ApiError::bad_request(format!(
+            "参数 {name} 必须在 {min} 到 {max} 之间"
+        )));
     }
     Ok(value)
 }
@@ -446,6 +523,123 @@ pub async fn recent_history(
         "limit": limit,
         "offset": offset,
         "total": total,
+    })))
+}
+
+/// GET /api/history/stats —— 播放统计（**只统计调用者自己的行**）。
+///
+/// 查询参数：
+/// * `days`——统计范围：最近多少天（默认 [DEFAULT_STATS_DAYS]，上限 [MAX_STATS_DAYS]，
+///   **0 = 全部时间**）。**三个数字一起受它影响**（总量 / 榜单 / 按天），
+///   否则界面上「总量」与柱状图之和会对不上。
+/// * `tz_offset_minutes`——与 UTC 的偏移分钟数（北京 = 480），**决定「一天」从哪儿切**。
+///   前端传 `-new Date().getTimezoneOffset()` 即可（那个 API 的符号与这里相反）。
+///   省略按 0（UTC）算 —— 但那样凌晨听的东西会算到前一天，所以前端**应该传**。
+/// * `top`——歌 / 歌手榜各取前几条（默认 [DEFAULT_STATS_TOP]，上限 [MAX_STATS_TOP]）。
+///
+/// 响应：
+/// ```json
+/// {
+///   "totals": { "plays": 12, "listened_ms": 345000, "songs": 5 },
+///   "top_songs": [ { "song": {...}, "plays": 3, "listened_ms": 90000 } ],
+///   "top_artists": [ { "name": "周杰伦", "plays": 8, "listened_ms": 200000 } ],
+///   "daily": [ { "day": "2026-10-02", "plays": 4, "listened_ms": 120000 } ],
+///   "days": 30,
+///   "tz_offset_minutes": 480
+/// }
+/// ```
+///
+/// ⚠️ **`totals.listened_ms` 可能偏小**：`duration_listened_ms` 是 2026-10-02 起
+/// 前端才上报的，更早的历史行是 NULL（SUM 当 0 算，不丢行）。所以「播放次数」准、
+/// 「累计时长」是「已知的那部分」。别把它当精确值展示成「共听了 X 小时」而不留余地。
+///
+/// ⚠️ **`totals.plays` ≥ 各榜单之和**：榜单跳过已软删的歌（放不进榜也没法播），
+/// 而次数照算 —— 两者本来就不相等。
+pub async fn history_stats(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    params: QueryParams,
+) -> ApiResult<Json<Value>> {
+    let days = parse_stats_days(params.get("days"))?;
+    let tz_offset_minutes = parse_tz_offset(params.get("tz_offset_minutes"))?;
+    let top = parse_stats_top(params.get("top"))?;
+    let user_id = auth.0.id;
+    // 范围起点。`days = 0` = **全部时间**（不设下限）—— 界面上「全部」那一档就是它。
+    // 非零时往前多算一天，是为了让「今天」那一格必然是完整的：客户端按自己的
+    // 时区切天，这里给宽一点比给窄了好（给窄了会少一格）。
+    let since_ms = if days == 0 {
+        0
+    } else {
+        (crate::db::now_unix_ms() - (days + 1) * 86_400_000).max(0)
+    };
+
+    let (totals, top_songs, top_artists, daily) = run_db(Arc::clone(&state.db), move |conn| {
+        let totals = history::totals(conn, user_id, since_ms)?;
+        let top_songs = history::top_songs(conn, user_id, since_ms, top)?;
+        let top_artists = history::top_artists(conn, user_id, since_ms, top)?;
+        let daily = history::daily(conn, user_id, since_ms, tz_offset_minutes)?;
+        Ok((totals, top_songs, top_artists, daily))
+    })
+    .await?;
+
+    // 榜单里的歌一次性取回来（与 recent_history 同一套：批量 + songs_json 补专辑名）
+    let ids: Vec<i64> = top_songs.iter().map(|row| row.song_id).collect();
+    let songs_with_album = run_db(Arc::clone(&state.db), move |conn| {
+        let found = songs::get_many(conn, &ids)?;
+        let values = super::library::songs_json(conn, &found, false);
+        Ok(found
+            .iter()
+            .map(|song| song.id)
+            .zip(values)
+            .collect::<HashMap<i64, Value>>())
+    })
+    .await?;
+
+    let song_rows: Vec<Value> = top_songs
+        .iter()
+        .map(|row| {
+            json!({
+                // 同上：榜单里的歌可能刚被软删（聚合与取曲目之间），那时给 null
+                "song": songs_with_album.get(&row.song_id).cloned().unwrap_or(Value::Null),
+                "plays": row.plays,
+                "listened_ms": row.listened_ms,
+            })
+        })
+        .collect();
+
+    let artist_rows: Vec<Value> = top_artists
+        .iter()
+        .map(|row| {
+            json!({
+                "name": row.name,
+                "plays": row.plays,
+                "listened_ms": row.listened_ms,
+            })
+        })
+        .collect();
+
+    let daily_rows: Vec<Value> = daily
+        .iter()
+        .map(|row| {
+            json!({
+                "day": row.day,
+                "plays": row.plays,
+                "listened_ms": row.listened_ms,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "totals": {
+            "plays": totals.plays,
+            "listened_ms": totals.listened_ms,
+            "songs": totals.songs,
+        },
+        "top_songs": song_rows,
+        "top_artists": artist_rows,
+        "daily": daily_rows,
+        "days": days,
+        "tz_offset_minutes": tz_offset_minutes,
     })))
 }
 
@@ -696,6 +890,17 @@ mod tests {
     fn soft_delete(state: &AppState, song_id: i64) {
         let conn = state.db.acquire().expect("借连接");
         songs::mark_deleted(&conn, song_id).expect("标记删除");
+    }
+
+    /// 设一首歌的「歌手」——统计里的歌手榜按 `songs.artists` 整串分组，
+    /// 而 [seed_song] 不写这个列，所以单独设一下。
+    fn set_artists(state: &AppState, song_id: i64, artists: &str) {
+        let conn = state.db.acquire().expect("借连接");
+        conn.execute(
+            "UPDATE songs SET artists = ?2 WHERE id = ?1",
+            params![song_id, artists],
+        )
+        .expect("设歌手");
     }
 
     /// 直接查库：某用户的播放历史条数。
@@ -984,9 +1189,196 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3. 收藏幂等
+    // 2.5 播放统计
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// 播放统计：总量 / 歌榜 / 歌手榜 / 按天，并且**只看自己的行**。
+    #[tokio::test]
+    async fn history_stats_aggregates_totals_rankings_and_days() {
+        let (state, _temp) = test_state("s21-stats");
+        let (_alice_id, alice) = issue_token(&state, "alice");
+        let (_bob_id, bob) = issue_token(&state, "bob");
+        let a1 = seed_song(&state, "/music/a1.mp3");
+        let a2 = seed_song(&state, "/music/a2.mp3");
+        for song in [a1, a2] {
+            set_artists(&state, song, "某歌手");
+        }
+
+        // alice：a1 三次（1s / 2s / 3s）、a2 一次（不带时长）
+        for (song, dur) in [(a1, 1000), (a1, 2000), (a1, 3000), (a2, 0)] {
+            let body = if dur > 0 {
+                json!({ "song_id": song, "duration_listened_ms": dur })
+            } else {
+                json!({ "song_id": song })
+            };
+            let (status, resp) = call(
+                &state,
+                api("POST", "/api/history", Some(&alice), Some(body)),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{resp}");
+        }
+        // bob 的播放不该出现在 alice 的统计里
+        let (status, _) = call(
+            &state,
+            api(
+                "POST",
+                "/api/history",
+                Some(&bob),
+                Some(json!({ "song_id": a2, "duration_listened_ms": 999_999 })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, body) = call(
+            &state,
+            api("GET", "/api/history/stats", Some(&alice), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        assert_eq!(body["totals"]["plays"], 4, "alice 播了四次：{body}");
+        assert_eq!(
+            body["totals"]["listened_ms"], 6000,
+            "缺时长的行当 0 累加，不是丢掉"
+        );
+        assert_eq!(body["totals"]["songs"], 2);
+        assert_eq!(body["days"], DEFAULT_STATS_DAYS);
+        assert_eq!(body["tz_offset_minutes"], 0, "不传就是 UTC 口径");
+
+        let top = body["top_songs"].as_array().expect("top_songs 是数组");
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0]["song"]["id"], a1);
+        assert_eq!(top[0]["plays"], 3);
+        assert_eq!(top[0]["listened_ms"], 6000);
+        assert_eq!(top[1]["song"]["id"], a2);
+        assert_eq!(top[1]["plays"], 1);
+        // 榜上的曲目形状必须与别处一致（不泄漏内部字段）
+        assert!(
+            top[0]["song"].get("file_path").is_none(),
+            "泄漏了 file_path：{}",
+            top[0]
+        );
+
+        let artists = body["top_artists"].as_array().expect("top_artists 是数组");
+        assert_eq!(artists.len(), 1, "两首同歌手 → 合并：{body}");
+        assert_eq!(artists[0]["name"], "某歌手");
+        assert_eq!(artists[0]["plays"], 4);
+
+        // 按天：今天（服务器时间）必然有 4 次
+        let daily = body["daily"].as_array().expect("daily 是数组");
+        assert_eq!(daily.len(), 1, "全部发生在今天：{body}");
+        assert_eq!(daily[0]["plays"], 4);
+        assert_eq!(daily[0]["listened_ms"], 6000);
+        assert!(
+            daily[0]["day"].as_str().is_some_and(|d| d.len() == 10),
+            "day 必须是 YYYY-MM-DD：{}",
+            daily[0]["day"]
+        );
+        // ⚠️ **不变量：按天之和 == 总量**（同一个 since 窗口、同一组行）。
+        // 界面上「总量」与柱状图并排放着，两者对不上就是明显的 bug；
+        // 这条把它钉住 —— 以后谁只给其中一边加过滤，这里立刻变红。
+        let daily_sum: i64 = daily.iter().filter_map(|d| d["plays"].as_i64()).sum();
+        assert_eq!(
+            daily_sum, body["totals"]["plays"].as_i64().unwrap_or(-1),
+            "按天之和必须等于总播放次数：{body}"
+        );
+
+        // bob 那边只有他自己的一次
+        let (_, bob_body) = call(&state, api("GET", "/api/history/stats", Some(&bob), None)).await;
+        assert_eq!(bob_body["totals"]["plays"], 1, "{bob_body}");
+        assert_eq!(bob_body["totals"]["listened_ms"], 999_999);
+
+        // 空历史：四个字段都在，数值为 0 / 空数组（不能缺键，前端少一处判空）
+        let (_carol_id, carol) = issue_token(&state, "carol");
+        let (status, empty) = call(
+            &state,
+            api("GET", "/api/history/stats", Some(&carol), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{empty}");
+        assert_eq!(empty["totals"]["plays"], 0);
+        assert_eq!(empty["totals"]["listened_ms"], 0);
+        assert_eq!(empty["totals"]["songs"], 0);
+        assert_eq!(empty["top_songs"].as_array().map(Vec::len), Some(0));
+        assert_eq!(empty["top_artists"].as_array().map(Vec::len), Some(0));
+        assert_eq!(empty["daily"].as_array().map(Vec::len), Some(0));
+    }
+
+    /// 参数校验：`days` / `top` / `tz_offset_minutes` 的边界，一律 400 不静默夹取。
+    #[tokio::test]
+    async fn history_stats_validates_its_params() {
+        let (state, _temp) = test_state("s21-stats-params");
+        let (_id, token) = issue_token(&state, "alice");
+
+        // 合法：边界内的值都被接受，并**回显**在响应里（前端据此确认生效）
+        for (uri, days, tz) in [
+            ("/api/history/stats?days=1&tz_offset_minutes=480", 1, 480),
+            ("/api/history/stats?days=7&tz_offset_minutes=-300", 7, -300),
+            (
+                "/api/history/stats?days=366&tz_offset_minutes=840",
+                366,
+                840,
+            ),
+            // days=0 = **全部时间**（界面上「全部」那一档），是允许的
+            ("/api/history/stats?days=0", 0, 0),
+        ] {
+            let (status, body) = call(&state, api("GET", uri, Some(&token), None)).await;
+            assert_eq!(status, StatusCode::OK, "{uri} 应通过：{body}");
+            assert_eq!(body["days"], days, "{uri}");
+            assert_eq!(body["tz_offset_minutes"], tz, "{uri}");
+        }
+
+        for uri in [
+            "/api/history/stats?days=-1",
+            "/api/history/stats?days=367",
+            "/api/history/stats?days=abc",
+            "/api/history/stats?top=0",
+            "/api/history/stats?top=51",
+            "/api/history/stats?top=abc",
+            "/api/history/stats?tz_offset_minutes=841",
+            "/api/history/stats?tz_offset_minutes=-721",
+            "/api/history/stats?tz_offset_minutes=abc",
+        ] {
+            let (status, body) = call(&state, api("GET", uri, Some(&token), None)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} 必须 400：{body}");
+            assert_eq!(body["error"]["code"], "BAD_REQUEST", "{uri}");
+        }
+
+        // 未登录 → 401（路由挂在受保护子 Router 上）
+        let (status, _) = call(&state, api("GET", "/api/history/stats", None, None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // top 真的在限量
+        let song = seed_song(&state, "/music/limited.mp3");
+        for _ in 0..3 {
+            let _ = call(
+                &state,
+                api(
+                    "POST",
+                    "/api/history",
+                    Some(&token),
+                    Some(json!({ "song_id": song })),
+                ),
+            )
+            .await;
+        }
+        let (_, limited) = call(
+            &state,
+            api("GET", "/api/history/stats?top=1", Some(&token), None),
+        )
+        .await;
+        assert_eq!(
+            limited["top_songs"].as_array().map(Vec::len),
+            Some(1),
+            "{limited}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. 收藏幂等
+    // ─────────────────────────────────────────────────────────────────────────
     /// 画布 UT「收藏幂等」：同一首连收两次只有一行、第二次 200；取消两次第二次
     /// removed:false；收藏列表里出现且只出现一次；不存在的歌 / 软删的歌 → 404。
     #[tokio::test]

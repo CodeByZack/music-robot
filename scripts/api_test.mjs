@@ -1039,6 +1039,88 @@ async function main() {
     [st] = await anon3.json('GET', '/api/history');
     check('未登录看历史 → 401', st, 401);
 
+    // ── 播放统计（/api/history/stats）──
+    // 前面已经给 A 记了若干次播放。这里只钉「形状 + 口径 + 参数校验」，
+    // 具体数值依赖前面记了几次，所以用「>= / 自洽」而不是写死数字。
+    [st, , body] = await c.json('GET', '/api/history/stats');
+    check('播放统计 → 200', st, 200);
+    checkTrue('totals 三个键都在', [
+      body?.totals?.plays,
+      body?.totals?.listened_ms,
+      body?.totals?.songs,
+    ].every((v) => typeof v === 'number'), brief(body?.totals));
+    checkTrue(
+      'plays >= 1（前面记过播放）',
+      (body?.totals?.plays ?? 0) >= 1,
+      brief(body?.totals?.plays),
+    );
+    checkTrue(
+      'songs <= plays（不同的歌不多于总次数）',
+      (body?.totals?.songs ?? 0) <= (body?.totals?.plays ?? 0),
+      `${brief(body?.totals?.songs)} vs ${brief(body?.totals?.plays)}`,
+    );
+    checkTrue('top_songs 是数组', Array.isArray(body?.top_songs), brief(body?.top_songs));
+    checkTrue('top_artists 是数组', Array.isArray(body?.top_artists), brief(body?.top_artists));
+    checkTrue('daily 是数组', Array.isArray(body?.daily), brief(body?.daily));
+    // 榜上的曲目走同一个 song_json —— 不能泄漏内部字段
+    checkTrue(
+      '榜单曲目不泄漏内部字段',
+      !JSON.stringify(body?.top_songs ?? []).includes('file_path'),
+      '泄漏了 file_path',
+    );
+    // 榜单之和不能超过总量（软删的歌只进总量、不进榜，所以是 <= 而不是 ==）
+    const sumTop = (body?.top_songs ?? []).reduce((acc, row) => acc + (row?.plays ?? 0), 0);
+    checkTrue(
+      '榜上次数之和 <= 总播放次数',
+      sumTop <= (body?.totals?.plays ?? 0),
+      `${brief(sumTop)} vs ${brief(body?.totals?.plays)}`,
+    );
+    checkTrue('days 回显默认 30', body?.days === 30, brief(body?.days));
+    checkTrue('tz_offset_minutes 回显', typeof body?.tz_offset_minutes === 'number', brief(body));
+
+    // 参数：合法值被接受并回显（**days=0 = 全部时间**，是合法值不是越界）
+    [st, , body] = await c.json('GET', '/api/history/stats?days=7&tz_offset_minutes=480&top=3');
+    check('统计带参数 → 200', st, 200);
+    check('days 回显 7', body?.days, 7);
+    check('tz_offset_minutes 回显 480', body?.tz_offset_minutes, 480);
+    checkTrue(
+      'top=3 时每榜最多 3 条',
+      (body?.top_songs ?? []).length <= 3 && (body?.top_artists ?? []).length <= 3,
+      brief(body?.top_songs?.length),
+    );
+    [st, , body] = await c.json('GET', '/api/history/stats?days=0');
+    check('days=0（全部时间）→ 200', st, 200);
+    check('days=0 被回显', body?.days, 0);
+    checkTrue(
+      'days=0 时总量与按天一致',
+      (body?.daily ?? []).reduce((acc, d) => acc + (d?.plays ?? 0), 0) === (body?.totals?.plays ?? 0),
+      `daily 之和 ${brief(body?.daily?.length)} 项 vs totals.plays ${brief(body?.totals?.plays)}`,
+    );
+
+    // 参数：越界一律 400（不静默夹取）
+    for (const q of [
+      'days=-1',
+      'days=367',
+      'days=abc',
+      'top=0',
+      'top=51',
+      'tz_offset_minutes=841',
+      'tz_offset_minutes=-721',
+      'tz_offset_minutes=abc',
+    ]) {
+      [st] = await c.json('GET', `/api/history/stats?${q}`);
+      check(`统计参数非法 ${q} → 400`, st, 400);
+    }
+
+    // 跨用户隔离：B 的统计里没有 A 的播放
+    [st, , body] = await c2.json('GET', '/api/history/stats');
+    check('B 的统计 → 200', st, 200);
+    check('B 看不到 A 的播放', body?.totals?.plays ?? null, 0);
+    check('B 的榜是空的', (body?.top_songs ?? []).length, 0);
+
+    [st] = await anon3.json('GET', '/api/history/stats');
+    check('未登录看统计 → 401', st, 401);
+
     // ───────────────────────── 歌曲请求 ─────────────────────────
     section('9. 歌曲请求（S23）');
 

@@ -187,6 +187,10 @@ pub fn build_router(state: AppState) -> AppRouter {
             "/api/history",
             get(playback::recent_history).post(playback::record_history),
         )
+        // 播放统计（画布「历史：最近播放 · 播放统计」的后一半）。
+        // **静态路径必须与 /api/history 并列注册**，不要写成 /api/history/{what}——
+        // 那会和「按 id 取一条历史」将来的路由抢匹配，也会让 404 文案含糊。
+        .route("/api/history/stats", get(playback::history_stats))
         .route("/api/favorites", get(playback::list_favorites))
         .route(
             "/api/favorites/{song_id}",
