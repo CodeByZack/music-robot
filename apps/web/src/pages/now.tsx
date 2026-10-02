@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayMode, Song } from '@music-robot/core';
 import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
-import { useOverlayClose } from '@/lib/use-overlay-close.ts';
+import { useOverlayClose, useEscapeToClose } from '@/lib/use-overlay-close.ts';
 import { usePlayer } from '@/lib/player.tsx';
 import { useAsync } from '@/lib/use-async.tsx';
 
@@ -153,13 +153,9 @@ export default function NowPage() {
   // 收起飞出：优先回上一页，带动画（见 lib/use-overlay-close.ts）
   const { closing, close: back } = useOverlayClose('/');
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') back();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [back]);
+  // Esc 关闭。用共用 hook，别自己写监听 —— 理由见 use-overlay-close.ts
+  // （自写监听会让「页内开着弹窗时按 Esc」把整页也关掉）。
+  useEscapeToClose(back);
 
   /**
    * 歌词行。优先用**同步歌词**（SYLT）；没有就看看普通歌词里是不是本来就带着

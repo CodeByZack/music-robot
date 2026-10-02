@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { isDialogOpen } from '@/components/dialog.tsx';
 
 /**
  * 全屏浮层（设置页 / 播放页）的「带动画关闭」。
@@ -37,4 +38,28 @@ export function useOverlayClose(fallback = '/', ms = 180) {
   }, [navigate, fallback, ms]);
 
   return { closing, close };
+}
+
+/**
+ * 让 Esc 关掉全屏浮层页（设置 / 播放 / 标签编辑）。
+ *
+ * ⚠️ **必须用这个，别自己写 `document.addEventListener('keydown')`**：
+ * 浮层页里可能开着弹窗（比如设置页「点歌请求」分节的「点一首」），
+ * 而弹窗**也**监听 Esc。两个监听器都挂在 `document` 上，
+ * `stopPropagation` 拦不住同一个 target 上的另一个（只有 `stopImmediatePropagation`
+ * 能，那依赖注册顺序，很脆）。于是按一次 Esc 会同时关掉弹窗和整个页面 ——
+ * 用户被弹回上一页，以为自己把设置弄丢了。实测踩过两次。
+ *
+ * 这里统一先问 `isDialogOpen()`：有弹窗就让给弹窗，浮层页不动。
+ *
+ * （设置 / 播放 / 标签编辑原来各自内联了这段监听，三份都没有这个判断。）
+ */
+export function useEscapeToClose(close: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDialogOpen()) close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [close]);
 }

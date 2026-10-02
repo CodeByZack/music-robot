@@ -1,80 +1,67 @@
 import { useCallback, useState } from 'react';
 import type { User } from '@music-robot/core';
-import { OverlayShell, type OverlaySection } from '@/components/overlay.tsx';
 import { Panel, PanelRow } from '@/components/panel.tsx';
 import { api } from '@/lib/client.ts';
 import { messageOf, useSession } from '@/lib/session.tsx';
 import { useAsync } from '@/lib/use-async.tsx';
 
 /**
- * 用户管理页（全屏浮层页面，**骨架与设置页一致**：顶栏 + 左侧分节 + 右侧 Panel）。
+ * 设置 → 用户管理（**是设置页的一个分节，不是独立页面**，仅 admin 可见）。
  *
- * 入口是顶栏右上角的下拉菜单。路由本身不拦权限 —— 后端那两条接口都挂 `AdminUser`
- * 提取器，普通用户进来只会看到一个 403 错误，不是数据泄漏。前端在菜单里
- * **不对普通用户显示这一项**（点进去再收 403 是更差的体验）。
+ * 用户 2026-10-02 要求并入设置页。分节本身对普通用户不显示（`settings.tsx` 的
+ * `SECTIONS` 里标了 `adminOnly`）—— 后端那两条接口也各自挂了 `AdminUser` 提取器，
+ * 所以就算直接改 URL 也拿不到数据，不是靠前端拦。
  *
  * 为什么必须有「列表」这一半：`POST /api/admin/users` 是注册关闭后唯一的建号入口，
  * 但以前只有建号没有列表 —— 建完就查不到「现在有谁」，管理界面等于一张孤零零的表单。
  *
  * **不做**的：改密码、删号。前者后端没有接口；后者会牵动 playlists / favorites /
  * history / song_requests 一串 CASCADE，没有需求就不动。
- *
- * 分节：三个按角色筛的列表 + 一个建号表单。**建号不做成弹窗** —— 它是一整块带说明的
- * 表单，正是设置页「一块面板里几行」的形态；弹窗只用在「填完就走」的小输入上
- * （比如点歌请求那个，见 `request-dialog.tsx`）。
  */
-const SECTIONS: OverlaySection[] = [
-  { id: 'all', label: '全部用户' },
-  { id: 'admin', label: '管理员' },
-  { id: 'user', label: '普通用户' },
-  { id: 'new', label: '新建用户' },
-];
-
-export default function UsersPage() {
+export function UsersSection() {
   const { user: me } = useSession();
   const load = useCallback(() => api.users.list(), []);
   const { data, error, loading, reload } = useAsync(load, []);
 
-  const [section, setSection] = useState<string>('all');
   const items = data?.items ?? [];
-
-  // 角色筛选在**前端**做：用户表本来就小（一台自托管服务几个人），
-  // 为它加一个后端 query 参数不划算。
-  const shown = section === 'all' ? items : items.filter((u) => u.role === section);
-  const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
+  /** 建号表单的显隐。默认收起 —— 它是低频动作，平时该让「现在有谁」占满这一块。 */
+  const [creating, setCreating] = useState(false);
 
   return (
-    <OverlayShell
-      title="用户管理"
-      sections={SECTIONS}
-      section={section}
-      onSection={setSection}
-    >
-      {section === 'new' ? (
-        <CreateUserForm
+    <>
+      <Panel
+        title="用户"
+        actions={
+          <button
+            type="button"
+            onClick={() => setCreating((v) => !v)}
+            className="h-[34px] shrink-0 rounded-full bg-surface-hover px-3.5 text-nav transition-colors hover:brightness-125"
+          >
+            {creating ? '收起' : '新建用户'}
+          </button>
+        }
+      >
+        {error ? (
+          <p className="py-8 text-center text-nav text-ink-3">{error}</p>
+        ) : loading ? (
+          <p className="py-8 text-center text-nav text-ink-4">读取中…</p>
+        ) : items.length === 0 ? (
+          <p className="py-8 text-center text-nav text-ink-4">还没有用户。</p>
+        ) : (
+          items.map((u) => <UserRow key={u.id} user={u} isMe={u.id === me?.id} />)
+        )}
+      </Panel>
+
+      {creating && (
+        <CreateUserPanel
           onDone={() => {
+            setCreating(false);
             reload();
-            // 建完切回列表 —— 用户要看到「刚建的那个人出现了」
-            setSection('all');
           }}
+          onCancel={() => setCreating(false)}
         />
-      ) : (
-        <Panel title={current.label}>
-          {error ? (
-            /* 普通用户直接敲地址进来会看到这个。把话说清楚，别只说「读取失败」。 */
-            <p className="py-8 text-center text-nav text-ink-3">{error}</p>
-          ) : loading ? (
-            <p className="py-8 text-center text-nav text-ink-4">读取中…</p>
-          ) : shown.length === 0 ? (
-            <p className="py-8 text-center text-nav text-ink-4">
-              {section === 'all' ? '还没有用户。' : '这一节里没有用户。'}
-            </p>
-          ) : (
-            shown.map((u) => <UserRow key={u.id} user={u} isMe={u.id === me?.id} />)
-          )}
-        </Panel>
       )}
-    </OverlayShell>
+    </>
   );
 }
 
@@ -82,7 +69,7 @@ export default function UsersPage() {
  * 一个用户 = 设置页的一行（**左边用户名 + 上次登录，右边角色**）。
  *
  * 刻意**不做头像**：设置页「账号」那一块就是「用户名 + 角色 + 右侧按钮」，
- * 加了头像反而不像同一套界面。首字头像留着给顶栏那颗按钮（那儿没有文字）。
+ * 加了头像反而不像同一套界面。
  */
 function UserRow({ user, isMe }: { user: User; isMe: boolean }) {
   return (
@@ -108,19 +95,18 @@ function UserRow({ user, isMe }: { user: User; isMe: boolean }) {
 }
 
 /**
- * 建号表单 —— **就是一块 Panel 加几行**，不另做表单样式。
+ * 建号 —— **就是一块 Panel 加几行**，不另做表单样式，也不是弹窗。
  *
  * 校验只做**前端该做的那一份**（非空、口令长度），真正的规则在后端
  * （`normalize_username` / `validate_password`）—— 前端这层是为了少一次往返，
  * 不是安全边界。用户名重复由后端回 409，文案直接用它给的。
  */
-function CreateUserForm({ onDone }: { onDone: () => void }) {
+function CreateUserPanel({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('');
   const [pw, setPw] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
 
   const canSubmit = name.trim().length > 0 && pw.length >= 8;
 
@@ -129,10 +115,8 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
     if (!canSubmit || busy) return;
     setBusy(true);
     setErr(null);
-    setOk(null);
     try {
-      const r = await api.users.create(name.trim(), pw, role);
-      setOk(`已创建 ${r.user.username}（${r.user.role === 'admin' ? '管理员' : '普通用户'}）`);
+      await api.users.create(name.trim(), pw, role);
       // 口令立刻从内存里抹掉 —— 建完还留在输入框里没有理由
       setName('');
       setPw('');
@@ -192,15 +176,21 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
         </PanelRow>
 
         {err && <p className="mt-3 text-note text-accent">{err}</p>}
-        {ok && <p className="mt-3 text-note text-ink-3">{ok}</p>}
 
-        <div className="mt-4">
+        <div className="mt-4 flex gap-2.5">
           <button
             type="submit"
             disabled={!canSubmit || busy}
             className="h-[34px] rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? '创建中…' : '创建用户'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-[34px] rounded-full px-4 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            取消
           </button>
         </div>
       </Panel>

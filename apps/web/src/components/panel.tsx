@@ -11,11 +11,32 @@ import type { ReactNode } from 'react';
  * `PanelRow` 的右控件**没有宽度约束** —— 按钮、开关、输入框都往这儿放，
  * 由调用处给宽度（设置页里那些是行内小控件，表单输入框自己带 `w-[…]`）。
  */
-export function Panel({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * 面板标题行右侧的控件（筛选、主操作按钮）。
+ *
+ * 有它才好在**不改面板外观**的前提下把「这一块的主操作」放在该在的地方 ——
+ * `actions` 不传时标题行的布局与宽度和以前逐像素相同。
+ */
+export function Panel({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="mb-4 rounded-lg bg-surface p-5">
-      {/* 宽字距全大写小标签（`docs/design.md` §7.1）—— 分组标题专用 */}
-      <div className="mb-3 text-micro tracking-[.24em] text-ink-4 uppercase">{title}</div>
+      <div className="mb-3 flex items-center gap-3">
+        {/* 宽字距全大写小标签（`docs/design.md` §7.1）—— 分组标题专用。
+            用 `items-center` 而不是 `items-start`：有右侧按钮时标题要在整行里垂直居中，
+            否则 11px 的小字会贴着 34px 按钮的顶边。 */}
+        <div className="min-w-0 flex-1 text-micro tracking-[.24em] text-ink-4 uppercase">
+          {title}
+        </div>
+        {actions && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>}
+      </div>
       {children}
     </div>
   );

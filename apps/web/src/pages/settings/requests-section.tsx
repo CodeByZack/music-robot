@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import type { RequestStatus, Song, SongRequest } from '@music-robot/core';
-import { OverlayShell, type OverlaySection } from '@/components/overlay.tsx';
 import { Panel, PanelRow } from '@/components/panel.tsx';
 import { RequestSongDialog } from '@/components/request-dialog.tsx';
 import { api } from '@/lib/client.ts';
@@ -8,47 +7,42 @@ import { messageOf, useSession } from '@/lib/session.tsx';
 import { useAsync } from '@/lib/use-async.tsx';
 
 /**
- * 点歌请求页（全屏浮层页面，**骨架与设置页一致**：顶栏 + 左侧分节 + 右侧 Panel）。
+ * 设置 → 点歌请求（**是设置页的一个分节，不是独立页面**）。
  *
- * 入口有两个（都不是本页自己发的）：
- * 1. 顶栏右上角的下拉菜单（面向所有人）；
- * 2. 搜索页搜不到时的「请求这首歌」（面向需求发生的当场）。
- * 两条都通到这里 —— 但真正的「提交」用的是同一个 `RequestSongDialog`（弹窗）。
- *
- * **左侧分节 = 状态筛选**。这是本页最自然的分法：用户来这儿想看的是
- * 「哪些还没处理 / 哪些已经被拒了」，那就该是分节，而不是顶上排一排筛选小按钮
- * —— 设置页导航存在的理由正是把「看哪一块」显式化。筛选走后端 `?status=`。
+ * 用户 2026-10-02 要求并入设置页。理由也成立：它是「偶尔来一下」的管理动作，
+ * 和「音乐库 / 播放 / 账号」同一层级，单独占一个全屏页面反而过重。
+ * 需求侧入口仍在**搜索页**（搜不到 → 「请求这首歌」）。
  *
  * 权限（后端 `routes::requests` 强制）：普通用户无论带什么 query 都只看得到
  * **自己提交的**；`?status=` 这种全量筛选是管理端能力，普通用户调会 403 ——
- * 所以分节导航只对 admin 显示，普通用户只有一个「我的请求」分节。
+ * 所以状态筛选只对 admin 显示。
  */
-const SECTIONS: OverlaySection[] = [
-  { id: 'all', label: '全部请求' },
+const FILTERS: { id: 'all' | RequestStatus; label: string }[] = [
+  { id: 'all', label: '全部' },
   { id: 'pending', label: '待处理' },
   { id: 'processing', label: '处理中' },
   { id: 'done', label: '已添加' },
   { id: 'rejected', label: '已拒绝' },
 ];
 
-export default function RequestsPage() {
+export function RequestsSection() {
   const { user } = useSession();
   const isAdmin = user?.role === 'admin';
-  const [section, setSection] = useState<string>('all');
+  const [filter, setFilter] = useState<'all' | RequestStatus>('all');
   const [mineOnly, setMineOnly] = useState(false);
   const [composing, setComposing] = useState(false);
 
   const load = useCallback(
     () =>
       api.requests.list({
-        ...(section === 'all' ? {} : { status: section as RequestStatus }),
+        ...(filter === 'all' || !isAdmin ? {} : { status: filter }),
         ...(mineOnly ? { mine: 1 as const } : {}),
       }),
-    [section, mineOnly],
+    [filter, mineOnly, isAdmin],
   );
-  const { data, error, loading, reload } = useAsync(load, [section, mineOnly]);
+  const { data, error, loading, reload } = useAsync(load, [filter, mineOnly]);
 
-  // 当前展开的就地操作（一次只开一条 —— 列表里同时开两个输入框很难看）
+  // 当前展开的就地操作（一次只开一条 —— 同时开两个输入框很难看）
   const [action, setAction] = useState<{ id: number; kind: 'reject' | 'link' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -69,41 +63,54 @@ export default function RequestsPage() {
   }
 
   const items = data?.items ?? [];
-  // 分节表是常量且一定非空，所以 `?? SECTIONS[0]` 兜底后必是真值；
-  // 写 `!` 而不是再深一层判空 —— 这里没有运行时风险，只是 TS 推不出来。
-  const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
 
   return (
-    <OverlayShell
-      title="点歌请求"
-      sections={isAdmin ? SECTIONS : [{ id: 'all', label: '我的请求' }]}
-      section={section}
-      onSection={(id) => {
-        setSection(id);
-        setAction(null); // 换一节就把展开的表单收掉，别让它挂在新列表上
-      }}
-      actions={
-        <button
-          type="button"
-          onClick={() => setComposing(true)}
-          className="h-8 shrink-0 rounded-full bg-accent px-3.5 text-cap font-medium text-white transition-colors hover:brightness-110"
-        >
-          点一首
-        </button>
-      }
-    >
-      {err && (
-        <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{err}</p>
-      )}
-
-      <Panel title={current.label}>
-        {/* 「只看我的」是**范围**而不是状态，所以不做成分节，而是这块面板里的一个开关
-            —— 与设置页那个「写入文件」开关同一个写法（含 hint 说清当前含义）。
-            只对 admin 显示：普通用户拿到的本来就只有自己的。 */}
+    <>
+      <Panel
+        title={isAdmin ? '点歌请求' : '我的点歌'}
+        // 筛选与主操作放标题行右侧 —— 与设置页其余面板「块标题 + 右侧控件」同形
+        actions={
+          <>
+            {/* 状态筛选对普通用户无意义（后端只给他自己的、且拒绝全量筛选） */}
+            {isAdmin && (
+              <div className="flex flex-wrap gap-1">
+                {FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFilter(f.id)}
+                    className={[
+                      'rounded-full px-3 py-1.5 text-cap transition-colors',
+                      filter === f.id
+                        ? 'bg-surface-press text-ink'
+                        : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
+                    ].join(' ')}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setComposing(true)}
+              className="h-[34px] shrink-0 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110"
+            >
+              点一首
+            </button>
+          </>
+        }
+      >
+        {/* 「只看我的」是**范围**而不是状态，所以不做成筛选按钮，而是这块面板里的
+            一行开关 —— 与「音乐库」那块里「写入文件」同一个写法。只对 admin 显示。 */}
         {isAdmin && (
           <PanelRow
             label="只看我的"
-            hint={mineOnly ? '只显示你自己提交的请求' : '显示所有人提交的请求'}
+            hint={
+              mineOnly
+                ? '只显示你自己提交的请求'
+                : '显示所有人提交的请求（按想要的人数排序）'
+            }
           >
             <button
               type="button"
@@ -126,21 +133,25 @@ export default function RequestsPage() {
           </PanelRow>
         )}
 
+        {err && (
+          <p className="mb-3 rounded-md bg-accent-soft px-4 py-2.5 text-note text-accent">{err}</p>
+        )}
+
         {error ? (
           <p className="py-8 text-center text-nav text-ink-3">{error}</p>
         ) : loading ? (
           <p className="py-8 text-center text-nav text-ink-4">读取中…</p>
         ) : items.length === 0 ? (
-          /* 空状态写得具体点：区分「这一节是空的」与「压根没人点过」，
+          /* 空状态写得具体点：区分「这一档是空的」与「压根没人点过」，
              否则用户会以为筛选坏了。 */
           <p className="py-8 text-center text-nav text-ink-4">
-            {section === 'all' && !mineOnly
+            {filter === 'all' && !mineOnly
               ? isAdmin
                 ? '还没有人点歌。'
                 : '你还没有提交过点歌请求。'
               : mineOnly
-                ? '你没有符合这一节的请求。'
-                : '这一节里没有请求。'}
+                ? '你没有符合这一档的请求。'
+                : '这一档里没有请求。'}
           </p>
         ) : (
           items.map((r) => (
@@ -165,34 +176,32 @@ export default function RequestsPage() {
       {composing && (
         <RequestSongDialog
           onClose={() => setComposing(false)}
-          // 提交后刷新：新请求（或新票数）要立刻出现在列表里
+          // 提交后刷新 + 切到「待处理」：新建的请求一定落在那一档，让用户看得见它
           onDone={() => {
             reload();
-            // 新建的请求一定是「待处理」，切过去让用户看得见它落在哪儿
-            // （普通用户没有这个分节，所以只在 admin 下切）
-            if (isAdmin) setSection('pending');
+            if (isAdmin) setFilter('pending');
           }}
         />
       )}
-    </OverlayShell>
+    </>
   );
 }
 
 /** 状态徽标。四个状态四句话 —— 只用一个颜色点，用户看不出「待处理」还是「已拒绝」。 */
 function StatusChip({ status }: { status: RequestStatus }) {
   const [label, cls] = {
-    pending: ['待处理', 'bg-surface text-ink-2'],
+    pending: ['待处理', 'bg-surface-hover text-ink-2'],
     processing: ['处理中', 'bg-accent-soft text-accent'],
-    done: ['已添加', 'bg-surface text-ink-4'],
-    rejected: ['已拒绝', 'bg-surface text-ink-4'],
+    done: ['已添加', 'bg-surface-hover text-ink-4'],
+    rejected: ['已拒绝', 'bg-surface-hover text-ink-4'],
   }[status];
   return <span className={['rounded-full px-2.5 py-1 text-micro', cls].join(' ')}>{label}</span>;
 }
 
 /**
  * 一条请求。结构与设置页的 `PanelRow` 同形（**左边文字块、右边控件**），
- * 只是左边多几行、右边从单个控件变成一组。没直接用 `PanelRow`，是因为
- * 就地展开的操作区（拒绝理由 / 选歌）要占满整行宽度。
+ * 只是左边多几行、右边是一组按钮。没直接用 `PanelRow`，是因为就地展开的操作区
+ * （拒绝理由 / 选歌）要占满整行宽度。
  */
 function RequestRow({
   req,
@@ -235,9 +244,7 @@ function RequestRow({
             <span className="block text-xs text-ink-4">拒绝理由：{req.reject_reason}</span>
           )}
           {req.song_id != null && req.status === 'done' && (
-            <span className="block text-xs text-ink-4">
-              已关联到曲库里的歌曲 #{req.song_id}
-            </span>
+            <span className="block text-xs text-ink-4">已关联到曲库里的歌曲 #{req.song_id}</span>
           )}
         </div>
 
@@ -345,8 +352,8 @@ function SongPicker({
       return;
     }
     setSearching(true);
-    // 防抖放在这里而不是 useEffect：`useAsync` 不适合「打字触发」的场景
-    // （deps 一变就重取，没有等待窗口）。
+    // 防抖放在事件里而不是 useEffect：`useAsync` 是「deps 一变就重取」，
+    // 没有等待窗口，不适合「打字触发」的场景。
     window.setTimeout(() => {
       api
         .search(q, { page_size: 6 })
@@ -364,10 +371,10 @@ function SongPicker({
         value={kw}
         onChange={(e) => onKw(e.target.value)}
         placeholder="搜歌名 / 歌手 / 专辑"
-        className="h-9 w-full rounded-lg border-0 bg-surface-hover px-3 text-note text-ink outline-0 placeholder:text-ink-4"
+        className="h-9 w-full max-w-[420px] rounded-lg border-0 bg-surface-hover px-3 text-note text-ink outline-0 placeholder:text-ink-4"
       />
       {kw.trim() && (
-        <div className="mt-2 rounded-lg bg-black/25 p-1">
+        <div className="mt-2 max-w-[420px] rounded-lg bg-black/25 p-1">
           {hits.length === 0 ? (
             <p className="px-3 py-2 text-cap text-ink-4">
               {searching ? '搜索中…' : '没有匹配的歌曲'}

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RESUME_KEY_PREFIX, type Job } from '@music-robot/core';
 import { Panel, PanelRow as Row } from '@/components/panel.tsx';
-import { useOverlayClose } from '@/lib/use-overlay-close.ts';
+import { RequestsSection } from '@/pages/settings/requests-section.tsx';
+import { UsersSection } from '@/pages/settings/users-section.tsx';
+import { useOverlayClose, useEscapeToClose } from '@/lib/use-overlay-close.ts';
 import { setWriteFiles as setWriteFilesPref, useWriteFiles } from '@/lib/scrape-prefs.ts';
 import { api } from '@/lib/client.ts';
 import { useAsync } from '@/lib/use-async.tsx';
@@ -48,13 +50,25 @@ function Progress({ job }: { job: Job }) {
 }
 
 /** 设置的分节。左边那栏就按这个渲染。 */
-const SECTIONS = [
+interface SettingsSection {
+  id: 'library' | 'playback' | 'requests' | 'users' | 'account';
+  label: string;
+  /** 仅管理员可见（普通用户点进来只会看到 403 文案，干脆不给这一项）。 */
+  adminOnly?: boolean;
+}
+
+const SECTIONS: SettingsSection[] = [
   { id: 'library', label: '音乐库' },
   { id: 'playback', label: '播放' },
+  // 点歌请求与用户管理**不另开页面**，就是这里的两个分节 —— 用户 2026-10-02
+  // 明确要求并进来。理由也成立：它们是「偶尔来一下」的配置 / 管理动作，
+  // 和「音乐库 / 播放 / 账号」同一层级，单独占一个全屏页面反而过重。
+  { id: 'requests', label: '点歌请求' },
+  { id: 'users', label: '用户管理', adminOnly: true },
   { id: 'account', label: '账号' },
-] as const;
+];
 
-type SectionId = (typeof SECTIONS)[number]['id'];
+type SectionId = SettingsSection['id'];
 
 export default function SettingsPage() {
   const [section, setSection] = useState<SectionId>('library');
@@ -62,15 +76,18 @@ export default function SettingsPage() {
   // 关闭设置：优先回上一页，带动画（见 lib/use-overlay-close.ts）
   const { closing, close } = useOverlayClose('/');
 
-  // Esc 关闭
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [close]);
+  // Esc 关闭。⚠️ 用共用 hook，别自己写监听 —— 这一页里有弹窗（「点一首」），
+  // 自写监听会让一次 Esc 同时关掉弹窗和整页，详见 use-overlay-close.ts。
+  useEscapeToClose(close);
   const { user, logout } = useSession();
+  /**
+   * 当前用户能看到的分节。`adminOnly` 的那几项对普通用户**直接不渲染** ——
+   * 点进去只会看到后端 403 的文案，不如不给入口。
+   *
+   * ⚠️ 这不是权限边界：后端那几条接口各自挂 `AdminUser` 提取器，
+   * 前端这层只是为了不让人白点。
+   */
+  const visibleSections = SECTIONS.filter((s) => !s.adminOnly || user?.role === 'admin');
   const [scanJob, setScanJob] = useJobPoll();
   const [scrapeJob, setScrapeJob] = useJobPoll();
   // 默认 **false = 只入库**。危险的那一档必须用户显式打开，
@@ -143,13 +160,13 @@ export default function SettingsPage() {
         <div className="flex min-h-0 flex-1 flex-col min-[701px]:flex-row">
           {/* 分节导航：窄屏横向 tab，桌面左栏 */}
           <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line-weak p-2 min-[701px]:w-[186px] min-[701px]:flex-col min-[701px]:border-r min-[701px]:border-b-0 min-[701px]:p-3">
-            {SECTIONS.map((s) => (
+            {visibleSections.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => setSection(s.id)}
                 className={[
-                  'shrink-0 rounded-md px-3 py-2 text-left text-nav transition-colors',
+                  'shrink-0 rounded-md px-3 py-2 text-left text-nav whitespace-nowrap transition-colors',
                   section === s.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
                 ].join(' ')}
               >
@@ -264,6 +281,10 @@ export default function SettingsPage() {
         </Row>
       </Panel>
             )}
+
+            {section === 'requests' && <RequestsSection />}
+
+            {section === 'users' && <UsersSection />}
 
             {section === 'account' && (
               <Panel title="账号">
