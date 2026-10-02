@@ -12,8 +12,8 @@
 | | |
 |---|---|
 | 项目 | 自托管音乐服务器。Rust 后端（axum + rusqlite，标签读写**全自研**）+ Web 前端（Vite + React） |
-| 后端 | **已完成**，635 个用例全绿，接口 33 条路径 / 41 个操作 |
-| 前端 | **主体已跑通**：11 条路由、12 个页面，真数据真播放。差收尾（见 §3） |
+| 后端 | **已完成**，645 个用例全绿，接口 33 条路径 / 42 个操作 |
+| 前端 | **主体已跑通**：13 条路由、14 个页面，真数据真播放。差收尾（见 §3） |
 | 你大概率要做的 | ① 前端收尾与 UI 库决策 ② 标签编辑（**卡后端**）③ 点歌请求页 ④ S27/S28 |
 | 不该做的 | 别重写标签引擎，别「顺手修好」§5.2 列出的那些**故意的**行为 |
 
@@ -63,15 +63,15 @@ curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json
 
 | 项 | 实测值 | 怎么复现 |
 |---|---|---|
-| `cargo test --lib` | **510 passed / 0 failed / 1 ignored** | `timeout 900 cargo test` |
-| `cargo test`（`tests/`，11 个文件） | **125 passed / 0 failed** | 同上 |
-| Rust 合计 | **635 passed / 1 ignored**（另有 3 条 doc test 是 ignored） | 同上 |
+| `cargo test --lib` | **514 passed / 0 failed / 1 ignored** | `cargo test` |
+| `cargo test`（`tests/`，11 个文件） | **131 passed / 0 failed** | 同上 |
+| Rust 合计 | **645 passed / 1 ignored**（另有 3 条 doc test 是 ignored） | 同上 |
 | 编译警告 | **0** | `cargo check --lib --bins` |
-| 端到端 API 脚本 | **171 通过 / 0 失败** | `node scripts/api_test.mjs` |
+| 端到端 API 脚本 | **195 通过 / 1 失败**（那 1 条是既有的「封面同样认 cookie」） | `node scripts/api_test.mjs` |
 | core 单测（零依赖，node:test） | **34 通过 / 0 失败** | `cd packages/core && node --test 'src/**/*.test.ts'` |
 | Web 构建 | **121 modules**，JS 317.50 kB（gzip 97.10）· CSS 30.57 kB（gzip 6.57） | `pnpm --filter @music-robot/web build` |
-| HTTP 接口 | **33 条路径 / 41 个操作** | 对着 `src/server/routes/mod.rs` 数 |
-| 前端页面 | **11 条路由 + 登录页 = 12 个页面文件** | `ls apps/web/src/pages/` |
+| HTTP 接口 | **33 条路径 / 42 个操作**（`/api/admin/users` 2026-10-02 加了 GET） | 对着 `src/server/routes/mod.rs` 数 |
+| 前端页面 | **13 条路由 + 登录页 = 14 个页面文件** | `ls apps/web/src/pages/` |
 | 画布进度 | **24 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数） | `music-server-architecture.excalidraw` |
 | 代码量 | Rust 39864 行 · `apps/web` 2671 行 · `packages/core` 1097 行 | `wc -l` |
 | 前端测试 | **0 个**（`find apps/web -name '*.test.*'` → 空） | 见 §3.4 |
@@ -92,18 +92,25 @@ devDependencies:  vite 8 · @vitejs/plugin-react · tailwindcss 4 + @tailwindcss
 
 ### 3.1 卡在**后端**的（前端做不了，得先加接口）
 
-**① 标签编辑页（画布 S26，完全没开始）**
-现在只有 CLI 的 `write` 能改标签，**HTTP 侧一个写接口都没有** ——
-`/api/songs/{id}` 是纯 GET。要做页面就得先加接口（比如 `PATCH /api/songs/{id}`），
-而写标签是本项目最危险的操作 —— 跟 §5.2 表格里那行「刮削直接写原文件」是同一件事：
-`atomic_replace` 是 copy → tmp → verify → rename，**没有备份、不可撤销**。
-**接口设计必须带 `--preview` 那类 dry-run 语义**（CLI 的 `write --preview` 已经有现成的差异计算可以复用）。
+**① 标签编辑页 —— ✅ 已完成（2026-10-02）**
+`GET /api/songs/{id}/tags` + `PATCH`（仅 admin，**`dry_run` 默认 true**），前端
+`/songs/:id/tags` 全屏浮层：强制「先预览、改动即作废旧预览」，可勾选写前备份。
+不用再设计接口了 —— 现有的那套把「不可撤销」这件事处理得很细（四态：未改动 /
+未预览 / 预览已过期 / 已预览 N 处），改之前先读 `src/server/routes/tags.rs` 的头注释。
 
-**② 点歌请求页（画布 S26，完全没开始）**
-后端**已经齐了**（5 个操作：`GET|POST /api/requests`、`PATCH /api/requests/{id}`、
-`/api/requests/{id}/fetch`、`/link`），前端**一个页面都没有**。这是最容易摘的一个果子。
+**② 点歌请求 —— ✅ 已完成（2026-10-02）**
+需求侧入口在**搜索页**（搜不到 → 「请求这首歌」，预填搜索词）；管理侧是
+**顶栏右上角的 popover**（`components/manage/`），tab 切换「点歌请求 / 用户」。
+`packages/core` 的 `api.requests.*`（5 条）已补齐。
 注意：`POST /api/requests/{id}/fetch` **恒返回 503 是故意的** —— 它要的是
 `provider`（下载）插件 kind，而注册表目前只加载 `kind = "scraper"`。别当 bug 修。
+（前端**故意没放这个按钮**：点了只会弹一条 503。）
+
+**②b 用户管理 —— ✅ 已完成（2026-10-02，含一个后端新接口）**
+`GET /api/admin/users`（仅 admin，**复用 `user_json`、绝不带 password_hash**）
+是本次补的；`POST` 那条本来就有。前端在同一 popover 的「用户」tab 里。
+**不做**改密码 / 删号：前者后端没接口，后者会牵动 playlists / favorites /
+history / song_requests 一串 CASCADE —— 没有需求就别动。
 
 **③ 刮削失败原因没露到 API**
 单曲重刮失败时，界面上只有任务摘要「失败 1」，真正的原因
@@ -119,11 +126,13 @@ devDependencies:  vite 8 · @vitejs/plugin-react · tailwindcss 4 + @tailwindcss
 
 | 项 | 说明 |
 |---|---|
-| **shadcn/ui 没装** | 所有 UI 都是手写 Tailwind。**决策没落地** —— 用户说过「换吧」，但装依赖那步一直卡着（§6.3），所以这轮我改的东西仍然是手写的。见 §3.3 |
-| **`/now` 的「随机」按钮是假的** | `apps/web/src/pages/now.tsx:127`：`onClick={() => {}}`。播放器已有 `cycleMode()`（顺序/随机/列表循环/单曲循环），这个按钮要么接上要么删掉。**这是全项目唯一一处空 onClick** |
+| **shadcn/ui 没装** | 所有 UI 都是手写 Tailwind。**决策没落地** —— 用户说过「换吧」，但装依赖那步一直卡着（§6.3），所以到目前为止全是手写的。见 §3.3 |
 | 设置页的「写文件」开关不持久化 | 内存级（`lib/scrape-prefs.ts`），F5 后回默认的安全档 `false`。要持久化就存进后端 `settings`（通用键值表，`resume:<id>` 就是这么用的） |
-| `apps/web/src/components/{app,ui}/` 两个空目录 | 计划里留下的，没内容 |
-| 画布 S25/S26 卡片文字过时 | 卡片上写的是计划，不是实际交付（比如 S26 的「标签编辑」根本没做） |
+| 设置页的「音量 / 播放模式」是死 UI | 那两行永远显示「后端没有这个键」—— `volume` / `play_mode` **从来没有被写过**（画布 ④ 要求它们存 `user_settings`）。要么接上、要么把两行删掉 |
+| **播放统计没有页面** | 数据基础已经有了（`play_history.duration_listened_ms`，2026-10-02 起为真），但没有聚合接口（总时长 / 播放次数 / Top 歌曲），所以只做了「最近播放」列表 |
+| 播放列表缺一半操作 | `api.playlists` 里 `update` / `remove` / `removeSong` / `reorder` **客户端有、界面一个都没调**：改名 / 改可见性 / 删列表 / 从列表移除 / 拖动排序全都没做 |
+| `api.jobs.list` 从未被调用 | 任务列表接口有客户端，界面只轮询单个 batch |
+| 画布 S25/S26 卡片文字过时 | 卡片上写的是计划，不是实际交付。S26 的四项里：标签编辑 ✅、刮削控制台 ✅、点歌请求 ✅、播放列表只做了一半 |
 
 ### 3.3 UI 库这件事（**接手的第一个决策点**）
 
@@ -160,7 +169,7 @@ src/                      Rust 后端（39864 行）
   tag/                    自研标签引擎（ID3v2/v1 · FLAC · WAV · APEv2）
   plugin/                 插件宿主（清单 / 协议 / 进程池 / 沙箱）
 apps/web/                 PC 前端（**主战场**）
-  src/pages/              12 个页面，对着 11 条路由
+  src/pages/              14 个页面，对着 13 条路由
   src/components/         shell（侧边栏+抽屉+头像菜单）· player-bar · song-table · menu
   src/lib/                client / session / player / resume / scrape-prefs / use-async
   src/adapters/           **core 唯一碰宿主的地方**：token-store.web.ts · audio.web.ts
@@ -321,5 +330,5 @@ gh api repos/CodeByZack/music-robot/commits/<远端SHA> --jq '.commit.tree.sha,.
 | 待用户确认 | ① `pnpm install` 在他机器上到底过没过 ② shadcn 换不换、换哪几个 |
 
 **建议的第一步**：先跑 §1 的命令把服务起起来，用 `fixtures/` 当曲库（9 个真音频，
-扫进去 8 首），把 12 个页面点一遍。**亲眼看过再动手** —— 这个项目里
+扫进去 8 首），把 14 个页面点一遍。**亲眼看过再动手** —— 这个项目里
 「看着能跑」和「真能跑」差得挺远的。
