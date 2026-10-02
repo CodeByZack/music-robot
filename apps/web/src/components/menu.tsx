@@ -158,7 +158,8 @@ export function MenuButton({
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M6 3.5 11 8l-5 4.5" />
+                {/* 「返回」指向**左** —— 退回到上一层 */}
+                <path d="M10 3.5 5 8l5 4.5" />
               </svg>
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {subTitle}
@@ -193,7 +194,9 @@ export function MenuButton({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M10 3.5 5 8l5 4.5" />
+                      {/* 二级菜单指示器指向**右**（还有一层可以展开）。
+                          之前和上面的「返回」写反了 —— 用户反馈「怎么是箭头呢」。 */}
+                      <path d="M6 3.5 11 8l-5 4.5" />
                     </svg>
                   )}
                 </span>
