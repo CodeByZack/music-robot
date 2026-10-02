@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
-import { ManageMenu } from '@/components/manage/index.tsx';
-import { MenuButton } from '@/components/menu.tsx';
+import { MenuButton, type MenuItem } from '@/components/menu.tsx';
 import { api } from '@/lib/client.ts';
 import { useSession } from '@/lib/session.tsx';
 
@@ -157,6 +156,12 @@ function UserMenu() {
         </div>
       }
       items={[
+        /* 点歌请求对所有人生效（普通用户看的是自己提交的那些）；
+           用户管理只对 admin 显示 —— 点进去再收 403 是更差的体验。 */
+        { label: '点歌请求', to: '/requests' },
+        ...(user?.role === 'admin'
+          ? ([{ label: '用户管理', to: '/users' }] satisfies MenuItem[])
+          : []),
         { label: '设置', to: '/settings' },
         {
           label: '退出登录',
@@ -229,7 +234,6 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 
       <SearchBox />
       <span className="flex-1" />
-      <ManageMenu />
       <UserMenu />
     </header>
   );

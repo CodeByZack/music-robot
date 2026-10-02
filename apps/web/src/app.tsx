@@ -12,9 +12,11 @@ import LoginPage from '@/pages/login.tsx';
 import NowPage from '@/pages/now.tsx';
 import PlaylistPage from '@/pages/playlist.tsx';
 import PlaylistsPage from '@/pages/playlists.tsx';
+import RequestsPage from '@/pages/requests.tsx';
 import SearchPage from '@/pages/search.tsx';
 import SettingsPage from '@/pages/settings.tsx';
 import TagEditPage from '@/pages/tag-edit.tsx';
+import UsersPage from '@/pages/users.tsx';
 import { PlayerProvider } from '@/lib/player.tsx';
 import { SessionProvider, useSession } from '@/lib/session.tsx';
 
@@ -49,6 +51,9 @@ function Gate() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/songs/:id/tags" element={<TagEditPage />} />
           <Route path="/now" element={<NowPage />} />
+          {/* 两个全屏浮层页面（和 /settings 同一类）：入口在顶栏右上角的下拉菜单 */}
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/users" element={<UsersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
