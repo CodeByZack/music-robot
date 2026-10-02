@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Song } from '@music-robot/core';
 import Cover from '@/components/cover.tsx';
 import { api } from '@/lib/client.ts';
 import { usePlayer } from '@/lib/player.tsx';
-import { MenuButton } from '@/components/menu.tsx';
+import { MenuButton, type MenuItem } from '@/components/menu.tsx';
 import { useWriteFiles } from '@/lib/scrape-prefs.ts';
 
 /** 毫秒 → `3:58`。 */
@@ -96,12 +96,52 @@ async function awaitScrape(batchId: string): Promise<{ failed: number; message: 
  * 状态只影响**菜单里的那一项**（文字 + 禁用），trigger 始终是「⋯」——
  * 按钮字形变来变去反而认不出是同一个东西。
  */
-function RowMenu({ state, writeFiles, onRescrape }: {
+function RowMenu({ state, writeFiles, song, onRescrape }: {
   state: ScrapeState | undefined;
   writeFiles: boolean;
+  song: Song;
   onRescrape: () => void;
 }) {
   const running = state?.phase === 'running';
+  /**
+   * 刚加进去的歌单 id —— 在二级列表里打「已添加」，不然点完没反馈。
+   *
+   * 用 **ref** 不用 state：二级列表是点开时拉的一次快照，重新拉的时候执行的还是
+   * 当初那个闭包 —— 用 state 会永远读到旧值（踩过一次）。
+   */
+  const addedRef = useRef<number | null>(null);
+
+  /**
+   * 「添加到歌单」的二级列表。**每次点开拉一遍**（加完后也会重拉）——
+   * 歌单会变，而且不该在菜单刚打开的瞬间就把这个请求打出去。
+   */
+  async function loadPlaylists(): Promise<MenuItem[]> {
+    const res = await api.playlists.list();
+    if (res.items.length === 0) {
+      return [{ label: '还没有歌单', to: '/playlists', hint: '去建一个' }];
+    }
+    return res.items.map((pl) => {
+      const already = addedRef.current === pl.id;
+      return {
+        label: pl.name,
+        hint: already ? '已添加' : undefined,
+        disabled: already,
+        // 加完不关菜单，在这一项上打「已添加」—— 关了用户就不知道成没成
+        keepOpen: true,
+        onClick: () =>
+          api.playlists
+            .addSong(pl.id, song.id)
+            .then(() => {
+              // 后端对重复添加返回 200 {added:false}，不是错误，所以不用分支
+              addedRef.current = pl.id;
+            })
+            .catch(() => {
+              /* 失败就什么都不变，保持可再点一次 */
+            }),
+      };
+    });
+  }
+
   return (
     <MenuButton
       title="更多操作"
@@ -111,6 +151,7 @@ function RowMenu({ state, writeFiles, onRescrape }: {
         ) : undefined
       }
       items={[
+        { label: '添加到歌单', submenu: loadPlaylists },
         {
           label: running ? '刮削中…' : state?.phase === 'ok' ? '已重新刮削' : '重新刮削这首歌',
           // 「会不会动原文件」直接写在菜单里 —— 用户没理由记得住设置页那个开关当时开没开
@@ -216,11 +257,11 @@ export default function SongTable({
             ].join(' ')}
           >
             {showIndex && (
-              <td className="border-b border-line-weak px-3 text-xs text-ink-4 tabular-nums max-[640px]:hidden">
+              <td className="divider-row px-3 text-xs text-ink-4 tabular-nums max-[640px]:hidden">
                 {String(i + 1).padStart(2, '0')}
               </td>
             )}
-            <td className="overflow-hidden border-b border-line-weak px-3">
+            <td className="overflow-hidden divider-row px-3">
               <div className="flex min-w-0 items-center gap-3">
                 {/* 真封面（没内嵌封面时 Cover 自己退回 ♪ 占位）。
                     以前这里只是一个 ♪ / ⚠ 方块 —— 列表是音乐，应该有图。
@@ -251,10 +292,10 @@ export default function SongTable({
                 </span>
               </div>
             </td>
-            <td className="overflow-hidden border-b border-line-weak px-3 text-ellipsis whitespace-nowrap text-ink-3 max-[900px]:hidden">
+            <td className="overflow-hidden divider-row px-3 text-ellipsis whitespace-nowrap text-ink-3 max-[900px]:hidden">
               {s.album ?? '—'}
             </td>
-            <td className="border-b border-line-weak px-3 text-center max-[640px]:hidden">
+            <td className="divider-row px-3 text-center max-[640px]:hidden">
               <button
                 onClick={(e) => void fav.toggle(s, e)}
                 title={fav.ids.has(s.id) ? '取消收藏' : '收藏'}
@@ -268,16 +309,17 @@ export default function SongTable({
                 </svg>
               </button>
             </td>
-            <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">
+            <td className="divider-row px-3 text-right text-ink-3 tabular-nums">
               {mmss(s.duration_ms)}
             </td>
-            <td className="border-b border-line-weak px-3 text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
+            <td className="divider-row px-3 text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
               {s.format ?? '—'}
             </td>
-            <td className="border-b border-line-weak px-3 text-center">
+            <td className="divider-row px-3 text-center">
               <RowMenu
                 state={scrape.get(s.id)}
                 writeFiles={writeFiles}
+                song={s}
                 onRescrape={() => void rescrape(s)}
               />
             </td>

@@ -42,7 +42,7 @@ export default function ArtistsPage() {
                 key={a.name}
                 className={['h-14 transition-colors hover:bg-surface-hover', i % 2 === 1 ? 'bg-white/[.017]' : ''].join(' ')}
               >
-                <td className="border-b border-line-weak px-3">
+                <td className="divider-row px-3">
                   <Link
                     to={`/artists/${encodeURIComponent(a.name)}`}
                     className="flex size-[30px] items-center justify-center rounded-full bg-surface text-xs text-ink-4"
@@ -50,7 +50,7 @@ export default function ArtistsPage() {
                     {isDirtyArtist(a.name) ? '⚠' : '人'}
                   </Link>
                 </td>
-                <td className="overflow-hidden border-b border-line-weak px-3">
+                <td className="overflow-hidden divider-row px-3">
                   <Link to={`/artists/${encodeURIComponent(a.name)}`} className="block min-w-0">
                     <div className="overflow-hidden font-medium text-ellipsis whitespace-nowrap">{a.name}</div>
                     {isDirtyArtist(a.name) && (
@@ -62,8 +62,8 @@ export default function ArtistsPage() {
                     )}
                   </Link>
                 </td>
-                <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">{a.album_count}</td>
-                <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">{a.song_count}</td>
+                <td className="divider-row px-3 text-right text-ink-3 tabular-nums">{a.album_count}</td>
+                <td className="divider-row px-3 text-right text-ink-3 tabular-nums">{a.song_count}</td>
               </tr>
             ))}
           </tbody>

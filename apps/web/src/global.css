@@ -212,4 +212,17 @@
     width: var(--icon-xl);
     height: var(--icon-xl);
   }
+
+  /* 表格行的分隔线。
+     **必须用 inset box-shadow，不能用 border-bottom。**
+     表格是 `border-collapse: collapse`，行背景（`<tr>` 上的）**盖不住
+     折叠边框所占的那 1px** —— hover 时带子的最后一格露的是页面底色：
+     实测「带子 57、那一格 35」（暗 22 级），全表看起来就是一条深色线
+     （用户 2026-10-02 反馈「hover 上去有一条黑线」）。
+     inset 阴影画在**背景之上**，所以行背景是什么都不影响：实测改成阴影后
+     那一格变成 68（比带子亮），与正常行的分隔线一致。
+     ⚠️ 这是「表格里的行」专用；普通 div 的分隔线用 `border-b border-line-weak` 即可。 */
+  .divider-row {
+    box-shadow: inset 0 -1px 0 var(--color-line-weak);
+  }
 }
