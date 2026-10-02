@@ -49,6 +49,14 @@ const PlayerContext = createContext<PlayerValue | null>(null);
 
 const MODE_ORDER: PlayMode[] = ['order', 'shuffle', 'repeat-all', 'repeat-one'];
 
+/**
+ * 单次 `timeupdate` 的间隔超过它就算「跳变」，不计入收听时长。
+ *
+ * `timeupdate` 约 4Hz，正常增量 ~250ms。拖动进度条 / 刚 seek 完的第一帧 /
+ * 从续播点起播都会产生一大跳 —— 那些不是「听」出来的时间。
+ */
+const LISTEN_JUMP_MS = 1500;
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<AudioAdapter | null>(null);
   // resolveSrc 里那个 blob 绕法的来龙去脉见 lib/client.ts 的注释
@@ -82,6 +90,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
    */
   const lastPosRef = useRef<{ id: number; ms: number; dur: number } | null>(null);
 
+  /**
+   * **本次播放实际听了多久**（毫秒），以及它属于哪一首。
+   *
+   * 与 `lastPosRef`（听到哪）是两件事，别混：
+   * - `lastPosRef` 给断点续播用，是**位置**；
+   * - 这个给播放历史上报用，是**收听时长** —— 从头听 30 秒和从 3 分半续播听 30 秒，
+   *   位置差了 3 分钟，但「听了多久」都该是 30 秒。
+   *
+   * 一开始我直接拿位置当收听时长上报，实测立刻露馅：从续播点（106 秒）听了几秒就换歌，
+   * 却上报了 106041ms。播放统计要的是累计收听，所以按**正向增量**累加（见 timeupdate）。
+   */
+  const listenedRef = useRef<{ id: number; ms: number }>({ id: -1, ms: 0 });
+
   useEffect(() => {
     const offs = [
       audio.on('time', () => {
@@ -91,7 +112,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setDurationMs(dur);
         const id = currentId(queueRef.current);
         if (id == null) return;
+        const prev = lastPosRef.current;
         lastPosRef.current = { id, ms, dur };
+
+        // 累加实际收听时长。只算「正常播放的前进」：
+        // - 回拖 / 暂停后不动 → delta <= 0，不计；
+        // - 拖动进度条、刚 seek 完的第一帧、以及从续播点起播 → delta 是一大跳，
+        //   也不是「听」出来的，不计。
+        // timeupdate 约 4Hz（正常增量 ~250ms），单次超过 1.5 秒必然是跳变而不是播放。
+        // 换歌（id 变了）重新开始计数，别把上一首的时间累到这一首头上。
+        const listened = listenedRef.current.id === id ? listenedRef.current.ms : 0;
+        const delta = prev !== null && prev.id === id ? ms - prev.ms : 0;
+        listenedRef.current = {
+          id,
+          ms: listened + (delta > 0 && delta < LISTEN_JUMP_MS ? delta : 0),
+        };
+
         // 边播边记断点（save 内部节流成 15 秒一次）。
         // 不用给 pagehide 挂钩子 —— 最坏也就丢这 15 秒。
         resume.save(id, ms, dur);
@@ -134,8 +170,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setPositionMs(at);
         }
         await audio.play();
-        // 记一条播放历史。失败不打断播放 —— 历史是锦上添花，不该影响听歌。
-        void api.history.record(currentTrackId).catch(() => {});
       } catch {
         if (alive) setPlaying(false);
       }
@@ -146,7 +180,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // 播完自动下一首时那里是 position ≈ duration，core 会判定「听完了」从而删键，下次从头播。
       // id 对不上说明这一首还没出过声（刚点就换），没什么可记的。
       const last = lastPosRef.current;
-      if (last !== null && last.id === currentTrackId) resume.saveNow(last.id, last.ms, last.dur);
+      if (last !== null && last.id === currentTrackId) {
+        resume.saveNow(last.id, last.ms, last.dur);
+        // 播放历史**也在这里落**，而不是开播时 —— 后端 `play_history.record` 是 INSERT
+        // （没有 update），「开播记一条 + 离开补时长」会变成一次播放两条记录。
+        // 二选一就选这里：每条历史都带得上实际收听时长（`duration_listened_ms`），
+        // 「播放统计」才有数据基础；以前在开播时记、不传时长，那一列**永远是 NULL**。
+        //
+        // 时长为 0 就不记：那是「点了一下立刻换歌」，没有任何有效播放 ——
+        // 记一条 0 秒的历史只会把「最近播放」灌满噪声。
+        // 失败不打断播放 —— 历史是锦上添花。
+        const listened = listenedRef.current;
+        if (listened.id === last.id && listened.ms > 0) {
+          void api.history.record(last.id, Math.round(listened.ms)).catch(() => {});
+        }
+      }
     };
   }, [audio, resume, currentTrackId]);
 

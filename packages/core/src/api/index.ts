@@ -12,11 +12,14 @@ import type {
   Page,
   Playlist,
   PlaylistDetail,
+  RequestStatus,
   ScrapeRequest,
   ScrapeQueryResult,
   SettingsResponse,
   Song,
+  SongRequest,
   SongTags,
+  SubmitRequestResult,
   TagPatchRequest,
   TagPatchResult,
   User,
@@ -180,6 +183,63 @@ export function createApi(http: Http) {
        */
       startScrape: (body?: ScrapeRequest) => http.post<JobAccepted>('/api/scrape', body),
       scrape: (batchId: string) => http.get<Job>(`/api/scrape/${batchId}`),
+    },
+
+    /**
+     * S23 点歌请求。
+     *
+     * 权限口径（后端 `routes::requests` 模块头有完整说明）：**普通用户无论带什么
+     * query 都只看得到自己提交的**（`user_id` 只来自令牌，绝不从 query / body 读）；
+     * `?status=` 是「全量按状态筛」，属于管理端能力 → 普通用户调用会 **403**。
+     */
+    requests: {
+      /** 不带参：普通用户看自己的、admin 看全部（都按票数降序）。 */
+      list: (params: { mine?: 0 | 1; status?: RequestStatus } = {}) =>
+        http.get<{ items: SongRequest[]; total: number }>(`/api/requests${qs(params)}`),
+      /**
+       * 提交点歌。归一化（全半角 / 大小写 / 空白折叠）后同键的会**合并到已有请求**
+       * 并给当前用户记一票，响应里的 `created` 区分是新建还是合并。
+       * 只有 `title` 必填。
+       */
+      submit: (body: { title: string; artist?: string; album?: string; note?: string }) =>
+        http.post<SubmitRequestResult>('/api/requests', body),
+      /**
+       * 改状态（**仅 admin**）。目标 `rejected` **必须**带非空 `reject_reason`，
+       * 否则 400；非法流转（自环 / 从终态出发 / 跳步）也是 400。
+       */
+      update: (id: number, patch: { status: RequestStatus; reject_reason?: string }) =>
+        http.patch<{ request: SongRequest }>(`/api/requests/${id}`, patch),
+      /**
+       * 关联到已有歌曲（**仅 admin**）——顺便把状态置 `done`，一步到位。
+       * 歌曲不存在（含已软删）返 404。
+       */
+      link: (id: number, songId: number) =>
+        http.post<{ request: SongRequest }>(`/api/requests/${id}/link`, { song_id: songId }),
+      /**
+       * 触发获取（**仅 admin**）—— 让 provider 插件去把音频下下来。
+       *
+       * ⚠️ 当前**恒 503**：`provider` 插件 kind 尚未实现（注册表只加载 `scraper`），
+       * 后端**故意**不如实报错而不是假装成功。**别当 bug 修**。
+       */
+      fetch: (id: number) => http.post<{ ok: boolean }>(`/api/requests/${id}/fetch`),
+    },
+
+    /**
+     * 管理端用户管理。
+     *
+     * 只有这两条：建号（注册关闭后**唯一**入口）与列出用户。**没有**改密码 /
+     * 删号接口 —— 删号会牵动一堆 CASCADE，没需求就不做。
+     */
+    users: {
+      /** 列出全部用户（**仅 admin**）。**不含 password_hash**（后端复用 `user_json`）。 */
+      list: () => http.get<{ items: User[]; total: number }>('/api/admin/users'),
+      /** 建号（**仅 admin**）。`role` 省略即普通用户。用户名重复 → 409。 */
+      create: (username: string, password: string, role?: 'user' | 'admin') =>
+        http.post<{ user: User }>('/api/admin/users', {
+          username,
+          password,
+          ...(role ? { role } : {}),
+        }),
     },
   };
 }

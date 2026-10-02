@@ -435,6 +435,24 @@ async function main() {
     });
     c2.token = body?.token ?? '';
 
+    // 用户列表（2026-10-02 补的接口）：建号那一半的补全。
+    // 除了状态码，**必须钉住「不回 password_hash」** —— 这是这条接口唯一的真实风险。
+    [st, , body] = await c.json('GET', '/api/admin/users');
+    check('管理员列用户 → 200', st, 200);
+    check('列表里有 2 个用户', body?.total ?? null, 2);
+    checkTrue(
+      '列表按建号顺序（alice 在前）',
+      body?.items?.[0]?.username === 'alice' && body?.items?.[1]?.username === 'bob',
+      JSON.stringify(body?.items?.map((u) => u.username)),
+    );
+    checkTrue(
+      '列表不含口令 / 哈希',
+      !JSON.stringify(body).includes('password_hash') && !JSON.stringify(body).includes('$argon2'),
+      brief(body),
+    );
+    [st] = await c2.json('GET', '/api/admin/users');
+    check('普通用户列用户 → 403', st, 403);
+
     [st, , body] = await c.json('GET', '/api/auth/me');
     check('GET /api/auth/me → 200', st, 200);
     check('me 返回的是 alice', body?.user?.username ?? null, 'alice');

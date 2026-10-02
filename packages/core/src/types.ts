@@ -357,3 +357,49 @@ export interface TagPatchResult {
   /** 真的写盘了没有。 */
   applied: boolean;
 }
+
+/**
+ * 点歌请求的状态机：`pending → processing → done | rejected`。
+ *
+ * `done` 与 `rejected` 是**终态**，后端会拒绝从终态出发的任何流转（400）。
+ * 后端只认这四个值，写错的字符串会 400 而不是静默降级。
+ */
+export type RequestStatus = 'pending' | 'processing' | 'done' | 'rejected';
+
+/**
+ * 一条点歌请求。
+ *
+ * 后端**刻意不回** `dedup_key`（内部去重键）与 `user_id`（谁提交的由令牌代表）。
+ * 列表按 `vote_count` 降序、同票数按 `id` 升序。
+ */
+export interface SongRequest {
+  id: number;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  note: string | null;
+  status: RequestStatus;
+  /** **只有 `rejected` 才有值** —— 后端在目标不是 rejected 时会把原因清掉，不留脏数据。 */
+  reject_reason: string | null;
+  /** 关联到的歌曲。`done` 一定有；终态之前一般还没有。 */
+  song_id: number | null;
+  created_at: number;
+  updated_at: number;
+  /** 有多少人想要（**含**首个提交人 —— 新建时票数就是 1，不是 0）。 */
+  vote_count: number;
+}
+
+/**
+ * `POST /api/requests` 的响应。
+ *
+ * * `created`——这次是**新建**还是**合并到了已有请求**（归一化后同键）；
+ * * `voted`——这次提交有没有**新增一票**（同一个人重复提交同一首是 `false`）；
+ * * `request.vote_count`——合并后的总需求人数，界面直接用这个，不用自己加。
+ *
+ * 状态码也是信号：新建 201、合并 200。
+ */
+export interface SubmitRequestResult {
+  request: SongRequest;
+  created: boolean;
+  voted: boolean;
+}

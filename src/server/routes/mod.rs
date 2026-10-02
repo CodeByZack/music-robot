@@ -105,7 +105,12 @@ pub fn build_router(state: AppState) -> AppRouter {
         .route("/api/admin/ping", get(auth::admin_ping))
         // 建号唯一入口：`/api/auth/register` 只在库空时可用（初始化引导），
         // 之后由管理员走这里建用户。只有 admin 能调。
-        .route("/api/admin/users", post(auth::admin_create_user))
+        // GET 是建号那一半的补全 —— 没有它「建完就查不到现在有谁」，
+        // 管理界面只剩一张表单。两条都只回 user_json（绝不带 password_hash）。
+        .route(
+            "/api/admin/users",
+            get(auth::admin_list_users).post(auth::admin_create_user),
+        )
         // ── S16 曲库 API ──────────────────────────────────────────────────
         // 画布：所有 API 先过 JWT。这 5 条一律放在受保护子 Router 里，由下面的
         // require_auth 中间件统一拦截；handler 里还各自提取 AuthUser 兜底，

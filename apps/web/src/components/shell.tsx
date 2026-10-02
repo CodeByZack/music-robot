@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
+import { ManageMenu } from '@/components/manage/index.tsx';
 import { MenuButton } from '@/components/menu.tsx';
 import { api } from '@/lib/client.ts';
 import { useSession } from '@/lib/session.tsx';
@@ -228,6 +229,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 
       <SearchBox />
       <span className="flex-1" />
+      <ManageMenu />
       <UserMenu />
     </header>
   );

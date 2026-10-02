@@ -40,6 +40,7 @@ use crate::server::auth::{
     dummy_password_hash, hash_password, sign_token, verify_password, AdminUser, AuthUser,
 };
 use crate::server::error::{ApiError, ApiResult};
+use crate::server::routes::library::run_db;
 use crate::server::state::AppState;
 
 /// 登录失败对外统一的文案。
@@ -246,6 +247,29 @@ pub async fn admin_create_user(
     let created = create_user(&state, username, password, move |_existing| Ok(role)).await?;
 
     Ok(created_response("管理员创建用户", &created))
+}
+
+/// `GET /api/admin/users` —— 列出所有用户（**仅 admin**）。
+///
+/// 为什么需要这条：`POST /api/admin/users` 是注册关闭后唯一的建号入口，但**没有**
+/// 配套的列表 —— 建完就查不到「现在有谁」，管理界面只剩一张表单。这个接口补上那一半。
+///
+/// 响应：`{ items, total }`，每项就是 `user_json`（id / username / role / created_at /
+/// last_login）。**复用 `user_json` 而不是另写一份** —— 「绝不返回 password_hash」
+/// 这条保证只能有一处实现，抄第二份迟早漂移。
+///
+/// 顺序由 `users::list` 决定（按 id 升序 = 建号先后），这里**不重排**：
+/// 管理列表按建号先后看最自然，也省掉一次内存排序。
+pub async fn admin_list_users(
+    State(state): State<AppState>,
+    AdminUser(_admin): AdminUser,
+) -> ApiResult<Json<Value>> {
+    let db = Arc::clone(&state.db);
+    let rows = run_db(db, |conn| Ok(users::list(conn)?)).await?;
+
+    let items: Vec<Value> = rows.iter().map(user_json).collect();
+    let total = items.len();
+    Ok(Json(json!({ "items": items, "total": total })))
 }
 
 /// POST /api/auth/login —— 登录，成功返回 Bearer token。
@@ -592,6 +616,67 @@ mod tests {
             ),
         )
         .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    /// `GET /api/admin/users`：列出全部用户（仅 admin），且**绝不含口令 / 哈希**。
+    ///
+    /// 这条测试的价值在两个地方：
+    /// 1. 权限口径与其余管理端路由一致（普通用户 403、匿名 401）；
+    /// 2. 「绝不返回 password_hash」—— 那是本接口唯一的真实风险。除了断言字段不存在，
+    ///    还在整段响应文本里搜 `$argon2` 与明文口令，防止将来有人「顺手」把整个 User
+    ///    结构体序列化出来（那样字段名可能变，但哈希前缀跑不掉）。
+    #[tokio::test]
+    async fn admin_list_users_is_admin_only_and_never_leaks_hashes() {
+        let (state, _temp) = test_state("s15-secret");
+        let admin = token_for(&state, "alice", "s3cret-pw").await;
+        let (status, _) = admin_create(&state, &admin, "bob", "bob-password", None).await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, body) = call(
+            &state,
+            get_with_raw_auth("/api/admin/users", &format!("Bearer {admin}")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "管理员应能列出用户：{body}");
+
+        let items = body["items"].as_array().expect("items 是数组");
+        assert_eq!(body["total"], 2, "库里应有 alice 与 bob：{body}");
+        assert_eq!(items.len(), 2);
+        // 顺序 = 建号先后（users::list 按 id 升序），不是字母序 —— 别在 handler 里重排。
+        assert_eq!(items[0]["username"], "alice");
+        assert_eq!(items[0]["role"], "admin");
+        assert_eq!(items[1]["username"], "bob");
+        assert_eq!(items[1]["role"], "user");
+        // 前端渲染要用的字段都得在（last_login 可以是 null，但键必须在）。
+        assert!(items[0]["created_at"].is_number());
+        assert!(
+            items[0].get("last_login").is_some(),
+            "last_login 键必须存在（可为 null）：{}",
+            items[0]
+        );
+
+        let text = body.to_string();
+        for item in items {
+            assert!(
+                item.get("password_hash").is_none(),
+                "响应里出现了 password_hash：{item}"
+            );
+        }
+        assert!(!text.contains("$argon2"), "响应里出现了 argon2 哈希：{text}");
+        assert!(!text.contains("s3cret-pw"), "响应里出现了明文口令：{text}");
+        assert!(!text.contains("bob-password"), "响应里出现了明文口令：{text}");
+
+        // 普通用户 → 403（身份有效但没权限），匿名 → 401（中间件先拦）。
+        let bob = login_token(&state, "bob", "bob-password").await;
+        let (status, _) = call(
+            &state,
+            get_with_raw_auth("/api/admin/users", &format!("Bearer {bob}")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "普通用户列用户必须 403");
+
+        let (status, _) = call(&state, get("/api/admin/users")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
