@@ -32,3 +32,7 @@ web-build/
 
 # 前端构建产物
 apps/*/dist/
+
+# 本地运行时数据：serve 用的 SQLite 库（tmp/music.db）与服务端日志（tmp/logs）。
+# 这是**本机跑出来的东西**，不是源码 —— 每个人的库都不一样，别入库。
+/tmp/
