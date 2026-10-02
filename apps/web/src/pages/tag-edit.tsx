@@ -58,7 +58,7 @@ import {
   type Form,
 } from './tag-edit/parts.tsx';
 import { ReviewPane } from './tag-edit/review-pane.tsx';
-import { ScrapePanel } from './tag-edit/scrape-panel.tsx';
+import { ScrapeSuggestions } from './tag-edit/scrape-suggestions.tsx';
 
 export default function TagEditPage() {
   const { id: rawId } = useParams<{ id: string }>();
@@ -216,7 +216,11 @@ export default function TagEditPage() {
   const currentOf = (formKey: (typeof SCRAPE_FIELDS)[number]['formKey']) => (form ? form[formKey] : '');
 
   /**
-   * 把提议填进表单（**一个字节都不写**），然后关掉面板。
+   * 把提议填进表单（**一个字节都不写**）。
+   *
+   * **刻意不收起建议区**：浮层版必须收起（否则挡住编辑区），但内联版没这个必要 ——
+   * 连着看几条、先填 A 觉得不对再换 B，是这里的常见用法。
+   * 填了什么下面表单里立刻能看到。
    *
    * 只填插件**确实给出**的字段：`key in tags` 而不是看值真假 —— 缺失与空串的语义都是
    * 「不修改」，按真假判断就会把「没提这个字段」误当成「要清空」。
@@ -233,8 +237,7 @@ export default function TagEditPage() {
       if (p.lyrics) next.lyrics = p.lyrics;
       return next;
     });
-    setScrapeOpen(false);
-    setNotice('已把刮削结果填进表单 —— 还没写盘。看清楚再点「预览改动」。');
+    setNotice('已把这条候选填进表单 —— 还没写盘。看清楚再点「预览改动」。');
   }
 
   return (
@@ -256,11 +259,15 @@ export default function TagEditPage() {
         {canScrape && (
           <button
             type="button"
-            onClick={openScrape}
+            onClick={() => (scrapeOpen ? setScrapeOpen(false) : openScrape())}
             disabled={scrapeBusy}
-            className="h-8 shrink-0 rounded-full bg-surface px-3.5 text-note text-ink-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+            aria-expanded={scrapeOpen}
+            className={[
+              'h-8 shrink-0 rounded-full px-3.5 text-note transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+              scrapeOpen ? 'bg-accent-soft text-accent' : 'bg-surface text-ink-2 hover:bg-surface-hover',
+            ].join(' ')}
           >
-            {scrapeBusy ? '查询中…' : '刮削'}
+            {scrapeBusy ? '查询中…' : scrapeOpen ? '收起建议' : '刮削'}
           </button>
         )}
         <button
@@ -281,6 +288,25 @@ export default function TagEditPage() {
         写入会直接覆盖原文件，<b className="font-medium">没有备份、不可撤销</b>
         —— 建议先看清预览；写入前可勾选备份（原文件存成同名 .bak）。
       </div>
+
+      {/* 刮削建议：**就地展开**在编辑区上方，不是浮层 ——
+          一边看候选、一边看下面的表单，才是这个动作的真实用法。 */}
+      {scrapeOpen && (
+        <ScrapeSuggestions
+          data={scrape}
+          busy={scrapeBusy}
+          error={scrapeError}
+          currentOf={currentOf}
+          onApply={applyProposal}
+          onUseCover={(d) => {
+            setNewCover(d);
+            setDropCover(false);
+            setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
+          }}
+          onResearch={() => void runScrape()}
+          onCollapse={() => setScrapeOpen(false)}
+        />
+      )}
 
       {loading ? (
         <div className="p-6">
@@ -440,26 +466,6 @@ export default function TagEditPage() {
             />
           </aside>
         </div>
-      )}
-
-      {/* 刮削面板：独立浮层（盖住本页）。低频、内容多、用完即弃 —— 不占正文位置。 */}
-      {scrapeOpen && (
-        <ScrapePanel
-          data={scrape}
-          busy={scrapeBusy}
-          error={scrapeError}
-          songName={fileName}
-          currentOf={currentOf}
-          onApply={applyProposal}
-          onUseCover={(d) => {
-            setNewCover(d);
-            setDropCover(false);
-            setScrapeOpen(false);
-            setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
-          }}
-          onResearch={() => void runScrape()}
-          onClose={() => setScrapeOpen(false)}
-        />
       )}
     </div>
   );
