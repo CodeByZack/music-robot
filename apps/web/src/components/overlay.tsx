@@ -8,33 +8,45 @@ import { useOverlayClose } from '@/lib/use-overlay-close.ts';
  * 这几个页面**不占内容区**，而是 `fixed inset-0` 盖住整个应用（侧边栏和顶栏都让位）——
  * 它们是**上下文切换**，不是「主界面里的第 N 页」（`docs/design.md` §12.2）。
  *
- * # 为什么没有横贯的标题栏
+ * # 骨架 = 设置页那套（用户 2026-10-02 明确要求）
  *
- * 第一版做了一条 58px 的深色顶栏（左边标题、右边 ✕、底下一道分割线），用户的反馈是
- * **「看起来就像一个弹出层，怪怪的」** —— 说得准：那条横贯的条就是**对话框 header**
- * 的形状，而下面只有一条 720px 的窄列飘在暗色里，两者合起来就是「从上面盖下来的面板」。
+ * ```
+ * ┌──────────────────────────────────────────────┐
+ * │ 标题                                    [操作] ✕ │  ← 58px 顶栏
+ * ├────────────┬─────────────────────────────────┤
+ * │ 分节导航   │  内容区（Panel 一块块）           │
+ * │ 186px      │                                  │
+ * └────────────┴─────────────────────────────────┘
+ * ```
  *
- * 现在改成：
- * - ✕ **浮在右上角**（不画条、不画线），任何滚动位置都够得着；
- * - 页面标题挪进内容区，用**和音乐库 / 歌单那些普通页面一样的 header 结构**
- *   （大标题 + 一行说明 + 右侧主要操作），宽度也放宽到 860px。
+ * 窄屏（<701px）分节导航变成横向 tab —— 与设置页同一个断点、同一套写法。
  *
- * 于是它读起来是「一个页面，右上角有关闭」，而不是「一个弹出来的层」。
+ * # 中间走过的一版弯路（别退回去）
  *
- * ⚠️ `pages/settings.tsx` 与 `pages/tag-edit.tsx` 比这里更早，各自内联了同一套逻辑
- * （tag-edit 的顶栏还要显示文件名与格式，结构不同）。**没有回头改它们** ——
- * 那是独立的一次清理，混在这次改动里只会让 diff 难读。
+ * 我一度把顶栏去掉、改成「大标题 + 说明 + 列表」的普通内容页，理由是「顶栏像对话框
+ * header，看起来是个弹出层」。**方向错了**：用户要的不是「少一点 chrome」，
+ * 而是**和设置页一致**。真正让那一版显得怪的是另外两件事，且都已修掉：
+ * 1. 底色用了纯黑 `#14121b` 而不是应用的渐变底（见 `global.css` 的 `--app-bg`）；
+ * 2. 内容只有一条 720px 窄列飘在暗色里，没有分节导航撑着，比例失衡。
  */
+export interface OverlaySection {
+  id: string;
+  label: string;
+}
+
 export function OverlayShell({
   title,
-  description,
-  /** 页面主要操作，放在标题行右侧（和歌单页的「新建」同位置）。 */
+  sections,
+  section,
+  onSection,
+  /** 顶栏里 ✕ 左边的页面级主要操作（比如「点一首」）。 */
   actions,
   children,
 }: {
   title: string;
-  /** 标题下面那行说明。写清楚「这一页是干什么的」，别只放个数量。 */
-  description?: ReactNode;
+  sections: OverlaySection[];
+  section: string;
+  onSection: (id: string) => void;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -54,48 +66,58 @@ export function OverlayShell({
   return (
     <div
       className={[
-        // `app-bg` 而不是 `bg-[#14121b]`：和主界面同一个底色，否则整页比主界面暗一层，
-        // 看起来就是「盖上来的一块黑板」（见 global.css 里 --app-bg 的注释）。
+        // `app-bg` 而不是 `bg-[#14121b]`：和主界面同一个底色（渐变），
+        // 否则整页比主界面暗一层，看起来就是「盖上来的一块黑板」。
         'app-bg fixed inset-0 z-50 flex flex-col overflow-hidden',
         closing ? 'anim-overlay-out' : 'anim-overlay-in',
       ].join(' ')}
     >
-      {/* 绝对定位在**不滚动**的外层上，所以滚到哪儿它都在。 */}
-      <button
-        type="button"
-        onClick={close}
-        title="关闭"
-        aria-label={`关闭${title}`}
-        className="absolute top-3 right-3 z-10 flex size-9 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
-      >
-        <svg
-          className="ico-sm"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          strokeLinecap="round"
+      {/* 顶栏：与 settings.tsx 逐项对齐（58px / px-5 / 分割线 / 圆形 ✕） */}
+      <div className="flex h-[58px] shrink-0 items-center gap-2 border-b border-line-weak px-5">
+        <h2 className="text-lead font-medium">{title}</h2>
+        <span className="flex-1" />
+        {actions}
+        <button
+          type="button"
+          onClick={close}
+          title="关闭"
+          aria-label={`关闭${title}`}
+          className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <path d="M4 4l8 8M12 4l-8 8" />
-        </svg>
-      </button>
+          <svg
+            className="ico-sm"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.6}
+            strokeLinecap="round"
+          >
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 pt-2 pb-20 max-[1024px]:px-4 max-[640px]:px-3">
-        <div className="mx-auto w-full max-w-[860px]">
-          {/* 页面 header —— 形状对齐 `playlists.tsx` / `library.tsx`。
-              `pr-11` 是给右上角那颗 ✕ 让位（窄屏时内容会铺到它下面）。 */}
-          <div className="flex items-end gap-4 pt-3 pb-5 pr-11 max-[640px]:flex-wrap">
-            <div className="min-w-0">
-              <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
-                {title}
-              </h1>
-              {description && <div className="mt-1 text-nav text-ink-3">{description}</div>}
-            </div>
-            <span className="flex-1" />
-            {actions}
-          </div>
-          {children}
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col min-[701px]:flex-row">
+        {/* 分节导航：窄屏横向 tab，桌面左栏（与设置页同一断点、同一套 class） */}
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line-weak p-2 min-[701px]:w-[186px] min-[701px]:flex-col min-[701px]:border-r min-[701px]:border-b-0 min-[701px]:p-3">
+          {sections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onSection(s.id)}
+              className={[
+                'shrink-0 rounded-md px-3 py-2 text-left text-nav whitespace-nowrap transition-colors',
+                section === s.id
+                  ? 'bg-surface text-ink'
+                  : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
+              ].join(' ')}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="min-h-0 flex-1 overflow-auto p-5">{children}</div>
       </div>
     </div>
   );

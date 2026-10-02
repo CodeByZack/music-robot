@@ -1,25 +1,30 @@
 import { useCallback, useState } from 'react';
 import type { RequestStatus, Song, SongRequest } from '@music-robot/core';
-import { OverlayShell } from '@/components/overlay.tsx';
+import { OverlayShell, type OverlaySection } from '@/components/overlay.tsx';
+import { Panel, PanelRow } from '@/components/panel.tsx';
 import { RequestSongDialog } from '@/components/request-dialog.tsx';
 import { api } from '@/lib/client.ts';
 import { messageOf, useSession } from '@/lib/session.tsx';
 import { useAsync } from '@/lib/use-async.tsx';
 
 /**
- * 点歌请求页（全屏浮层页面，**和设置一样**）。
+ * 点歌请求页（全屏浮层页面，**骨架与设置页一致**：顶栏 + 左侧分节 + 右侧 Panel）。
  *
  * 入口有两个（都不是本页自己发的）：
  * 1. 顶栏右上角的下拉菜单（面向所有人）；
  * 2. 搜索页搜不到时的「请求这首歌」（面向需求发生的当场）。
- * 两条都通到这里 —— 但真正的「提交」用的是同一个 `RequestSongDialog`。
+ * 两条都通到这里 —— 但真正的「提交」用的是同一个 `RequestSongDialog`（弹窗）。
+ *
+ * **左侧分节 = 状态筛选**。这是本页最自然的分法：用户来这儿想看的是
+ * 「哪些还没处理 / 哪些已经被拒了」，那就该是分节，而不是顶上排一排筛选小按钮
+ * —— 设置页导航存在的理由正是把「看哪一块」显式化。筛选走后端 `?status=`。
  *
  * 权限（后端 `routes::requests` 强制）：普通用户无论带什么 query 都只看得到
- * **自己提交的**；`?status=` 那种全量筛选是管理端能力，普通用户调会 403。
- * 所以「只看我的」这个开关只对 admin 出现。
+ * **自己提交的**；`?status=` 这种全量筛选是管理端能力，普通用户调会 403 ——
+ * 所以分节导航只对 admin 显示，普通用户只有一个「我的请求」分节。
  */
-const FILTERS: { id: 'all' | RequestStatus; label: string }[] = [
-  { id: 'all', label: '全部' },
+const SECTIONS: OverlaySection[] = [
+  { id: 'all', label: '全部请求' },
   { id: 'pending', label: '待处理' },
   { id: 'processing', label: '处理中' },
   { id: 'done', label: '已添加' },
@@ -29,19 +34,19 @@ const FILTERS: { id: 'all' | RequestStatus; label: string }[] = [
 export default function RequestsPage() {
   const { user } = useSession();
   const isAdmin = user?.role === 'admin';
-  const [filter, setFilter] = useState<'all' | RequestStatus>('all');
+  const [section, setSection] = useState<string>('all');
   const [mineOnly, setMineOnly] = useState(false);
   const [composing, setComposing] = useState(false);
 
   const load = useCallback(
     () =>
       api.requests.list({
-        ...(filter === 'all' ? {} : { status: filter }),
+        ...(section === 'all' ? {} : { status: section as RequestStatus }),
         ...(mineOnly ? { mine: 1 as const } : {}),
       }),
-    [filter, mineOnly],
+    [section, mineOnly],
   );
-  const { data, error, loading, reload } = useAsync(load, [filter, mineOnly]);
+  const { data, error, loading, reload } = useAsync(load, [section, mineOnly]);
 
   // 当前展开的就地操作（一次只开一条 —— 列表里同时开两个输入框很难看）
   const [action, setAction] = useState<{ id: number; kind: 'reject' | 'link' } | null>(null);
@@ -64,100 +69,86 @@ export default function RequestsPage() {
   }
 
   const items = data?.items ?? [];
+  // 分节表是常量且一定非空，所以 `?? SECTIONS[0]` 兜底后必是真值；
+  // 写 `!` 而不是再深一层判空 —— 这里没有运行时风险，只是 TS 推不出来。
+  const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
 
   return (
     <OverlayShell
       title="点歌请求"
-      description={
-        isAdmin
-          ? '大家想听但库里没有的歌。按想要的人数排序。'
-          : '你提交的点歌请求与处理进度。'
-      }
+      sections={isAdmin ? SECTIONS : [{ id: 'all', label: '我的请求' }]}
+      section={section}
+      onSection={(id) => {
+        setSection(id);
+        setAction(null); // 换一节就把展开的表单收掉，别让它挂在新列表上
+      }}
       actions={
         <button
           type="button"
           onClick={() => setComposing(true)}
-          className="h-9 shrink-0 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110"
+          className="h-8 shrink-0 rounded-full bg-accent px-3.5 text-cap font-medium text-white transition-colors hover:brightness-110"
         >
           点一首
         </button>
       }
     >
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            onClick={() => setFilter(f.id)}
-            className={[
-              'rounded-full px-3 py-1.5 text-cap transition-colors',
-              filter === f.id
-                ? 'bg-surface text-ink'
-                : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
-            ].join(' ')}
-          >
-            {f.label}
-          </button>
-        ))}
-        {/* 总数与「只看我的」跟在**同一个** `ml-auto` 后面：窄屏换行时两者一起
-            被推到行尾，而不是只剩一个勾选框孤零零挂在右边。 */}
-        <span className="ml-auto text-cap text-ink-4 tabular-nums">
-          {data ? `${data.total} 条` : ''}
-        </span>
-        {/* 「只看我的」只对 admin 有意义 —— 普通用户拿到的本来就只有自己的 */}
-        {isAdmin && (
-          <label className="flex cursor-pointer items-center gap-2 text-cap text-ink-3">
-            <input
-              type="checkbox"
-              checked={mineOnly}
-              onChange={(e) => setMineOnly(e.target.checked)}
-              className="size-3.5 accent-[#ef6b3c]"
-            />
-            只看我的
-          </label>
-        )}
-      </div>
-
       {err && (
-        <p className="mb-3 rounded-lg bg-accent-soft px-4 py-2.5 text-cap text-accent">{err}</p>
+        <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{err}</p>
       )}
 
-      {error ? (
-        <p className="rounded-xl bg-surface py-10 text-center text-nav text-ink-3">{error}</p>
-      ) : loading ? (
-        <p className="py-10 text-center text-nav text-ink-4">读取中…</p>
-      ) : items.length === 0 ? (
-        /* 空状态写得具体点：区分「筛出来是空的」与「压根没人点过」，
-           否则用户会以为筛选坏了。 */
-        <div className="rounded-xl bg-surface px-6 py-12 text-center">
-          <p className="text-nav text-ink-3">
-            {filter === 'all' && !mineOnly
-              ? '还没有人点歌。'
-              : mineOnly
-                ? '你没有符合这个筛选的请求。'
-                : '这个状态下没有请求。'}
-          </p>
-          {filter === 'all' && !mineOnly && (
+      <Panel title={current.label}>
+        {/* 「只看我的」是**范围**而不是状态，所以不做成分节，而是这块面板里的一个开关
+            —— 与设置页那个「写入文件」开关同一个写法（含 hint 说清当前含义）。
+            只对 admin 显示：普通用户拿到的本来就只有自己的。 */}
+        {isAdmin && (
+          <PanelRow
+            label="只看我的"
+            hint={mineOnly ? '只显示你自己提交的请求' : '显示所有人提交的请求'}
+          >
             <button
               type="button"
-              onClick={() => setComposing(true)}
-              className="mt-4 rounded-full bg-accent px-4 py-2 text-nav font-medium text-white transition-colors hover:brightness-110"
+              role="switch"
+              aria-checked={mineOnly}
+              aria-label="只看我的"
+              onClick={() => setMineOnly((v) => !v)}
+              className={[
+                'relative h-[23px] w-10 shrink-0 rounded-full transition-colors',
+                mineOnly ? 'bg-accent' : 'bg-white/16',
+              ].join(' ')}
             >
-              点一首
+              <span
+                className={[
+                  'absolute top-[3px] left-[3px] size-[17px] rounded-full bg-ink transition-transform',
+                  mineOnly ? 'translate-x-[17px]' : '',
+                ].join(' ')}
+              />
             </button>
-          )}
-        </div>
-      ) : (
-        /* 一个容器 + 内部行，行间用淡内嵌阴影分隔 —— 与用户管理页同一套写法。
-           独立卡片一排浮在暗色上更像「面板」，行式列表才像「页面里的列表」。 */
-        <div className="overflow-hidden rounded-xl bg-surface">
-          {items.map((r, i) => (
+          </PanelRow>
+        )}
+
+        {error ? (
+          <p className="py-8 text-center text-nav text-ink-3">{error}</p>
+        ) : loading ? (
+          <p className="py-8 text-center text-nav text-ink-4">读取中…</p>
+        ) : items.length === 0 ? (
+          /* 空状态写得具体点：区分「这一节是空的」与「压根没人点过」，
+             否则用户会以为筛选坏了。 */
+          <p className="py-8 text-center text-nav text-ink-4">
+            {section === 'all' && !mineOnly
+              ? isAdmin
+                ? '还没有人点歌。'
+                : '你还没有提交过点歌请求。'
+              : mineOnly
+                ? '你没有符合这一节的请求。'
+                : '这一节里没有请求。'}
+          </p>
+        ) : (
+          items.map((r) => (
             <RequestRow
               key={r.id}
               req={r}
               isAdmin={isAdmin}
               busy={busy}
-              first={i === 0}
               action={action?.id === r.id ? action.kind : null}
               onAction={(kind) => setAction({ id: r.id, kind })}
               onCancel={() => setAction(null)}
@@ -167,15 +158,20 @@ export default function RequestsPage() {
               }
               onLink={(songId) => run(() => api.requests.link(r.id, songId))}
             />
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </Panel>
 
       {composing && (
         <RequestSongDialog
           onClose={() => setComposing(false)}
           // 提交后刷新：新请求（或新票数）要立刻出现在列表里
-          onDone={() => reload()}
+          onDone={() => {
+            reload();
+            // 新建的请求一定是「待处理」，切过去让用户看得见它落在哪儿
+            // （普通用户没有这个分节，所以只在 admin 下切）
+            if (isAdmin) setSection('pending');
+          }}
         />
       )}
     </OverlayShell>
@@ -193,11 +189,15 @@ function StatusChip({ status }: { status: RequestStatus }) {
   return <span className={['rounded-full px-2.5 py-1 text-micro', cls].join(' ')}>{label}</span>;
 }
 
+/**
+ * 一条请求。结构与设置页的 `PanelRow` 同形（**左边文字块、右边控件**），
+ * 只是左边多几行、右边从单个控件变成一组。没直接用 `PanelRow`，是因为
+ * 就地展开的操作区（拒绝理由 / 选歌）要占满整行宽度。
+ */
 function RequestRow({
   req,
   isAdmin,
   busy,
-  first,
   action,
   onAction,
   onCancel,
@@ -208,8 +208,6 @@ function RequestRow({
   req: SongRequest;
   isAdmin: boolean;
   busy: boolean;
-  /** 第一行不画分隔线。 */
-  first: boolean;
   action: 'reject' | 'link' | null;
   onAction: (kind: 'reject' | 'link') => void;
   onCancel: () => void;
@@ -221,72 +219,67 @@ function RequestRow({
   const settled = req.status === 'done' || req.status === 'rejected';
 
   return (
-    <div
-      className={[
-        'px-4 py-3.5 transition-colors hover:bg-surface-hover',
-        // 行分隔用**内嵌阴影**而不是 border：深色底上 border 比行背景更亮，
-        // 会看成一条亮线（项目里表格那套写法，见 docs/design.md §6.2）
-        first ? '' : 'shadow-[inset_0_1px_0_var(--color-line-weak)]',
-      ].join(' ')}
-    >
-      <div className="flex items-baseline gap-3">
-        <span className="min-w-0 flex-1 truncate text-lead text-ink">{req.title}</span>
-        {/* 票数 = 有多少人想要。新建时就是 1，所以「1 人」是正常状态，不是异常。 */}
-        <span className="shrink-0 text-cap text-ink-3 tabular-nums">
-          {req.vote_count} 人想要
-        </span>
-      </div>
-      <div className="mt-0.5 text-note text-ink-3">
-        {req.artist || '（没填歌手）'}
-        {req.album ? ` · ${req.album}` : ''}
-      </div>
-      {req.note && <div className="mt-1.5 text-note text-ink-3">备注：{req.note}</div>}
-      {req.status === 'rejected' && req.reject_reason && (
-        <div className="mt-1.5 text-note text-ink-4">拒绝理由：{req.reject_reason}</div>
-      )}
-      {req.song_id != null && req.status === 'done' && (
-        <div className="mt-1.5 text-cap text-ink-4">已关联到曲库里的歌曲 #{req.song_id}</div>
-      )}
+    <div className="border-b border-line-weak py-3.5 last:border-b-0">
+      <div className="flex items-start gap-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2.5">
+            <b className="truncate text-nav font-normal text-ink">{req.title}</b>
+            <StatusChip status={req.status} />
+          </div>
+          <span className="block text-xs text-ink-3">
+            {req.artist || '（没填歌手）'}
+            {req.album ? ` · ${req.album}` : ''}
+          </span>
+          {req.note && <span className="block text-xs text-ink-3">备注：{req.note}</span>}
+          {req.status === 'rejected' && req.reject_reason && (
+            <span className="block text-xs text-ink-4">拒绝理由：{req.reject_reason}</span>
+          )}
+          {req.song_id != null && req.status === 'done' && (
+            <span className="block text-xs text-ink-4">
+              已关联到曲库里的歌曲 #{req.song_id}
+            </span>
+          )}
+        </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <StatusChip status={req.status} />
-        {isAdmin && !settled && action === null && (
-          <>
-            {req.status === 'pending' && (
-              <Act onClick={onProcess} disabled={busy}>
-                开始处理
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {/* 票数 = 有多少人想要。新建时就是 1，所以「1 人」是正常状态，不是异常。 */}
+          <span className="text-cap text-ink-4 tabular-nums">{req.vote_count} 人想要</span>
+          {isAdmin && !settled && action === null && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {req.status === 'pending' && (
+                <Act onClick={onProcess} disabled={busy}>
+                  开始处理
+                </Act>
+              )}
+              <Act onClick={() => onAction('link')} disabled={busy}>
+                已有，关联
               </Act>
-            )}
-            <Act onClick={() => onAction('link')} disabled={busy}>
-              已有这首歌，关联
-            </Act>
-            <Act onClick={() => onAction('reject')} disabled={busy}>
-              拒绝
-            </Act>
-          </>
-        )}
+              <Act onClick={() => onAction('reject')} disabled={busy}>
+                拒绝
+              </Act>
+            </div>
+          )}
+        </div>
       </div>
 
       {action === 'reject' && (
-        <div className="mt-2.5 flex flex-col gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <input
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="拒绝理由（必填，提交人看得到）"
-            className="h-9 w-full rounded-lg border-0 bg-surface-hover px-3 text-note text-ink outline-0 placeholder:text-ink-4"
+            className="h-8 min-w-[200px] flex-1 rounded-md border-0 bg-surface-hover px-3 text-note text-ink outline-0 placeholder:text-ink-4"
           />
-          <div className="flex gap-2">
-            <Act onClick={() => onReject(reason.trim())} disabled={busy || !reason.trim()} danger>
-              确认拒绝
-            </Act>
-            <Act onClick={onCancel}>取消</Act>
-          </div>
+          <Act onClick={() => onReject(reason.trim())} disabled={busy || !reason.trim()} danger>
+            确认拒绝
+          </Act>
+          <Act onClick={onCancel}>取消</Act>
         </div>
       )}
 
       {action === 'link' && (
-        <div className="mt-2.5">
-          <p className="mb-2 text-cap text-ink-4">
+        <div className="mt-3">
+          <p className="mb-2 text-xs text-ink-3">
             搜一首已经在库里的歌 —— 关联后这条请求会直接标成「已添加」
           </p>
           <SongPicker busy={busy} onPick={onLink} onCancel={onCancel} />
@@ -296,7 +289,7 @@ function RequestRow({
   );
 }
 
-/** 小动作按钮。列表里要轻 —— 圆角胶囊 + 12px 字，别用实心大按钮抢视线。 */
+/** 小动作按钮。放在行右侧，必须轻 —— 胶囊 + 12px 字，别用实心大按钮抢视线。 */
 function Act({
   children,
   onClick,
@@ -314,7 +307,7 @@ function Act({
       onClick={onClick}
       disabled={disabled}
       className={[
-        'rounded-full px-3 py-1.5 text-cap transition-colors disabled:opacity-40',
+        'shrink-0 rounded-full px-3 py-1.5 text-cap transition-colors disabled:opacity-40',
         danger
           ? 'bg-accent-soft text-accent hover:brightness-125'
           : 'bg-surface-hover text-ink-2 hover:brightness-125',

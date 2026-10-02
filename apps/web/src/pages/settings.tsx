@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RESUME_KEY_PREFIX, type Job } from '@music-robot/core';
+import { Panel, PanelRow as Row } from '@/components/panel.tsx';
 import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { setWriteFiles as setWriteFilesPref, useWriteFiles } from '@/lib/scrape-prefs.ts';
 import { api } from '@/lib/client.ts';
@@ -42,27 +43,6 @@ function Progress({ job }: { job: Job }) {
         <i className="block h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
       </div>
       {job.message && <div className="text-note text-ink-3">{job.message}</div>}
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-4 rounded-lg bg-surface p-5">
-      <div className="mb-3 text-micro tracking-[.24em] text-ink-4 uppercase">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Row({ label, hint, children }: { label: string; hint?: string; children?: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3.5 border-b border-line-weak py-3 last:border-b-0">
-      <div className="min-w-0 flex-1">
-        <b className="block text-nav font-normal">{label}</b>
-        {hint && <span className="text-xs text-ink-3">{hint}</span>}
-      </div>
-      {children}
     </div>
   );
 }
