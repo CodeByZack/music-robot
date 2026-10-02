@@ -30,6 +30,31 @@ const NAV: { to: string; label: string; d: string }[] = [
 /** 侧边栏收起与否的持久化键。**UI 偏好，不进 core**（core 不碰 localStorage）。 */
 const RAIL_KEY = 'music-robot.sidebar.rail';
 
+/**
+ * 视口低于这个宽度就**强制把侧边栏收成图标导轨**。
+ *
+ * 为什么是 1180：曲目表有约 853px 的最小宽度（单元格都是 `white-space: nowrap`），
+ * 展开的侧边栏（229px + 左右 padding 40px）吃掉 269px。实测 1100px 时 ⋯ 列还
+ * 勉强露着，到 1050px 就被挤出可视区了（用户 2026-10-02 截图反馈）。
+ * 1180 留了约 80px 余量。收起后内容区多 165px，这个区间就装得下了。
+ */
+const AUTO_RAIL_MAX = 1180;
+
+/** 视口是否窄到需要自动收起侧边栏。 */
+function useNeedRail(): boolean {
+  const [need, setNeed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < AUTO_RAIL_MAX,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${AUTO_RAIL_MAX - 1}px)`);
+    const sync = () => setNeed(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return need;
+}
+
 function readRail(): boolean {
   try {
     return localStorage.getItem(RAIL_KEY) === 'rail';
@@ -114,9 +139,20 @@ function UserMenu() {
     <MenuButton
       title="账号"
       header={
-        <div>
-          <div className="text-nav text-ink">{user?.username ?? '未登录'}</div>
-          <div className="text-cap text-ink-4">{user?.role === 'admin' ? '管理员' : '普通用户'}</div>
+        /* 头像 + 名字两行。
+           以前只有文字，弹层顶部看起来空、跟面板整体不衬（用户 2026-10-02 反馈）。 */
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent text-lead font-medium text-white">
+            {initial}
+          </span>
+          <span className="min-w-0">
+            <span className="block overflow-hidden text-nav text-ellipsis whitespace-nowrap text-ink">
+              {user?.username ?? '未登录'}
+            </span>
+            <span className="block text-cap text-ink-4">
+              {user?.role === 'admin' ? '管理员' : '普通用户'}
+            </span>
+          </span>
         </div>
       }
       items={[
@@ -200,16 +236,19 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 export function Shell({ children }: { children: ReactNode }) {
   // 窄屏抽屉。桌面侧边栏是常驻的，这个状态只在 <900px 有意义。
   const [drawer, setDrawer] = useState(false);
-  // 桌面侧边栏是否收成图标导轨（持久化，见 RAIL_KEY）
-  const [rail, setRail] = useState(readRail);
+  // 用户自己选的收起状态（持久化，见 RAIL_KEY）
+  const [userRail, setUserRail] = useState(readRail);
+  // 视口太窄就自动收起 —— 这是**强制**的，所以那种情况下不显示切换按钮
+  const autoRail = useNeedRail();
+  const rail = autoRail || userRail;
 
   useEffect(() => {
     try {
-      localStorage.setItem(RAIL_KEY, rail ? 'rail' : 'full');
+      localStorage.setItem(RAIL_KEY, userRail ? 'rail' : 'full');
     } catch {
       /* 存不了就存不了，下次回来按展开态 */
     }
-  }, [rail]);
+  }, [userRail]);
 
   // 抽屉开着时按 Esc 关掉
   useEffect(() => {
@@ -232,19 +271,23 @@ export function Shell({ children }: { children: ReactNode }) {
       >
         <SideNav rail={rail} />
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => setRail((v) => !v)}
-          title={rail ? '展开' : '收起'}
-          aria-label={rail ? '展开侧边栏' : '收起侧边栏'}
-          className={[
-            'flex items-center rounded-md py-2 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
-            rail ? 'justify-center' : 'gap-3 px-3',
-          ].join(' ')}
-        >
-          <Icon d={rail ? 'M6 3.5 11 8l-5 4.5' : 'M10 3.5 5 8l5 4.5'} />
-          {!rail && <span>收起</span>}
-        </button>
+        {/* 窄的时候自动收起是**强制**的，这时候切换按钮什么也做不了，干脆不显示 */}
+        {!autoRail && (
+          <button
+            type="button"
+            onClick={() => setUserRail((v) => !v)}
+            title={rail ? '展开' : '收起'}
+            aria-label={rail ? '展开侧边栏' : '收起侧边栏'}
+            className={[
+              // 居中 —— 以前靠左，跟上面的导航项对齐反而显得歪（用户 2026-10-02 反馈）
+              'flex items-center justify-center rounded-md py-2 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
+              rail ? '' : 'gap-3 px-3',
+            ].join(' ')}
+          >
+            <Icon d={rail ? 'M6 3.5 11 8l-5 4.5' : 'M10 3.5 5 8l5 4.5'} />
+            {!rail && <span>收起</span>}
+          </button>
+        )}
       </aside>
 
       {/* 窄屏抽屉：盖在内容上，点遮罩 / 点导航 / 按 Esc 都关 */}
