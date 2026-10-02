@@ -101,6 +101,13 @@ pub const HIT_CONFIDENCE: f64 = 0.80;
 /// 封面文件大小上限（16 MiB）。插件是不可信子进程，不能让它把任意大的文件读进内存。
 const MAX_COVER_BYTES: u64 = 16 * 1024 * 1024;
 
+/// 查询结果里**内联进 JSON** 的封面上限（8 MiB，与 `routes::tags::MAX_COVER_BYTES` 一致）。
+///
+/// 为什么要单独一个小一点的上限：查询接口把封面 base64 塞进响应体交给前端暂存，
+/// 前端再原样回传给 PATCH。两边上限一致，才能保证「查询里能拿到的封面一定写得回去」。
+/// 超限的封面只是不内联（带一条说明），不影响其它字段。
+const MAX_EMBED_COVER_BYTES: usize = 8 * 1024 * 1024;
+
 /// 刮削请求里点名要的字段（与 [Tags] 的六个字段同口径）。
 const WANT_FIELDS: [&str; 6] = ["title", "artist", "album", "year", "genre", "track"];
 
@@ -382,10 +389,48 @@ enum AttemptOutcome {
 struct ScrapedHit {
     plugin: String,
     confidence: f64,
+    source: Option<String>,
     tags: Tags,
     lyrics: FieldUpdate<String>,
     /// None = 不修改封面；Some(空) = 清除封面；Some(图) = 替换封面
     cover_pictures: Option<Vec<Picture>>,
+}
+
+/// 一条**只看不改**的刮削结果（标签编辑页的「刮削」用）。
+///
+/// 为什么不复用 [ScrapeOutcome]：那个描述的是「已经落库后的状态」，而这里要的是
+/// 「插件提议了什么」，包括**低于阈值、服务端不会自动采用**的那些 —— 由人来判断
+/// 比固定阈值更准（这也是这个功能存在的理由）。
+///
+/// 没 derive `PartialEq`：[Picture] 只有 `Debug + Clone`，为了比一个封面字节而给它
+/// 加 Eq 不值得（而且封面本来就该按内容比，不是按结构比）。
+#[derive(Debug, Clone)]
+pub struct ScrapeProposal {
+    /// 产出这条提议的插件名
+    pub plugin: String,
+    /// 插件给出的 confidence
+    pub confidence: f64,
+    /// 是否达到自动落库阈值（≥ [HIT_CONFIDENCE]）。不到也能给用户看，只是标一下。
+    pub meets_threshold: bool,
+    /// 插件的数据来源说明（如 `musicbrainz`），可能没有
+    pub source: Option<String>,
+    /// 插件提议的字段（未提及的字段不在里面 = 不修改）
+    pub tags: Tags,
+    /// 插件给的歌词（有的话）。走 DB 那一列，和批量刮削一个口径。
+    pub lyrics: Option<String>,
+    /// 插件给的封面字节。已在内存里，**不依赖插件的 work_dir**（那个已经随 guard 删了）。
+    pub cover: Option<Picture>,
+}
+
+/// [ScrapeService::query_song] 的结果。
+#[derive(Debug, Clone)]
+pub struct ScrapeQuery {
+    /// 最佳的哪一条；全部未命中时为 None
+    pub proposal: Option<ScrapeProposal>,
+    /// 每个插件的中文说明（未命中的原因 / 命中了哪个插件）。
+    /// **没有命中时这一项就是全部价值** —— 插件给的原因（如「候选里没有一条能和本地歌手
+    /// 或时长对上」）比一句「刮削失败」有用得多，它直接告诉用户该先改哪个字段。
+    pub notes: Vec<String>,
 }
 
 /// 刮削服务：持有连接池 + 按顺序排列的插件池 + 配置。
@@ -512,7 +557,7 @@ impl ScrapeService {
                 }
                 *lock(&slot.cooldown_until) = None;
             }
-            match self.try_plugin(slot, &song, album_name.as_deref()) {
+            match self.try_plugin(slot, &song, album_name.as_deref(), HIT_CONFIDENCE) {
                 AttemptOutcome::Hit(found) => {
                     hit = Some(*found);
                     break;
@@ -543,8 +588,98 @@ impl ScrapeService {
         }
     }
 
+    /// 只查不写：给标签编辑页的「刮削」按钮用。
+    ///
+    /// 与 [ScrapeService::scrape_song_with] 的三点不同，都是为「预览」这个用途服务的：
+    ///
+    /// 1. **不占位**：不碰 `scrape_status`。查询不该改变剥离队列的状态 ——
+    ///    否则用户在编辑页点一下「刮削」，这首歌就从 pending 队列里没了。
+    /// 2. **不落库、不写文件**：结果只是一份待用户确认的提议。
+    /// 3. **低于阈值的也返回**：批量路径里 confidence < 0.80 直接当未命中（回退下一个插件），
+    ///    而这里把它当「备选」交给界面 —— 插件自己已经卡了一道闸（低于 0.5 回 NOT_FOUND），
+    ///    所以能回来的都是插件认可的候选，该不该用由人判断。
+    ///
+    /// 多个插件都给出结果时取 confidence 最高的那条；一旦有达到阈值的就提前停
+    /// （与批量的「命中即停」一致，没必要再问后面的插件）。
+    pub fn query_song(&self, song_id: i64) -> Result<ScrapeQuery, ScrapeError> {
+        // 只读一行；**不** claim。
+        let song = {
+            let conn = self.db.acquire()?;
+            songs::get(&conn, song_id, false)?
+                .ok_or(ScrapeError::SongNotFound { id: song_id })?
+        };
+        let album_name = match song.album_id {
+            Some(album_id) => {
+                let conn = self.db.acquire()?;
+                albums::get(&conn, album_id)?.map(|album| album.name)
+            }
+            None => None,
+        };
+
+        let mut notes: Vec<String> = Vec::new();
+        let mut best: Option<ScrapeProposal> = None;
+        for slot in &self.plugins {
+            let now = self.clock.now();
+            let cooldown_until = *lock(&slot.cooldown_until);
+            if let Some(until) = cooldown_until {
+                if now < until {
+                    notes.push(format!("{}：限流冷却中，本次跳过", slot.name));
+                    continue;
+                }
+                *lock(&slot.cooldown_until) = None;
+            }
+            // 阈值给 0.0：插件回来的 Ok 全部收下（插件内部已经拦掉 < 0.5 的）。
+            match self.try_plugin(slot, &song, album_name.as_deref(), 0.0) {
+                AttemptOutcome::Hit(found) => {
+                    let meets = found.confidence >= HIT_CONFIDENCE;
+                    notes.push(format!(
+                        "{}：给出结果，confidence {:.2}{}",
+                        found.plugin,
+                        found.confidence,
+                        if meets { "（达到自动采用阈值）" } else { "（低于自动采用阈值，仅供参考）" }
+                    ));
+                    let cover = found
+                        .cover_pictures
+                        .as_ref()
+                        .and_then(|pics| pics.first().cloned());
+                    let proposal = ScrapeProposal {
+                        plugin: found.plugin.clone(),
+                        confidence: found.confidence,
+                        meets_threshold: meets,
+                        source: found.source.clone(),
+                        tags: found.tags.clone(),
+                        lyrics: match &found.lyrics {
+                            FieldUpdate::Set(text) if !text.trim().is_empty() => Some(text.clone()),
+                            _ => None,
+                        },
+                        cover,
+                    };
+                    if meets {
+                        best = Some(proposal);
+                        break;
+                    }
+                    // 不达标：留着当备选，继续试后面的插件（也许它有更确定的答案）。
+                    if best.as_ref().is_none_or(|b| proposal.confidence > b.confidence) {
+                        best = Some(proposal);
+                    }
+                }
+                AttemptOutcome::Miss(reason) => notes.push(format!("{}：{reason}", slot.name)),
+            }
+        }
+        Ok(ScrapeQuery { proposal: best, notes })
+    }
+
     /// 试一个插件。返回 Miss 表示「这个插件这次不算命中」，调用方继续回退。
-    fn try_plugin(&self, slot: &PluginSlot, song: &Song, album_name: Option<&str>) -> AttemptOutcome {
+    ///
+    /// `min_confidence`：低于它就当未命中。批量路径传 [HIT_CONFIDENCE]（画布规则：
+    /// ≥ 0.80 才算命中）；[ScrapeService::query_song] 传 0.0（收下所有 Ok，由人判断）。
+    fn try_plugin(
+        &self,
+        slot: &PluginSlot,
+        song: &Song,
+        album_name: Option<&str>,
+        min_confidence: f64,
+    ) -> AttemptOutcome {
         self.throttle(slot);
         let mut guard = match slot.pool.acquire(self.acquire_wait()) {
             Ok(guard) => guard,
@@ -574,9 +709,9 @@ impl ScrapeService {
 
         match response {
             PluginResponse::ScrapeOk(ok) => {
-                if ok.confidence < HIT_CONFIDENCE {
+                if ok.confidence < min_confidence {
                     return AttemptOutcome::Miss(format!(
-                        "confidence {:.2} 低于命中阈值 {HIT_CONFIDENCE:.2}",
+                        "confidence {:.2} 低于命中阈值 {min_confidence:.2}",
                         ok.confidence
                     ));
                 }
@@ -592,6 +727,7 @@ impl ScrapeService {
                 AttemptOutcome::Hit(Box::new(ScrapedHit {
                     plugin: slot.name.clone(),
                     confidence: ok.confidence,
+                    source: ok.source.clone(),
                     tags: ok.tags,
                     lyrics: ok.lyrics,
                     cover_pictures,
@@ -661,7 +797,8 @@ impl ScrapeService {
         hit: ScrapedHit,
         write_files: bool,
     ) -> Result<ScrapeOutcome, ScrapeError> {
-        let ScrapedHit { plugin, confidence, tags, lyrics, cover_pictures } = hit;
+        // `source` 只有查询接口用得上（给界面看数据来源）；批量落库不需要它。
+        let ScrapedHit { plugin, confidence, tags, lyrics, cover_pictures, source: _ } = hit;
         let path = PathBuf::from(&song.file_path);
         // 只入库模式：**一个字节都不写**。连 note_write 都不登记 —— 没写就没有自写事件，
         // 登记了反而会让监听器误以为这个文件刚被我们改过。
@@ -1029,6 +1166,11 @@ fn build_edit_meta(tags: &Tags, pictures: Option<Vec<Picture>>) -> Id3EditMeta {
     meta.pictures = pictures;
     // 歌词只入 DB：lyrics / lyrics_timed 保持 None = 不修改文件里已有的歌词帧。
     meta
+}
+
+/// 查询结果里内联封面用的上限（外面读时用）。
+pub fn max_embed_cover_bytes() -> usize {
+    MAX_EMBED_COVER_BYTES
 }
 
 /// 读插件产出的封面，做成 ID3 的 [Picture]。

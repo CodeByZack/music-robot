@@ -13,6 +13,7 @@ import type {
   Playlist,
   PlaylistDetail,
   ScrapeRequest,
+  ScrapeQueryResult,
   SettingsResponse,
   Song,
   SongTags,
@@ -76,6 +77,14 @@ export function createApi(http: Http) {
       /** 预览（默认）或写入。返回改动明细，界面直接展示，不用自己比字段。 */
       patch: (songId: number, body: TagPatchRequest) =>
         http.patch<TagPatchResult>(`/api/songs/${songId}/tags`, body),
+      /**
+       * **只查不写**地问插件这首歌该是什么标签（编辑页的「刮削」按钮）。
+       *
+       * 与 `jobs.startScrape` 完全不同：那条会真的覆盖原文件；这条什么都不改，
+       * 只是拿回一份提议。仅管理员可用（会发起外部网络请求）。
+       */
+      queryScrape: (songId: number) =>
+        http.post<ScrapeQueryResult>(`/api/songs/${songId}/scrape`, undefined),
     },
 
     albums: {

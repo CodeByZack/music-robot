@@ -11,6 +11,9 @@ pub mod tag_edit;
 pub use library::{LibraryError, LibraryService, ScanIssue, ScanReport};
 pub use scrape::{
     BatchProgress, BatchReport, BatchRunner, Clock, ProgressSnapshot, ScrapeError, ScrapeIssue,
-    ScrapeOutcome, ScrapePlugin, ScrapeService, SystemClock, HIT_CONFIDENCE,
+    ScrapeOutcome, ScrapePlugin, ScrapeProposal, ScrapeQuery, ScrapeService, SystemClock,
+    HIT_CONFIDENCE,
 };
+/// 查询结果内联封面的上限（路由层用它决定要不要内联 + 给用户实话）。
+pub use scrape::max_embed_cover_bytes;
 pub use tag_edit::{CoverOp, EditResult, TagEditError, TagEditService};

@@ -134,6 +134,28 @@
     background: transparent;
   }
 
+  /* ── 那两个「白点」（用户 2026-10-02 反馈）─────────────────────────
+     深色界面里冒出的两块纯白，是**浏览器自己的**两个部件，不是我们画的：
+
+     1. `::-webkit-resizer` —— `resize-y` 的 textarea 右下角那个拖拽柄。
+        默认是**实心白方块**，在 #14121b 上看着像渲染 bug。
+     2. `::-webkit-scrollbar-corner` —— 横竖滚动条交汇的角。我们只改了
+        thumb / track，**没改这个角**，于是它保持浏览器的浅色默认值。
+        长歌词不换行时会出现横向滚动条，这个角就露出来了。
+
+     两个都保留功能，只换外观：拖拽柄换成淡斜纹（还看得出能拖），
+     角改成透明。别直接 `display: none` —— 那会让「能拖高」这个能力没人发现。
+     ───────────────────────────────────────────────────────────── */
+  ::-webkit-resizer {
+    background-color: transparent;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M9 3 3 9M9 6.5 6.5 9' stroke='rgba(255,255,255,0.3)' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: bottom right;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   /* ── 可点区域的光标 ───────────────────────────────────────────────
      Tailwind **v4 的 preflight 不再给 `<button>` 加 `cursor: pointer`**
      （v3 有过这一条），于是落回浏览器 UA 默认的 `default` ——

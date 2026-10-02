@@ -139,6 +139,9 @@ pub fn build_router(state: AppState) -> AppRouter {
         .route("/api/scan/{batch_id}", get(jobs::scan_status))
         .route("/api/scrape", post(jobs::start_scrape))
         .route("/api/scrape/{batch_id}", get(jobs::scrape_status))
+        // 标签编辑页的「刮削」按钮：**只查不写**（不落库、不写文件、不动 scrape_status）。
+        // 放在受保护路由的末尾（普通内置上限即可 —— 请求体是空的）。
+        .route("/api/songs/{id}/scrape", post(tags::query_scrape))
         .route("/api/jobs", get(jobs::list))
         // ── S22 播放列表 ──────────────────────────────────────────────────
         // 画布：GET/POST /api/playlists、GET/PUT/DELETE /api/playlists/:id、

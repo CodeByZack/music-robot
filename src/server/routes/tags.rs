@@ -358,6 +358,97 @@ fn map_error(e: TagEditError) -> ApiError {
     }
 }
 
+/// POST /api/songs/{id}/scrape —— **只查不写**地问插件：这首歌该是什么标签。
+///
+/// 给标签编辑页的「刮削」按钮用。与批量刮削（`POST /api/scrape`）的关键差别：
+///
+/// * **不落库、不写文件、不改 `scrape_status`** —— 结果只是一份待用户确认的提议。
+///   批量那条会直接覆盖原文件（不可撤销），编辑页要的是「先看看」。
+/// * **返回低于阈值的备选**：批量路径里 confidence < 0.80 当未命中，这里交给用户判断。
+/// * 未命中时把**插件给的中文原因**原样带回（如「候选里没有一条能和本地歌手或时长对上」），
+///   它直接告诉用户该先改哪个字段，比一句「刮削失败」有用得多。
+///
+/// 权限与 `/api/scrape` 同档（admin）—— 它会发起外部网络请求。
+pub async fn query_scrape(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(raw_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let id = parse_id(&raw_id)?;
+    // `state.scrape` 是 BatchRunner，真正的服务在它里面（两者共享同一个插件池）。
+    let runner = std::sync::Arc::clone(&state.scrape);
+    // 插件调用是同步阻塞的（子进程 + 网络，可能几十秒），必须挪出 reactor。
+    let query = tokio::task::spawn_blocking(move || runner.service().query_song(id))
+        .await
+        .map_err(|e| ApiError::internal(format!("刮削查询任务异常退出：{e}")))?
+        .map_err(|e| match e {
+            crate::service::ScrapeError::SongNotFound { .. } => ApiError::not_found("请求的歌曲不存在"),
+            other => ApiError::internal(other.to_string()),
+        })?;
+
+    Ok(Json(json!({
+        "proposal": query.proposal.as_ref().map(proposal_json),
+        "notes": query.notes,
+    })))
+}
+
+/// 提议 → JSON。
+///
+/// `tags` 只列插件**确实给出**的字段：缺省（`Absent`）与「空字符串」都不出现 ——
+/// 它们的语义是「不修改」，前端不该把它们当成「要写成空」。
+/// `Clear`（插件显式要求清空）翻成 `null`，前端据此才知道那是「清掉」而不是「没给」。
+fn proposal_json(p: &crate::service::ScrapeProposal) -> Value {
+    use crate::plugin::protocol::TagValue;
+
+    let mut tags = serde_json::Map::new();
+    let mut put = |key: &str, value: TagValue| match value {
+        TagValue::Text(text) if !text.trim().is_empty() => {
+            tags.insert(key.to_string(), Value::String(text));
+        }
+        TagValue::Number(n) => {
+            tags.insert(key.to_string(), json!(n));
+        }
+        TagValue::Clear => {
+            tags.insert(key.to_string(), Value::Null);
+        }
+        // Absent 与空文本都是「不修改」—— 两者都不出现在结果里。
+        TagValue::Absent | TagValue::Text(_) => {}
+    };
+    put("title", p.tags.title.clone());
+    put("artist", p.tags.artist.clone());
+    put("album", p.tags.album.clone());
+    put("year", p.tags.year.clone());
+    put("genre", p.tags.genre.clone());
+    put("track", p.tags.track.clone());
+
+    // 封面内联成 data URL，前端直接塞进 <img>/封面槽位，一整套现成管道。
+    // 超过上限（8 MB）就不内联 —— 反正回传时 PATCH 也会拒，不如在这里就说清楚。
+    let cover = p.cover.as_ref().and_then(|pic| {
+        if pic.data.len() > crate::service::max_embed_cover_bytes() {
+            return None;
+        }
+        let b64 = B64.encode(&pic.data);
+        Some(json!({
+            "mime": pic.mime_type,
+            "size": pic.data.len(),
+            "data": format!("data:{};base64,{}", pic.mime_type, b64),
+        }))
+    });
+    let cover_skipped = p.cover.as_ref().is_some_and(|pic| pic.data.len() > crate::service::max_embed_cover_bytes());
+
+    json!({
+        "plugin": p.plugin,
+        "confidence": p.confidence,
+        "meets_threshold": p.meets_threshold,
+        "source": p.source,
+        "tags": tags,
+        "lyrics": p.lyrics,
+        "cover": cover,
+        // 封面太大没收进来时给一句实话，免得用户以为插件没给封面。
+        "cover_skipped": cover_skipped,
+    })
+}
+
 /// GET /api/songs/{id}/tags/cover —— **文件内嵌**封面（不是专辑那张）。
 ///
 /// 为什么另开一条而不是复用 `/api/songs/{id}/cover`：那条**优先返回专辑表里的封面**
@@ -582,6 +673,96 @@ mod tests {
     #[test]
     fn non_bool_dry_run_is_rejected() {
         assert!(parse(json!({ "fields": {}, "dry_run": "yes" })).is_err());
+    }
+}
+
+/// 刮削提议 → JSON 的测试。
+///
+/// 这一段盯的是**三态语义在 JSON 上的落法**：插件的 `TagValue` 有四种取值，但界面上只该看到
+/// 两种结果 —— 出现（要写这个值）或 `null`（要清空）。把 `Absent`（没提这个字段）或空串
+/// 也塞进 JSON，前端就会把「插件没想法」当成「要清成空」，**变成一次静默清空**。
+#[cfg(test)]
+mod scrape_tests {
+    use super::*;
+    use crate::plugin::protocol::Tags;
+    use crate::service::ScrapeProposal;
+    use crate::tag::read::Picture;
+
+    fn proposal(tags: Tags) -> ScrapeProposal {
+        ScrapeProposal {
+            plugin: "fake".into(),
+            confidence: 0.9,
+            meets_threshold: true,
+            source: Some("fake-source".into()),
+            tags,
+            lyrics: None,
+            cover: None,
+        }
+    }
+
+    #[test]
+    fn absent_and_blank_never_reach_the_client() {
+        let mut tags = Tags::default();
+        tags.title = crate::plugin::protocol::TagValue::Absent;
+        tags.artist = crate::plugin::protocol::TagValue::Text("   ".into()); // 全空白 = 不修改
+        tags.album = crate::plugin::protocol::TagValue::Text("真专辑".into());
+        let json = proposal_json(&proposal(tags));
+
+        let map = json["tags"].as_object().expect("tags 应是对象");
+        assert!(!map.contains_key("title"), "Absent 不该出现在结果里：{map:?}");
+        assert!(!map.contains_key("artist"), "全空白与 Absent 同义，也不该出现：{map:?}");
+        assert_eq!(map["album"], "真专辑");
+    }
+
+    #[test]
+    fn explicit_clear_is_null_not_missing() {
+        // `null` 与「不出现」在前端是两件事：前者是「清掉」，后者是「别动」。必须分得开。
+        let mut tags = Tags::default();
+        tags.year = crate::plugin::protocol::TagValue::Clear;
+        let json = proposal_json(&proposal(tags));
+        assert!(json["tags"].as_object().expect("tags").contains_key("year"), "Clear 必须以键存在的方式表达");
+        assert_eq!(json["tags"]["year"], Value::Null, "Clear 必须是 null");
+    }
+
+    #[test]
+    fn track_number_keeps_being_a_number() {
+        let mut tags = Tags::default();
+        tags.track = crate::plugin::protocol::TagValue::Number(7);
+        let json = proposal_json(&proposal(tags));
+        assert_eq!(json["tags"]["track"], 7);
+        assert!(json["tags"]["track"].is_number(), "音轨应是数字，别被转成字符串");
+    }
+
+    #[test]
+    fn cover_is_inlined_as_a_data_url() {
+        let mut p = proposal(Tags::default());
+        p.cover = Some(Picture {
+            mime_type: "image/png".into(),
+            pic_type: 3,
+            description: "front".into(),
+            data: vec![0x89, 0x50, 0x4E, 0x47],
+        });
+        let json = proposal_json(&p);
+        let data = json["cover"]["data"].as_str().expect("cover.data");
+        assert!(data.starts_with("data:image/png;base64,"), "应是 data URL：{data}");
+        assert_eq!(json["cover"]["size"], 4);
+        assert_eq!(json["cover_skipped"], false);
+    }
+
+    #[test]
+    fn oversized_cover_is_flagged_not_silently_dropped() {
+        // 超限时不能装作插件没给封面 —— 界面上要能说实话，用户才不会以为插件不行。
+        let mut p = proposal(Tags::default());
+        let too_big = vec![0u8; crate::service::max_embed_cover_bytes() + 1];
+        p.cover = Some(Picture {
+            mime_type: "image/jpeg".into(),
+            pic_type: 3,
+            description: String::new(),
+            data: too_big,
+        });
+        let json = proposal_json(&p);
+        assert_eq!(json["cover"], Value::Null, "超限就不内联");
+        assert_eq!(json["cover_skipped"], true, "但要如实告诉界面「有封面、只是太大」");
     }
 }
 

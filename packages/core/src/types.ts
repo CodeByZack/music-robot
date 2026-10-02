@@ -277,6 +277,51 @@ export interface TagPatchRequest {
   backup?: boolean;
 }
 
+// ── 标签编辑页的「刮削」查询 ────────────────────────────────────────────────
+
+/**
+ * 插件给出的一条**提议**（还没写入任何地方）。
+ *
+ * 与批量刮削的区别：批量路径在达到命中阈值时会**直接覆盖原文件**；
+ * 这个查询只是把结果拿回来给用户看，由用户决定要不要填进表单。
+ */
+export interface ScrapeProposal {
+  plugin: string;
+  confidence: number;
+  /**
+   * 是否达到自动采用阈值（服务端的 `HIT_CONFIDENCE` = 0.80）。
+   *
+   * **不到阈值也会回结果** —— 插件内部已经卡了一道闸（低于 0.5 直接报 NOT_FOUND），
+   * 所以能回来的都是插件认可的候选。低于 0.80 只是说「服务端不会自动用它」，
+   * 该不该用由人判断。
+   */
+  meets_threshold: boolean;
+  source: string | null;
+  /**
+   * 插件**确实给出**的字段。
+   *
+   * 缺省（插件没提这个字段）与「空字符串」都不会出现 —— 两者的语义都是「不修改」。
+   * 只有**显式要求清空**时才是 `null`。所以判断某个键存不存在，而不是看值真假。
+   */
+  tags: Partial<Record<'title' | 'artist' | 'album' | 'year' | 'genre' | 'track', string | number | null>>;
+  /** 插件给的歌词（进 DB 那一列的口径，不写文件）。 */
+  lyrics: string | null;
+  /** 插件给的封面，已编码成 data URL（可直接给 `<img src>` 或 PATCH 的 `cover.data`）。 */
+  cover: { mime: string; size: number; data: string } | null;
+  /** 封面存在但太大、没有内联（界面据此给一句实话，而不是假装插件没给）。 */
+  cover_skipped: boolean;
+}
+
+export interface ScrapeQueryResult {
+  /** 最佳那条；全部未命中为 null。 */
+  proposal: ScrapeProposal | null;
+  /**
+   * 每个插件的中文说明（未命中的原因 / 命中说明）。
+   * **未命中时这一项就是全部价值** —— 它直接告诉用户该先改哪个字段。
+   */
+  notes: string[];
+}
+
 /** 一处改动。`before` / `after` 已经是**给人看的字符串**（没有值显示为「(无)」）。 */
 export interface TagDiff {
   key: string;

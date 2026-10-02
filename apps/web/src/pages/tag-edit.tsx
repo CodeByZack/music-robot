@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
-import type { SongTagValues, TagDiff, TagFieldPatch, TagPatchResult } from '@music-robot/core';
+import type { ScrapeProposal, ScrapeQueryResult, SongTagValues, TagDiff, TagFieldPatch, TagPatchResult } from '@music-robot/core';
 import { api } from '@/lib/client.ts';
+import { useSession } from '@/lib/session.tsx';
 import { useOverlayClose } from '@/lib/use-overlay-close.ts';
 import { ErrorNote, LoadingNote, useAsync } from '@/lib/use-async.tsx';
 
@@ -44,6 +45,21 @@ const FIELD_LABEL: Record<string, string> = {
 
 /** 封面大小上限，与后端 `tags::MAX_COVER_BYTES` 对齐（前端先拦一下，报错更快）。 */
 const MAX_COVER_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 刮削提议的字段 ↔ 表单字段。
+ *
+ * 为什么要一张表：插件协议用**单数**（`artist` / `genre`），而表单与 PATCH 用
+ * **复数**（`artists` / `genres`）。一一对应写在一处，免得散在渲染与填充两个地方。
+ */
+const SCRAPE_FIELDS: { key: string; formKey: keyof Form; label: string }[] = [
+  { key: 'title', formKey: 'title', label: '标题' },
+  { key: 'artist', formKey: 'artists', label: '歌手' },
+  { key: 'album', formKey: 'album', label: '专辑' },
+  { key: 'year', formKey: 'year', label: '年份' },
+  { key: 'genre', formKey: 'genres', label: '流派' },
+  { key: 'track', formKey: 'track', label: '音轨' },
+];
 
 /** 表单形态：全部用字符串表示，提交时再转成后端的类型。 */
 interface Form {
@@ -423,6 +439,19 @@ export default function TagEditPage() {
   // `no-store`，这里是第二道保险 —— 万一将来有人把缓存策略改回长缓存，界面依然会刷。
   const [coverNonce, setCoverNonce] = useState(0);
 
+  // ── 刮削（只查不写）────────────────────────────────────────────────────
+  //
+  // 这里**不写盘**是这个功能的前提：刮削会发起外部请求、结果未必准，
+  // 直接覆盖原文件（且不可撤销）风险太大。所以流程是
+  // 「刮削 → 提议填进表单 → 用户看一眼、改不改随他 → 预览 → 写入」，
+  // 真正落盘仍然走既有的那两道闸。
+  const [scrape, setScrape] = useState<ScrapeQueryResult | null>(null);
+  const [scrapeBusy, setScrapeBusy] = useState(false);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  // 刮削会发起网络请求，后端仅限管理员（与 /api/scrape 同档）—— 非管理员不显示入口。
+  const { user } = useSession();
+  const canScrape = user?.role === 'admin';
+
   /** 封面要传给后端的部分。没动封面就是 `undefined`（ = 保持原样）。 */
   const coverPatch = useMemo(() => {
     if (newCover) return { data: newCover };
@@ -519,6 +548,52 @@ export default function TagEditPage() {
   // 在 FLAC 上写「USLT」是不准确的 —— 那里根本没有 ID3 帧。
   const lyricsFrame = noTimedLyrics ? 'LYRICS' : 'USLT';
 
+  /** 只查不写地问插件。结果填进 `scrape`，由界面展示成一份待确认的提议。 */
+  async function runScrape() {
+    setScrapeBusy(true);
+    setScrapeError(null);
+    setScrape(null);
+    try {
+      setScrape(await api.tags.queryScrape(songId));
+    } catch (e) {
+      setScrapeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setScrapeBusy(false);
+    }
+  }
+
+  /** 表单里对应字段的当前值（用于对比展示）。 */
+  function currentOf(formKey: keyof Form): string {
+    return form ? form[formKey] : '';
+  }
+
+  /** 提议值 → 表单字符串。`null`（插件要求清空）落到空串，提交时会被翻成 `null`。 */
+  function propText(value: string | number | null | undefined): string {
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  /**
+   * 把提议填进表单（**一个字节都不写**）。
+   *
+   * 只填插件**确实给出**的字段：`key in tags` 而不是看值真假 —— 缺失与空串的语义都是
+   * 「不修改」，如果按真假判断就会把「没提这个字段」误当成「要清空」。
+   * 插件要求清空的（值恰好是 `null`）会落成空串 → 提交时又变回 `null`，语义正好对上。
+   */
+  function applyProposal(p: ScrapeProposal) {
+    const t = p.tags;
+    setForm((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      for (const { key, formKey } of SCRAPE_FIELDS) {
+        if (key in t) next[formKey] = propText(t[key as keyof typeof t]);
+      }
+      if (p.lyrics) next.lyrics = p.lyrics;
+      return next;
+    });
+    setScrape(null);
+    setNotice('已把刮削结果填进表单 —— 还没写盘。看清楚再点「预览改动」。');
+  }
+
   return (
     <div
       className={[
@@ -567,6 +642,151 @@ export default function TagEditPage() {
                   建议先点「预览改动」看清变化；写入前可勾选备份，原文件会存成同名 .bak。
                 </span>
               </div>
+
+              {/* 刮削入口。刻意放在这里（而不是底部操作条）：它的产物只是「草稿」，
+                  和那两个真按钮不是一档的事。文案也要说清楚它不写盘。 */}
+              {canScrape && (
+                <div className="mb-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void runScrape()}
+                    disabled={scrapeBusy}
+                    className="h-8 shrink-0 rounded-full bg-surface px-3.5 text-note text-ink-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {scrapeBusy ? '查询中…' : '刮削'}
+                  </button>
+                  <span className="text-cap leading-4 text-ink-4">
+                    让插件查一下这首歌的标签。<b className="font-medium text-ink-3">只填进表单，不会直接写盘</b>
+                    —— 看完、改完，再走下面的预览与写入。
+                  </span>
+                </div>
+              )}
+
+              {scrapeError && (
+                <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{scrapeError}</p>
+              )}
+
+              {/* 刮削提议：只列插件确实给出的字段，并把「当前值 → 提议值」摆在一起。 */}
+              {scrape && (
+                <div className="mb-5 rounded-xl border border-line bg-surface p-4">
+                  {scrape.proposal ? (
+                    <>
+                      <div className="mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                        <b className="text-note font-medium">刮削提议</b>
+                        <span className="text-cap text-ink-4">
+                          {scrape.proposal.plugin}
+                          {' · '}
+                          {(scrape.proposal.confidence * 100).toFixed(0)}% 可信
+                        </span>
+                        {!scrape.proposal.meets_threshold && (
+                          <span className="rounded-full bg-black/25 px-2 py-0.5 text-micro text-ink-3">
+                            低于自动采用阈值，仅供参考
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-0.5">
+                        {SCRAPE_FIELDS.filter(({ key }) => key in scrape.proposal!.tags).map(
+                          ({ key, formKey, label }) => {
+                            const before = currentOf(formKey);
+                            const after = propText(scrape.proposal!.tags[key as keyof typeof scrape.proposal.tags]);
+                            const same = before.trim() === after.trim();
+                            return (
+                              <div key={key} className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-note">
+                                <span className="w-[52px] shrink-0 text-ink-3">{label}</span>
+                                <span className={same ? 'text-ink-4' : 'text-ink-4 line-through'}>
+                                  {before.trim() || '(无)'}
+                                </span>
+                                {!same && (
+                                  <>
+                                    <span className="text-ink-4">→</span>
+                                    <span className="min-w-0 break-all text-accent">{after.trim() || '(清空)'}</span>
+                                  </>
+                                )}
+                                {same && <span className="text-micro text-ink-4">未变化</span>}
+                              </div>
+                            );
+                          })}
+                        {/* 封面单独一行：它不在 tags 里，也要单独决定要不要用。 */}
+                        {(scrape.proposal.cover || scrape.proposal.cover_skipped) && (
+                          <div className="flex flex-wrap items-center gap-x-2 py-0.5 text-note">
+                            <span className="w-[52px] shrink-0 text-ink-3">封面</span>
+                            {scrape.proposal.cover ? (
+                              <>
+                                <img
+                                  src={scrape.proposal.cover.data}
+                                  alt="刮削到的封面"
+                                  className="size-9 rounded object-cover"
+                                />
+                                <span className="text-ink-4">
+                                  {(scrape.proposal.cover.size / 1024).toFixed(0)} KB
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNewCover(scrape.proposal!.cover!.data);
+                                    setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
+                                  }}
+                                  className="h-7 shrink-0 rounded-full bg-black/25 px-2.5 text-cap text-ink-2 transition-colors hover:bg-surface-hover"
+                                >
+                                  用这张
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-ink-4">插件给了封面但太大，没有内联（回传也会被拒）</span>
+                            )}
+                          </div>
+                        )}
+                        {scrape.proposal.lyrics && (
+                          <div className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-note">
+                            <span className="w-[52px] shrink-0 text-ink-3">歌词</span>
+                            <span className="text-ink-4">{scrape.proposal.lyrics.length} 字</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => applyProposal(scrape.proposal!)}
+                          className="h-8 rounded-full bg-accent px-3.5 text-note text-white transition-opacity hover:opacity-90"
+                        >
+                          填进表单
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setScrape(null)}
+                          className="h-8 rounded-full px-3 text-note text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+                        >
+                          关掉
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <b className="text-note font-medium">刮削没有结果</b>
+                        <button
+                          type="button"
+                          onClick={() => setScrape(null)}
+                          className="h-7 rounded-full px-2.5 text-cap text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
+                        >
+                          关掉
+                        </button>
+                      </div>
+                      {/* 插件给的原因照原样展示 —— 它常直接指出该先改哪个字段。 */}
+                      <ul className="space-y-1 text-cap leading-4 text-ink-3">
+                        {scrape.notes.map((note) => (
+                          <li key={note}>· {note}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-cap leading-4 text-ink-4">
+                        提示：插件要靠歌手和时长认歌。先把「标题 / 歌手」改对再刮，命中率会高很多。
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
 
               {failure && (
                 <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{failure}</p>
