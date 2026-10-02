@@ -683,13 +683,17 @@ impl ScrapeService {
                 AttemptOutcome::Hit(hits) => {
                     // 同一个插件的多条候选**全部**带给界面（这是「只查不写」的价值所在：
                     // 同一歌名对应多张专辑时，让人来挑比固定阈值准）。
+                    //
+                    // 结论文字要短：它显示在 330px 的右栏里，长了就换行。
+                    // 「达到自动采用阈值」这件事由候选行的百分比 + 悬停说明表达，
+                    // 这里只留「几条、最高多少、可信度档位」。
                     let best_conf = hits.first().map(|h| h.confidence).unwrap_or(0.0);
                     let meets = best_conf >= HIT_CONFIDENCE;
                     let note = format!(
-                        "{} 条候选，最高 {:.0}% 可信{}",
+                        "{} 条候选 · 最高 {:.0}%{}",
                         hits.len(),
                         best_conf * 100.0,
-                        if meets { "（达到自动采用阈值）" } else { "（低于自动采用阈值，仅供参考）" }
+                        if meets { "" } else { "（偏低）" }
                     );
                     PluginAttempt {
                         plugin: slot.name.clone(),

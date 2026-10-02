@@ -247,7 +247,7 @@ export default function TagEditPage() {
         closing ? 'anim-overlay-out' : 'anim-overlay-in',
       ].join(' ')}
     >
-      {/* 顶栏。刮削是「工具动作」，放这里比塞进正文更合适 —— 它不属于任何字段分组。 */}
+      {/* 顶栏。 */}
       <header className="flex h-[58px] shrink-0 items-center gap-3 border-b border-line-weak px-5">
         <h2 className="shrink-0 text-lead font-medium">编辑标签</h2>
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-cap text-ink-4">
@@ -256,20 +256,6 @@ export default function TagEditPage() {
           {sizes ? ` · ${sizes}` : ''}
         </span>
         <span className="flex-1" />
-        {canScrape && (
-          <button
-            type="button"
-            onClick={() => (scrapeOpen ? setScrapeOpen(false) : openScrape())}
-            disabled={scrapeBusy}
-            aria-expanded={scrapeOpen}
-            className={[
-              'h-8 shrink-0 rounded-full px-3.5 text-note transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-              scrapeOpen ? 'bg-accent-soft text-accent' : 'bg-surface text-ink-2 hover:bg-surface-hover',
-            ].join(' ')}
-          >
-            {scrapeBusy ? '查询中…' : scrapeOpen ? '收起建议' : '刮削'}
-          </button>
-        )}
         <button
           type="button"
           onClick={close}
@@ -289,8 +275,7 @@ export default function TagEditPage() {
         —— 建议先看清预览；写入前可勾选备份（原文件存成同名 .bak）。
       </div>
 
-      {/* 刮削建议：**就地展开**在编辑区上方，不是浮层 ——
-          一边看候选、一边看下面的表单，才是这个动作的真实用法。 */}
+      {/* 刮削建议已移到右栏（与改动预览同栏）。 */}
 
       {loading ? (
         <div className="p-6">
@@ -301,39 +286,10 @@ export default function TagEditPage() {
           <ErrorNote message={error} />
         </div>
       ) : !form || !data ? null : (
-        /* 宽屏两栏（编辑列 | 审查栏）、窄屏上下。 */
+        /* 宽屏两栏（编辑列 | 右栏）、窄屏上下。 */
         <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
-          {/* 编辑区（滚动）。
-              刮削建议就放在这个滚动容器**里面**并吸顶（见下方），
-              而不是当兄弟节点 —— 那样它的宽度盒与编辑内容差一个滚动条宽，
-              两张卡会错开 4px 左右。放里面就自动一模一样，不用手算。 */}
+          {/* 编辑区（滚动）。这里只管编辑字段 —— 建议与预览都在右栏。 */}
           <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
-            {scrapeOpen && (
-              /* 吸顶：滚动表单时建议不会跑掉（它是「看着候选决定填什么」的工具）。
-                 `-mx-5 -mt-5` + `px-5 pt-5`：把不透明底色铺满滚动口（含四周留白），
-                 否则内容会从卡片两侧/上方滑过去。底色与页面同色，看不出是一条带。
-                 `-top-5`：滚动容器的顶内边距也算在吸顶基准里（实测 sticky 以
-                 content-box 顶为基准），不减这 20px 的话吸顶后上方会多空一截。 */
-              <div className="sticky -top-5 z-10 -mx-5 -mt-5 mb-5 bg-[#14121b] px-5 pt-5">
-                <div className="mx-auto max-w-[940px]">
-                  <ScrapeSuggestions
-                    data={scrape}
-                    busy={scrapeBusy}
-                    error={scrapeError}
-                    currentOf={currentOf}
-                    onApply={applyProposal}
-                    onUseCover={(d) => {
-                      setNewCover(d);
-                      setDropCover(false);
-                      setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
-                    }}
-                    onResearch={() => void runScrape()}
-                    onCollapse={() => setScrapeOpen(false)}
-                  />
-                </div>
-              </div>
-            )}
-
             <div className="mx-auto flex max-w-[940px] flex-col gap-5 min-[760px]:flex-row min-[760px]:items-start">
               {/* 左栏：封面 + 文件信息。窄屏落到最上面。 */}
               <aside className="w-full shrink-0 min-[760px]:w-[210px]">
@@ -461,22 +417,52 @@ export default function TagEditPage() {
             </div>
           </div>
 
-          {/* 审查栏：宽屏在右（固定宽度、撑满高度），窄屏落到下方。
-              这样「点按钮 → 结果就在正上方」，不用来回滚。 */}
-          <aside className="flex shrink-0 flex-col border-line-weak bg-black/15 max-[1099px]:max-h-[46vh] max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
-            <ReviewPane
-              preview={preview}
-              fresh={previewFresh}
-              dirty={dirty}
-              busy={busy}
-              backup={backup}
-              onBackup={setBackup}
-              onPreview={() => void run(false)}
-              onWrite={() => void run(true)}
-              invalid={patch.invalid}
-              notice={notice}
-              failure={failure}
-            />
+          {/* 右栏：**检查与落盘**一条流程 —— 刮削建议（找值）→ 改动预览（看差异）
+              → 备份 + 两个按钮（写）。宽屏在右（固定 330px），窄屏落到下方。 */}
+          <aside className="flex shrink-0 flex-col border-line-weak bg-black/15 max-[1099px]:max-h-[72vh] max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
+            {canScrape && (
+              <div
+                className={[
+                  'flex flex-col border-b border-line-weak',
+                  // 展开时给列表一个上限，不把下面的改动预览挤没；收起时只占一行。
+                  scrapeOpen ? 'min-h-0 shrink-0 max-[1099px]:max-h-[34vh] min-[1100px]:max-h-[46%]' : 'shrink-0',
+                ].join(' ')}
+              >
+                <ScrapeSuggestions
+                  open={scrapeOpen}
+                  data={scrape}
+                  busy={scrapeBusy}
+                  error={scrapeError}
+                  currentOf={currentOf}
+                  onApply={applyProposal}
+                  onUseCover={(d) => {
+                    setNewCover(d);
+                    setDropCover(false);
+                    setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
+                  }}
+                  onResearch={() => {
+                    openScrape();
+                  }}
+                  onToggleOpen={() => setScrapeOpen((v) => !v)}
+                />
+              </div>
+            )}
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ReviewPane
+                preview={preview}
+                fresh={previewFresh}
+                dirty={dirty}
+                busy={busy}
+                backup={backup}
+                onBackup={setBackup}
+                onPreview={() => void run(false)}
+                onWrite={() => void run(true)}
+                invalid={patch.invalid}
+                notice={notice}
+                failure={failure}
+              />
+            </div>
           </aside>
         </div>
       )}
