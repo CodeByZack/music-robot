@@ -43,13 +43,13 @@ function useJobPoll() {
 
 function Progress({ job }: { job: Job }) {
   const pct = job.total > 0 ? Math.round(((job.done + job.failed + job.skipped) / job.total) * 100) : 0;
+  const verb = job.kind === 'scan' ? '扫描' : '刮削';
+  // ⚠️ 别写成「扫描中（已完成）」那种拼凑 —— 跑完之后还带「中」是自相矛盾的
+  const label = job.status === 'running' ? `${verb}中` : job.status === 'done' ? `${verb}完成` : `${verb}失败`;
   return (
     <div className="mt-4 border-t border-line pt-4">
       <div className="flex items-baseline gap-2.5">
-        <b className="text-sm">
-          {job.kind === 'scan' ? '扫描中' : '刮削中'}
-          {job.status !== 'running' && (job.status === 'done' ? '（已完成）' : '（失败）')}
-        </b>
+        <b className="text-sm">{label}</b>
         <span className="text-note text-ink-3">
           {job.done} 成功 · {job.failed} 失败 · {job.skipped} 跳过 / 共 {job.total}
         </span>
