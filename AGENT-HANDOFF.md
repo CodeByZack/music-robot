@@ -72,7 +72,7 @@ curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json
 | Web 构建 | **121 modules**，JS 317.50 kB（gzip 97.10）· CSS 30.57 kB（gzip 6.57） | `pnpm --filter @music-robot/web build` |
 | HTTP 接口 | **34 条路径 / 43 个操作**（`/api/admin/users` 的 GET 与 `/api/history/stats` 是 2026-10-02 新增） | 对着 `src/server/routes/mod.rs` 数 |
 | 前端页面 | **15 条路由 = 15 个页面文件**（含 3 个全屏浮层页：`/settings` `/now` `/songs/:id/tags`） | `ls apps/web/src/pages/` |
-| 画布进度 | **24 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数） | `music-server-architecture.excalidraw` |
+| 画布进度 | **26 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数）；未绿的是 **S27 文件整理** 与 **S28 集成打包** | `music-server-architecture.excalidraw` |
 | 代码量 | Rust 39864 行 · `apps/web` 2671 行 · `packages/core` 1097 行 | `wc -l` |
 | 前端测试 | **0 个**（`find apps/web -name '*.test.*'` → 空） | 见 §3.4 |
 
@@ -139,7 +139,10 @@ history / song_requests 一串 CASCADE —— 没有需求就别动。
 从歌单移除、拖动排序（含「上移 / 下移」兼容触屏与键盘）全做了。
 一并补了后端的 `is_owner` —— 前端靠它决定给不给编辑入口（见 `routes::playlists.rs`） |
 | `api.jobs.list` 从未被调用 | 任务列表接口有客户端，界面只轮询单个 batch |
-| 画布 S25/S26 卡片文字过时 | 卡片上写的是计划，不是实际交付。S26 的四项里：标签编辑 ✅、刮削控制台 ✅、点歌请求 ✅、播放列表只做了一半 |
+| ~~画布 S25/S26 卡片文字过时~~ | ✅ **已修（2026-10-02）**：S25/S26 已标绿，标题带
+  「已完成 · 前端 UT 未写」。⛔ 但卡片上的「交付 / UT」那两行仍是**当初的计划原文**
+  （画布上所有绿卡都是这个规矩）—— 实际交付有出入，别把计划当现状：
+  S26 的「请求页」现已并入设置页，不是一个页面；「前端 UT」全部未写 |
 
 ### 3.3 UI 库这件事（**接手的第一个决策点**）
 
