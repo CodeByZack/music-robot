@@ -723,7 +723,10 @@ fn repoint_song_to_file(conn: &Connection, id: i64, song: &Song) -> Result<(), R
 /// 已有专辑只补缺失的年份，不覆盖封面 / 年份等已有成果 —— 专辑上的封面多半是
 /// 刮削写进去的，扫描顺手把它抹掉是不可接受的。album_artist 未知时用空串，
 /// 这是 repo 的约定（SQLite 的 UNIQUE 不把多个 NULL 当冲突）。
-fn upsert_album(conn: &Connection, meta: &AudioMetadata) -> Result<Option<i64>, RepoError> {
+///
+/// `pub(crate)`：手工编辑标签（`service::tag_edit`）改完专辑名也要走这条 ——
+/// 专辑换名 / 年份只补不覆盖 / 并发冲突复用行这些规则同样只能有一份实现。
+pub(crate) fn upsert_album(conn: &Connection, meta: &AudioMetadata) -> Result<Option<i64>, RepoError> {
     let name = match meta
         .albums
         .iter()
@@ -809,7 +812,10 @@ fn parse_year(raw: &str) -> Option<i64> {
 }
 
 /// 组装要落库的 Song（new_file 时 id = 0，insert 会忽略 id 取新行）。
-fn build_song(
+///
+/// `pub(crate)`：手工编辑标签（`service::tag_edit`）写完文件后也走这条映射 ——
+/// 「标签 → songs 行」必须只有一份实现，否则两处迟早漂移。
+pub(crate) fn build_song(
     id: i64,
     file_path: String,
     file_size: i64,

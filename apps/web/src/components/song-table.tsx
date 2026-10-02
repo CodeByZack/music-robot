@@ -5,6 +5,7 @@ import { api } from '@/lib/client.ts';
 import { usePlayer } from '@/lib/player.tsx';
 import { MenuButton, type MenuItem } from '@/components/menu.tsx';
 import { useWriteFiles } from '@/lib/scrape-prefs.ts';
+import { useSession } from '@/lib/session.tsx';
 
 /** 毫秒 → `3:58`。 */
 export function mmss(ms: number | null | undefined): string {
@@ -103,6 +104,12 @@ function RowMenu({ state, writeFiles, song, onRescrape }: {
   onRescrape: () => void;
 }) {
   const running = state?.phase === 'running';
+  const { user } = useSession();
+  /**
+   * 写标签仅管理员可用（后端 `PATCH /api/songs/{id}/tags` 挂的是 `AdminUser`），
+   * 所以非管理员**干脆不给这个入口** —— 点进去再收 403 是更差的体验。
+   */
+  const canEditTags = user?.role === 'admin';
   /**
    * 刚加进去的歌单 id —— 在二级列表里打「已添加」，不然点完没反馈。
    *
@@ -151,6 +158,9 @@ function RowMenu({ state, writeFiles, song, onRescrape }: {
         ) : undefined
       }
       items={[
+        ...(canEditTags
+          ? [{ label: '编辑标签', to: `/songs/${song.id}/tags` } satisfies MenuItem]
+          : []),
         { label: '添加到歌单', submenu: loadPlaylists },
         {
           label: running ? '刮削中…' : state?.phase === 'ok' ? '已重新刮削' : '重新刮削这首歌',

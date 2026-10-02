@@ -15,6 +15,9 @@ import type {
   ScrapeRequest,
   SettingsResponse,
   Song,
+  SongTags,
+  TagPatchRequest,
+  TagPatchResult,
   User,
 } from '../types.ts';
 
@@ -57,6 +60,22 @@ export function createApi(http: Http) {
       streamUrl: (id: number) => `/api/stream/${id}`,
       /** 封面地址。同上，靠 cookie。 */
       coverUrl: (id: number) => `/api/songs/${id}/cover`,
+    },
+
+    /**
+     * S26 标签编辑。
+     *
+     * ⚠️ **写文件是不可撤销的**（后端 `atomic_replace`：copy → tmp → verify → rename，
+     * 没有备份）。所以两件事：
+     * 1. `patch` 的 `dry_run` **默认为 true** —— 不传就只算差异，一个字节都不写；
+     * 2. 写文件仅管理员可用（后端 `AdminUser`），非管理员调用会 403。
+     */
+    tags: {
+      /** 当前**文件**标签（编辑器初值）。登录即可读。 */
+      get: (songId: number) => http.get<SongTags>(`/api/songs/${songId}/tags`),
+      /** 预览（默认）或写入。返回改动明细，界面直接展示，不用自己比字段。 */
+      patch: (songId: number, body: TagPatchRequest) =>
+        http.patch<TagPatchResult>(`/api/songs/${songId}/tags`, body),
     },
 
     albums: {

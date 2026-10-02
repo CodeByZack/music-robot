@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::config::Config;
 use crate::db::pool::DbPool;
 use crate::plugin::{LoadReport, PluginRegistry};
-use crate::service::{BatchRunner, LibraryService, ScrapeService};
+use crate::service::{BatchRunner, LibraryService, ScrapeService, TagEditService};
 use crate::watcher::SelfWriteRegistry;
 
 use super::error::ApiError;
@@ -54,6 +54,11 @@ pub struct AppState {
     /// 批量刮削执行器。同步阻塞，调用方必须把它搬进独立 OS 线程
     /// （std::thread），**不要**用 spawn_blocking —— 见模块级注释。
     pub scrape: Arc<BatchRunner>,
+    /// 手工编辑标签（Web 端）。同步阻塞（读文件 / 写文件 / 落库），
+    /// 调用方要 spawn_blocking —— 它比扫描轻得多，但确实是文件 IO。
+    /// 与刮削**共用同一份 SelfWriteRegistry**：两边都是「我们自己写的」，
+    /// 各搞一个的话 watcher 只会认其中一边。
+    pub tag_edit: Arc<TagEditService>,
     /// 启动时扫描插件目录的结果：加载了哪些、跳过了哪些及原因。
     ///
     /// 单独存一份的原因：刮削没工作时，「是没插件、还是插件全坏了」必须能一眼看到。
@@ -80,6 +85,11 @@ impl AppState {
 
         let registry = load_plugin_registry(&config);
         let plugin_report = Arc::new(registry.report().clone());
+        // 标签编辑服务与刮削共用同一份自写抑制表（两个 Arc 指同一个注册表）。
+        let tag_edit = Arc::new(TagEditService::new(
+            Arc::clone(&db),
+            Arc::clone(&self_write),
+        ));
         let scrape_service = ScrapeService::new(
             Arc::clone(&db),
             registry.into_plugins(),
@@ -92,6 +102,7 @@ impl AppState {
             library,
             jobs: Arc::new(JobRegistry::new()),
             scrape: Arc::new(BatchRunner::new(Arc::new(scrape_service))),
+            tag_edit,
             plugin_report,
         }
     }

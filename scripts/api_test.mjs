@@ -675,6 +675,51 @@ async function main() {
     [st] = await c.json('GET', '/api/songs/999999');
     check('不存在的歌 → 404', st, 404);
 
+    // ───────────────────────── 标签编辑（S26）─────────────────────────
+    //
+    // ⚠️ 这一段**只测 dry_run**，绝不真写文件 —— 这个脚本跑的是用户的真实曲库，
+    // 而写标签是不可撤销的（覆盖原文件、无备份）。「能写」这件事由
+    // `src/server/routes/tags.rs` 的 UT + 手工验证覆盖，这里守的是**契约与默认值**：
+    // 默认不写、只读接口的形状、以及错误输入被拒。
+    section('4.5 标签编辑（S26，只读 dry-run）');
+    let tagsBody;
+    [st, , tagsBody] = await c.json('GET', `/api/songs/${firstId}/tags`);
+    check('GET /api/songs/{id}/tags → 200', st, 200);
+    checkTrue('返回文件名（不含路径）', typeof tagsBody?.file?.name === 'string' && !tagsBody.file.name.includes('/'), brief(tagsBody?.file?.name));
+    checkTrue('返回 tags 对象', tagsBody?.tags !== null && typeof tagsBody?.tags === 'object', brief(Object.keys(tagsBody?.tags ?? {}).length + ' 个字段'));
+    checkTrue('lyrics_source 是三者之一', ['db', 'file', 'none'].includes(tagsBody?.tags?.lyrics_source), brief(tagsBody?.tags?.lyrics_source));
+
+    const titleBefore = tagsBody?.tags?.title ?? null;
+    // 1) **不传 dry_run** → 必须只算差异、不写盘
+    [st, , body] = await c.json('PATCH', `/api/songs/${firstId}/tags`, {
+      fields: { title: 'e2e-绝不该被写入' },
+    });
+    check('PATCH 标签（不传 dry_run）→ 200', st, 200);
+    check('默认 dry_run：applied=false', body?.applied ?? null, false);
+    check('默认 dry_run：changed=true', body?.changed ?? null, true);
+    checkTrue('预览给出了 title 这一处改动', (body?.diffs ?? []).some((d) => d.key === 'title'), brief(body?.diffs?.length));
+
+    // 2) 再读一次，确认**文件一个字节都没变**
+    [st, , tagsBody] = await c.json('GET', `/api/songs/${firstId}/tags`);
+    check('dry_run 之后文件未变', tagsBody?.tags?.title ?? null, titleBefore);
+
+    // 3) 没有任何改动 → changed=false
+    [st, , body] = await c.json('PATCH', `/api/songs/${firstId}/tags`, { fields: {} });
+    check('空 fields → 200', st, 200);
+    check('空 fields：changed=false', body?.changed ?? null, false);
+
+    // 4) 错误输入明确被拒（静默忽略会变成「保存成功但没生效」）
+    [st] = await c.json('PATCH', `/api/songs/${firstId}/tags`, { fields: { titel: 'x' } });
+    check('拼错字段名 → 400', st, 400);
+    [st] = await c.json('PATCH', `/api/songs/${firstId}/tags`, { fields: { track: '三' } });
+    check('字段类型错 → 400', st, 400);
+    [st] = await c.json('PATCH', `/api/songs/${firstId}/tags`, { dry_run: true });
+    check('缺 fields 对象 → 400', st, 400);
+    [st] = await c.json('PATCH', '/api/songs/999999/tags', { fields: {} });
+    check('不存在的歌（标签）→ 404', st, 404);
+    [st] = await c.json('GET', '/api/songs/999999/tags');
+    check('不存在的歌（读标签）→ 404', st, 404);
+
     [st] = await c.json('GET', '/api/search?q=%E7%99%BD');
     check('搜索 → 200', st, 200);
     [st, , body] = await c.json('GET', '/api/search?q=zzzz-nope-nothing');

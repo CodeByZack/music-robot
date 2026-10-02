@@ -192,3 +192,94 @@ export interface JobAccepted {
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
+
+// ── S26 标签编辑 ────────────────────────────────────────────────────────────
+//
+// 形状对着**真服务**核过（`GET/PATCH /api/songs/{id}/tags`）。
+
+/** 编辑器里的标签值。多值字段一律是数组；没有值就是 `null` / 空数组。 */
+export interface SongTagValues {
+  title: string | null;
+  artists: string[];
+  album: string | null;
+  album_artist: string | null;
+  track: number | null;
+  track_total: number | null;
+  disc: number | null;
+  disc_total: number | null;
+  year: string | null;
+  genres: string[];
+  composers: string[];
+  comment: string | null;
+  lyrics: string | null;
+  lyrics_timed: string | null;
+}
+
+/**
+ * 歌词的来源。
+ *
+ * `db` 表示这份歌词只在数据库里（刮削来的），**文件里没有** —— 界面要提示，
+ * 否则用户会以为歌词已经写进文件了。只改标题时后端会保住库里的歌词。
+ */
+export type LyricsSource = 'db' | 'file' | 'none';
+
+export interface SongTags {
+  song_id: number;
+  /** 文件信息。**只有文件名**，后端不暴露绝对路径。 */
+  file: { name: string; format: string | null; size: number | null };
+  tags: SongTagValues & { lyrics_source: LyricsSource; has_cover: boolean };
+}
+
+/**
+ * PATCH 的字段语义 —— 与后端的三种状态一一对应：
+ *
+ * * **不传**  = 保持原样（`undefined`，字段直接从对象里省略）
+ * * **传 null** = 清空该字段
+ * * **传值**  = 设为该值
+ */
+export type TagFieldPatch = Partial<{
+  title: string | null;
+  artists: string[] | null;
+  album: string | null;
+  album_artist: string | null;
+  track: number | null;
+  track_total: number | null;
+  disc: number | null;
+  disc_total: number | null;
+  year: string | null;
+  genres: string[] | null;
+  composers: string[] | null;
+  comment: string | null;
+  lyrics: string | null;
+  lyrics_timed: string | null;
+  /** 显式清空（与「传 null」等价，给批量清空用）。 */
+  unset: string[];
+}>;
+
+export interface TagPatchRequest {
+  fields: TagFieldPatch;
+  /**
+   * **默认为 true**：不传就只算差异、一个字节都不写。
+   * 要真正写文件必须显式传 `false`。
+   */
+  dry_run?: boolean;
+  /** 写前复制一份 `<file>.bak`（与 CLI 的 `--bak` 同语义）。 */
+  backup?: boolean;
+}
+
+/** 一处改动。`before` / `after` 已经是**给人看的字符串**（没有值显示为「(无)」）。 */
+export interface TagDiff {
+  key: string;
+  before: string;
+  after: string;
+}
+
+export interface TagPatchResult {
+  song_id: number;
+  file_name: string;
+  diffs: TagDiff[];
+  /** 有没有字段真的变了。false 时 `applied` 也一定是 false（后端不做无用功）。 */
+  changed: boolean;
+  /** 真的写盘了没有。 */
+  applied: boolean;
+}

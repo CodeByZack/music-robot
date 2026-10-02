@@ -44,6 +44,8 @@ export type Http = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
+  /** PATCH —— 局部更新。后端只在「只改一部分字段」的接口上用（如标签编辑）。 */
+  patch<T>(path: string, body?: unknown): Promise<T>;
   del<T>(path: string): Promise<T>;
 };
 
@@ -112,6 +114,7 @@ export function createHttp(options: HttpOptions): Http {
     get: (path) => request('GET', path),
     post: (path, body) => request('POST', path, body),
     put: (path, body) => request('PUT', path, body),
+    patch: (path, body) => request('PATCH', path, body),
     del: (path) => request('DELETE', path),
   } as Http;
 }

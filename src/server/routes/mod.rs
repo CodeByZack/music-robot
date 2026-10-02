@@ -77,6 +77,14 @@ pub mod playback;
 /// 模块头注释 —— 归一化是本步骤的核心，规则与理由都写在那里。
 pub mod requests;
 
+/// S26 手工编辑标签（/api/songs/{id}/tags）。
+///
+/// GET 读当前**文件**标签（登录即可）；PATCH 预览 / 写入标签，**仅 admin** ——
+/// 它会直接覆盖原文件且不可撤销（`atomic_replace` 无备份），与扫描 / 刮削同一量级。
+/// 请求体的 `dry_run` **默认为 true**，所以「预览」是默认行为，「写盘」要显式要求。
+/// 字段语义（不传 = 保持 / null = 清空 / 传值 = 设置）见 routes::tags 模块头注释。
+pub mod tags;
+
 /// 组装好的路由别名（state 已经塞进去，服务与测试都直接用）。
 pub type AppRouter = Router;
 
@@ -106,6 +114,11 @@ pub fn build_router(state: AppState) -> AppRouter {
         // 路径参数用 axum 0.8 的花括号写法（旧写法 :id 在 matchit 0.8 下会 panic）。
         .route("/api/library", get(library::library))
         .route("/api/songs/{id}", get(library::song))
+        // S26 标签编辑：GET 读当前**文件**标签（登录即可），PATCH 预览 / 写入标签。
+        // PATCH 会**直接覆盖原文件**且不可撤销（atomic_replace 无备份），所以它
+        // 在 handler 里用 AdminUser 提取器要求管理员，与 /api/scrape 同档；
+        // 且请求体的 `dry_run` **默认为 true**（忘了传不会误写）。
+        .route("/api/songs/{id}/tags", get(tags::get_tags).patch(tags::patch_tags))
         // 列表与详情并存：/api/albums 与 /api/albums/{id}、/api/artists 与 /api/artists/{name}
         .route("/api/albums", get(library::albums_list))
         .route("/api/albums/{id}", get(library::album))
