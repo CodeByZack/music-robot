@@ -32,6 +32,55 @@
   --radius-md: 8px;
   --radius-lg: 10px;
   --radius-xl: 16px;
+
+  /* ── 字阶 ─────────────────────────────────────────────────────────
+     **全站唯一的字号来源**。界面里不要写 `text-[13px]` 这种硬编码 ——
+     要整体放大 / 缩小，只改下面这几个值（档位见 docs/design.md §2.2）。
+     每档都带 **行高**：Tailwind 的 `text-*` 工具类会一起取用，
+     否则会编译出 `line-height: var(--tw-leading, )` 这种空回退。
+     ─────────────────────────────────────────────────────────────── */
+  --text-micro: 11px; /* 宽字距大写标签、格式徽标 */
+  --text-micro--line-height: 16px;
+  --text-cap: 12px; /* 表头、tabular 数字、次要说明 */
+  --text-cap--line-height: 16px;
+  --text-note: 13px; /* 小号正文、提示文字 */
+  --text-note--line-height: 18px;
+  --text-nav: 14px; /* 导航、列表正文（用得最多） */
+  --text-nav--line-height: 20px;
+  --text-lead: 16px; /* 小标题、强调 */
+  --text-lead--line-height: 24px;
+  --text-display: 24px; /* 列表里的 ♪ 占位字形 */
+  --text-display--line-height: 28px;
+  --text-brand: 28px; /* 登录页品牌字 */
+  --text-brand--line-height: 32px;
+  --text-glyph: 76px; /* 「正在播放」的大 ♪ */
+  --text-glyph--line-height: 80px;
+
+  /* Tailwind 的命名尺寸（text-xs / sm / base / xl / 2xl）也一并校准到同一档，
+     免得两套并存时同一片区域的字号对不上。 */
+  --text-xs: 13px;
+  --text-xs--line-height: 18px;
+  --text-sm: 15px;
+  --text-sm--line-height: 22px;
+  --text-base: 17px;
+  --text-base--line-height: 26px;
+  --text-lg: 19px;
+  --text-lg--line-height: 28px;
+  --text-xl: 22px;
+  --text-xl--line-height: 30px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 34px;
+  --text-3xl: 32px;
+  --text-3xl--line-height: 40px;
+
+  /* ── 图标 ─────────────────────────────────────────────────────────
+     同样**唯一来源**。SVG 不要写 `width="17"`，用 `.ico-md`（见文件末尾的 utilities）。
+     ─────────────────────────────────────────────────────────────── */
+  --icon-xs: 13px;
+  --icon-sm: 16px;
+  --icon-md: 18px;
+  --icon-lg: 21px;
+  --icon-xl: 28px;
 }
 
 @layer base {
@@ -100,5 +149,28 @@
     .anim-overlay-out {
       animation: none;
     }
+  }
+
+  /* 图标尺寸。SVG 上写这类 class 代替 `width="17" height="17"`，
+     值来自上面的 --icon-*，所以整体缩放只改那几个变量。 */
+  .ico-xs {
+    width: var(--icon-xs);
+    height: var(--icon-xs);
+  }
+  .ico-sm {
+    width: var(--icon-sm);
+    height: var(--icon-sm);
+  }
+  .ico-md {
+    width: var(--icon-md);
+    height: var(--icon-md);
+  }
+  .ico-lg {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+  }
+  .ico-xl {
+    width: var(--icon-xl);
+    height: var(--icon-xl);
   }
 }

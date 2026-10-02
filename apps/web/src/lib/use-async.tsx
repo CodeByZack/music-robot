@@ -50,7 +50,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
 /** 页面通用的「读了但没读成」提示。 */
 export function ErrorNote({ message, hint }: { message: string; hint?: ReactNode }) {
   return (
-    <div className="rounded-lg bg-surface p-5 text-[13px] text-ink-2">
+    <div className="rounded-lg bg-surface p-5 text-nav text-ink-2">
       {message}
       {hint && <div className="mt-2 text-xs text-ink-4">{hint}</div>}
     </div>
@@ -59,5 +59,5 @@ export function ErrorNote({ message, hint }: { message: string; hint?: ReactNode
 
 /** 正在读。别用 spinner —— 一行字够了，也不会因为抽搐让人分心。 */
 export function LoadingNote() {
-  return <p className="py-6 text-[13px] text-ink-4">读取中…</p>;
+  return <p className="py-6 text-nav text-ink-4">读取中…</p>;
 }

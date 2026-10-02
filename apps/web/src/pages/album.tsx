@@ -14,13 +14,13 @@ export default function AlbumPage() {
   return (
     <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
-        <Link to="/albums" className="text-[13px] text-ink-3 hover:text-ink">
+        <Link to="/albums" className="text-nav text-ink-3 hover:text-ink">
           ← 专辑
         </Link>
         <h1 className="mt-2 text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
           {data?.album.name ?? (loading ? '读取中…' : '专辑')}
         </h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {data?.album.album_artist ?? ''}
           {data?.album.year ? ` · ${data.album.year}` : ''}
           {data?.songs?.length ? ` · ${data.songs.length} 首` : ''}

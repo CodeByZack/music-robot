@@ -34,14 +34,14 @@ function Progress({ job }: { job: Job }) {
           {job.kind === 'scan' ? '扫描中' : '刮削中'}
           {job.status !== 'running' && (job.status === 'done' ? '（已完成）' : '（失败）')}
         </b>
-        <span className="text-[12.5px] text-ink-3">
+        <span className="text-note text-ink-3">
           {job.done} 成功 · {job.failed} 失败 · {job.skipped} 跳过 / 共 {job.total}
         </span>
       </div>
       <div className="my-3 h-1.5 overflow-hidden rounded-full bg-white/12">
         <i className="block h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
       </div>
-      {job.message && <div className="text-[12.5px] text-ink-3">{job.message}</div>}
+      {job.message && <div className="text-note text-ink-3">{job.message}</div>}
     </div>
   );
 }
@@ -49,7 +49,7 @@ function Progress({ job }: { job: Job }) {
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-4 rounded-lg bg-surface p-[18px]">
-      <div className="mb-3 text-[10px] tracking-[.24em] text-ink-4 uppercase">{title}</div>
+      <div className="mb-3 text-micro tracking-[.24em] text-ink-4 uppercase">{title}</div>
       {children}
     </div>
   );
@@ -59,7 +59,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   return (
     <div className="flex items-center gap-3.5 border-b border-line-weak py-[13px] last:border-b-0">
       <div className="min-w-0 flex-1">
-        <b className="block text-[13.5px] font-normal">{label}</b>
+        <b className="block text-nav font-normal">{label}</b>
         {hint && <span className="text-xs text-ink-3">{hint}</span>}
       </div>
       {children}
@@ -145,7 +145,7 @@ export default function SettingsPage() {
       ].join(' ')}
     >
       <div className="flex h-[58px] shrink-0 items-center gap-2 border-b border-line-weak px-5">
-          <h2 className="text-[15px] font-medium">设置</h2>
+          <h2 className="text-lead font-medium">设置</h2>
           <span className="flex-1" />
           <button
             type="button"
@@ -154,7 +154,7 @@ export default function SettingsPage() {
             aria-label="关闭设置"
             className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
           >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+            <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
               <path d="M4 4l8 8M12 4l-8 8" />
             </svg>
           </button>
@@ -169,7 +169,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => setSection(s.id)}
                 className={[
-                  'shrink-0 rounded-md px-3 py-2 text-left text-[13px] transition-colors',
+                  'shrink-0 rounded-md px-3 py-2 text-left text-nav transition-colors',
                   section === s.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
                 ].join(' ')}
               >
@@ -179,7 +179,7 @@ export default function SettingsPage() {
           </nav>
 
           <div className="min-h-0 flex-1 overflow-auto p-5">
-            {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-[12.5px] text-accent">{err}</p>}
+            {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-note text-accent">{err}</p>}
 
             {section === 'library' && (
               <>
@@ -205,7 +205,7 @@ export default function SettingsPage() {
             />
           </span>
           <span className="min-w-0">
-            <span className="text-[13.5px]">把刮削结果写入音乐文件</span>
+            <span className="text-nav">把刮削结果写入音乐文件</span>
             <br />
             <span className="text-xs text-ink-3">
               {writeFiles
@@ -225,7 +225,7 @@ export default function SettingsPage() {
                 onChange={(e) => setAck(e.target.checked)}
                 className="mt-0.5 shrink-0 accent-accent"
               />
-              <label htmlFor="ack" className="cursor-pointer text-[12.5px]">
+              <label htmlFor="ack" className="cursor-pointer text-note">
                 我确认要覆盖原文件。建议先关掉这个开关跑一次「只入库」看看结果，
                 确认插件写出来的标签是你要的，再打开它。
               </label>
@@ -237,7 +237,7 @@ export default function SettingsPage() {
           <button
             onClick={() => start('scrape')}
             disabled={(writeFiles && !ack) || scrapeJob?.status === 'running'}
-            className="h-[34px] rounded-full bg-accent px-4 text-[13px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-[34px] rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {scrapeJob?.status === 'running'
               ? '刮削中…'
@@ -254,7 +254,7 @@ export default function SettingsPage() {
           <button
             onClick={() => start('scan')}
             disabled={scanJob?.status === 'running'}
-            className="h-[34px] rounded-full bg-surface px-3.5 text-[13px] transition-colors hover:bg-surface-hover disabled:opacity-40"
+            className="h-[34px] rounded-full bg-surface px-3.5 text-nav transition-colors hover:bg-surface-hover disabled:opacity-40"
           >
             {scanJob?.status === 'running' ? '扫描中…' : '重新扫描'}
           </button>
@@ -298,7 +298,7 @@ export default function SettingsPage() {
               }
               logout();
             }}
-            className="h-[34px] rounded-full bg-surface px-3.5 text-[13px] transition-colors hover:bg-surface-hover"
+            className="h-[34px] rounded-full bg-surface px-3.5 text-nav transition-colors hover:bg-surface-hover"
           >
             退出登录
           </button>

@@ -129,6 +129,33 @@ blue #1b73fb  purple #c934e1   pink  #f05672
 
 **只有这 7 档，别发明第 8 档。**
 
+#### 2.2.1 落地：全站唯一的字号来源是 CSS 变量（2026-10-02）
+
+上面是**参考值**。真写代码时，**不要在 JSX 里写 `text-[13px]`** ——
+字号（和图标尺寸）统一在 `apps/web/src/global.css` 的 `@theme` 里定义，
+界面只引用 token：
+
+| token | 值（2026-10-02 整体上调后） | 用途 |
+|---|---|---|
+| `text-micro` | 11px / 16px | 宽字距大写标签、格式徽标 |
+| `text-cap` | 12px / 16px | 表头、tabular 数字、次要说明 |
+| `text-note` | 13px / 18px | 小号正文、提示 |
+| `text-nav` | **14px / 20px** | 导航、列表正文（用得最多） |
+| `text-lead` | 16px / 24px | 小标题、强调 |
+| `text-display` / `text-brand` / `text-glyph` | 24 / 28 / 76px | 占位字形、登录品牌字、播放页大音符 |
+
+> `--text-*` 和 `--icon-*` 每档都**必须带 `--line-height`**：Tailwind 的
+> `text-<name>` 工具类会取 `var(--text-<name>--line-height)`，缺了会编译成
+> `line-height: var(--tw-leading, )` 这种空回退。
+
+Tailwind 自带的 `text-xs / sm / base / xl / 2xl` **也已校准到同一档**
+（13 / 15 / 17 / 22 / 26px），所以两种写法混用时大小不会打架 ——
+但新代码优先用语义 token。
+
+**要整体放大 / 缩小界面，只改 `@theme` 里那十几个值**，不要再去改各个页面。
+图标同理：SVG 上写 `.ico-xs / sm / md / lg / xl`（值来自 `--icon-*`），
+不要写 `width="17"`。
+
 ### 2.3 字重
 
 只用 `400` / `500`（次级强调，如曲名）/ `600`（标题、logo）。**不用 700 以上**——

@@ -28,13 +28,13 @@ export default function LoginPage() {
   return (
     <div className="fixed inset-0 z-50 flex">
       {/* 角落的宽字距小标签：成本几乎为零，但立刻显得"有人设计过" */}
-      <span className="absolute top-[38px] left-[40px] text-[10px] tracking-[.28em] text-ink-4 uppercase max-[640px]:hidden">
+      <span className="absolute top-[38px] left-[40px] text-micro tracking-[.28em] text-ink-4 uppercase max-[640px]:hidden">
         Personal Music Archive
       </span>
-      <span className="absolute bottom-[38px] left-[40px] text-[10px] tracking-[.28em] text-ink-4 uppercase max-[640px]:hidden">
+      <span className="absolute bottom-[38px] left-[40px] text-micro tracking-[.28em] text-ink-4 uppercase max-[640px]:hidden">
         Tracks // Albums // Artists
       </span>
-      <span className="absolute top-1/2 right-[34px] -translate-y-1/2 text-[10px] tracking-[.3em] text-ink-4 uppercase [writing-mode:vertical-rl] max-[640px]:hidden">
+      <span className="absolute top-1/2 right-[34px] -translate-y-1/2 text-micro tracking-[.3em] text-ink-4 uppercase [writing-mode:vertical-rl] max-[640px]:hidden">
         music-robot
       </span>
 
@@ -44,12 +44,12 @@ export default function LoginPage() {
       >
         <div className="mb-[34px] flex items-center gap-[13px]">
           <span className="flex size-[52px] items-center justify-center rounded-[14px] bg-accent text-white shadow-[0_1px_4px_#0006]">
-            <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
+            <svg className="ico-xl" viewBox="0 0 16 16" fill="currentColor">
               <path d="M6 12.5a2 2 0 1 1-1.5-1.94V4.2l7-1.6v7.4a2 2 0 1 1-1.5-1.94V5.1L6 6.1z" />
             </svg>
           </span>
           <span>
-            <b className="block text-[27px] leading-8 font-semibold">music-robot</b>
+            <b className="block text-brand leading-8 font-semibold">music-robot</b>
             <span className="text-xs text-ink-3">自建音乐服务器</span>
           </span>
         </div>
@@ -78,7 +78,7 @@ export default function LoginPage() {
         </label>
 
         {error && (
-          <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-[12.5px] leading-[18px] text-accent">
+          <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-note leading-[18px] text-accent">
             {error}
           </p>
         )}

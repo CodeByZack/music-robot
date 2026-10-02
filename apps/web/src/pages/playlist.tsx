@@ -18,13 +18,13 @@ export default function PlaylistPage() {
   return (
     <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
-        <Link to="/playlists" className="text-[13px] text-ink-3 hover:text-ink">
+        <Link to="/playlists" className="text-nav text-ink-3 hover:text-ink">
           ← 歌单
         </Link>
         <h1 className="mt-2 text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
           {playlist?.name ?? (loading ? '读取中…' : '歌单')}
         </h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {playlist?.description || (playlist ? (playlist.is_public ? '公开' : '私有') : '')}
           {songs.length > 0 && ` · ${songs.length} 首`}
         </div>

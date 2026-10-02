@@ -24,7 +24,7 @@ const MODE_LABEL: Record<PlayMode, string> = {
 function ModeIcon({ mode }: { mode: PlayMode }) {
   if (mode === 'shuffle') {
     return (
-      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      <svg className="ico-md" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
         <path d="M2 5h2.5l7 6H14" /><path d="M2 11h2.5l7-6H14" />
         <path d="M12 3.2 14 5l-2 1.8" /><path d="M12 9.2 14 11l-2 1.8" />
       </svg>
@@ -32,13 +32,13 @@ function ModeIcon({ mode }: { mode: PlayMode }) {
   }
   if (mode === 'order') {
     return (
-      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+      <svg className="ico-md" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
         <path d="M2 4h12M2 8h12M2 12h7" />
       </svg>
     );
   }
   return (
-    <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ico-md" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 8a5 5 0 0 1 5-5h3.5" /><path d="M9.5 1.2 11.7 3 9.5 4.8" />
       <path d="M13 8a5 5 0 0 1-5 5H4.5" /><path d="M6.5 14.8 4.3 13l2.2-1.8" />
       {mode === 'repeat-one' && <path d="M8 6.6v3" />}
@@ -90,7 +90,7 @@ function VolumeBtn({ volume, setVolume }: { volume: number; setVolume: (v: numbe
   return (
     <div ref={wrap} className="relative">
       <IconBtn title="音量" on={volume === 0} onClick={() => setOpen((v) => !v)}>
-        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <svg className="ico-md" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 6h2l3-2.5v9L5 10H3z" />
           {volume > 0.05 && <path d="M10.5 6.2a2.6 2.6 0 0 1 0 3.6" />}
           {volume > 0.6 && <path d="M12.2 4.6a5 5 0 0 1 0 6.8" />}
@@ -110,7 +110,7 @@ function VolumeBtn({ volume, setVolume }: { volume: number; setVolume: (v: numbe
             style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
             className="h-[82px] accent-accent"
           />
-          <span className="mt-1 text-[10px] text-ink-3 tabular-nums">{Math.round(volume * 100)}</span>
+          <span className="mt-1 text-micro text-ink-3 tabular-nums">{Math.round(volume * 100)}</span>
         </div>
       )}
     </div>
@@ -205,20 +205,20 @@ export default function NowPage() {
       {/* 顶栏：左上 ⌄ 收起、右上 ✕ 关闭 —— 两个都只是「离开播放页」 */}
       <header className="relative z-10 flex h-[58px] shrink-0 items-center px-4">
         <IconBtn title="收起" onClick={back}>
-          <svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+          <svg className="ico-lg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
             <path d="M3.5 6 8 10.5 12.5 6" />
           </svg>
         </IconBtn>
         <span className="flex-1" />
         <IconBtn title="关闭" onClick={back}>
-          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+          <svg className="ico-md" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
         </IconBtn>
       </header>
 
       {!p.song ? (
-        <div className="relative z-10 grid flex-1 place-items-center text-[13px] text-ink-3">
+        <div className="relative z-10 grid flex-1 place-items-center text-nav text-ink-3">
           还没有在放的歌。去音乐库点一首。
         </div>
       ) : (
@@ -233,7 +233,7 @@ export default function NowPage() {
                 type="button"
                 onClick={() => setPane(k)}
                 className={[
-                  'rounded-full px-4 py-[6px] text-[13px] transition-colors',
+                  'rounded-full px-4 py-[6px] text-nav transition-colors',
                   pane === k ? 'bg-surface text-ink' : 'text-ink-3',
                 ].join(' ')}
               >
@@ -255,13 +255,13 @@ export default function NowPage() {
               id={p.song.id}
               className="size-[190px] border border-line shadow-[0_8px_32px_rgba(0,0,0,.42)] min-[901px]:size-[330px]"
               rounded="rounded-2xl"
-              glyphClass="text-[74px]"
+              glyphClass="text-glyph"
             />
 
             <div className="mt-[18px] text-xl leading-7 font-semibold min-[901px]:mt-[26px] min-[901px]:text-2xl min-[901px]:leading-8">
               {p.song.title ?? '（无标题）'}
             </div>
-            <div className="mt-1 text-[13px] text-ink-3">
+            <div className="mt-1 text-nav text-ink-3">
               {[p.song.artists ?? '（未知歌手）', p.song.album].filter(Boolean).join(' · ')}
             </div>
 
@@ -280,12 +280,12 @@ export default function NowPage() {
                   style={{ left: `${pct}%` }}
                 />
                 {p.song.format && (
-                  <span className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[3px] bg-white/10 px-[6px] py-[1px] text-[9px] tracking-[.1em] text-ink-3 uppercase backdrop-blur-sm">
+                  <span className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[3px] bg-white/10 px-[6px] py-[1px] text-micro tracking-[.1em] text-ink-3 uppercase backdrop-blur-sm">
                     {p.song.format}
                   </span>
                 )}
               </div>
-              <div className="mt-[9px] flex justify-between text-[11px] text-ink-3 tabular-nums">
+              <div className="mt-[9px] flex justify-between text-cap text-ink-3 tabular-nums">
                 <span>{clock(p.positionMs)}</span>
                 <span>{clock(p.durationMs)}</span>
               </div>
@@ -297,7 +297,7 @@ export default function NowPage() {
                 <ModeIcon mode={p.queue.mode} />
               </IconBtn>
               <IconBtn onClick={p.prev} title="上一首">
-                <svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor">
+                <svg className="ico-lg" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M12.5 4v8l-6-4z" /><path d="M3.5 4h1.2v8H3.5z" />
                 </svg>
               </IconBtn>
@@ -309,17 +309,17 @@ export default function NowPage() {
                 className="mx-2.5 flex size-14 items-center justify-center rounded-full bg-ink text-[#14121b] transition-transform hover:scale-105"
               >
                 {p.playing ? (
-                  <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor">
+                  <svg className="ico-md" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M5 3.5h2.4v9H5zM8.6 3.5H11v9H8.6z" />
                   </svg>
                 ) : (
-                  <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor">
+                  <svg className="ico-md" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M5 3.5v9L13 8z" />
                   </svg>
                 )}
               </button>
               <IconBtn onClick={p.next} title="下一首">
-                <svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor">
+                <svg className="ico-lg" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M3.5 4v8l6-4z" /><path d="M11.3 4h1.2v8h-1.2z" />
                 </svg>
               </IconBtn>
@@ -336,14 +336,14 @@ export default function NowPage() {
           >
             <div ref={lyricsRef} className="min-h-0 flex-1 overflow-auto pr-2 min-[901px]:max-h-[70vh]">
               {lyrics.length === 0 ? (
-                <p className="text-[13px] text-ink-3">这首歌没有内嵌歌词。</p>
+                <p className="text-nav text-ink-3">这首歌没有内嵌歌词。</p>
               ) : (
                 lyrics.map((line, i) => (
                   <p
                     key={i}
                     ref={i === activeLine ? activeRef : undefined}
                     className={[
-                      'mb-1 text-[15px] leading-[30px] transition-colors',
+                      'mb-1 text-lead leading-[30px] transition-colors',
                       i === activeLine ? 'text-ink' : 'text-ink-4',
                     ].join(' ')}
                   >
@@ -363,8 +363,8 @@ export default function NowPage() {
           {queueOpen && (
             <div className="max-h-[min(60vh,420px)] w-[min(360px,calc(100vw-40px))] overflow-auto rounded-xl border border-line bg-[#0a0a0ee6] p-2 shadow-[0_8px_32px_#000a] backdrop-blur-xl">
               <div className="flex items-center gap-2 px-2.5 py-1.5">
-                <b className="text-[12px] font-normal text-ink-2">播放队列</b>
-                <span className="text-[11px] text-ink-4">{p.queueSongs.length}</span>
+                <b className="text-note font-normal text-ink-2">播放队列</b>
+                <span className="text-cap text-ink-4">{p.queueSongs.length}</span>
                 <span className="flex-1" />
                 <button
                   type="button"
@@ -373,7 +373,7 @@ export default function NowPage() {
                   aria-label="关闭队列"
                   className="flex size-6 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
                 >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+                  <svg className="ico-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
                     <path d="M4 4l8 8M12 4l-8 8" />
                   </svg>
                 </button>
@@ -388,18 +388,18 @@ export default function NowPage() {
                     p.song?.id === s.id ? 'bg-accent-soft' : '',
                   ].join(' ')}
                 >
-                  <span className="w-4 shrink-0 text-center text-[11px] text-ink-4 tabular-nums">
+                  <span className="w-4 shrink-0 text-center text-cap text-ink-4 tabular-nums">
                     {p.song?.id === s.id ? '▶' : i + 1}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={['block overflow-hidden text-[13px] text-ellipsis whitespace-nowrap', p.song?.id === s.id ? 'text-accent' : ''].join(' ')}>
+                    <span className={['block overflow-hidden text-nav text-ellipsis whitespace-nowrap', p.song?.id === s.id ? 'text-accent' : ''].join(' ')}>
                       {s.title ?? '（无标题）'}
                     </span>
-                    <span className="block overflow-hidden text-[11.5px] text-ellipsis whitespace-nowrap text-ink-3">
+                    <span className="block overflow-hidden text-cap text-ellipsis whitespace-nowrap text-ink-3">
                       {s.artists ?? '（未知歌手）'}
                     </span>
                   </span>
-                  <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">
+                  <span className="shrink-0 text-cap text-ink-3 tabular-nums">
                     {clock(s.duration_ms ?? 0)}
                   </span>
                 </button>
@@ -413,11 +413,11 @@ export default function NowPage() {
             title="播放队列"
             aria-label="播放队列"
             className={[
-              'flex h-10 items-center gap-2 rounded-full border border-line px-3.5 text-[12.5px] backdrop-blur-xl transition-colors',
+              'flex h-10 items-center gap-2 rounded-full border border-line px-3.5 text-note backdrop-blur-xl transition-colors',
               queueOpen ? 'bg-surface-press text-ink' : 'bg-[#ffffff12] text-ink-2 hover:bg-surface-hover hover:text-ink',
             ].join(' ')}
           >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+            <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
               <path d="M2 4.5h12M2 8h12M2 11.5h7" />
               <circle cx="12.4" cy="11.5" r="1.7" fill="currentColor" stroke="none" />
             </svg>

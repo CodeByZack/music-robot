@@ -62,17 +62,18 @@ function SongTiles({ songs }: { songs: Song[] }) {
               rounded="rounded-lg"
               glyphClass="text-3xl"
             />
-            {/* 播放按钮：**常显** + 48px。
-                以前是 32px 且只在 hover 时浮现（`opacity-0 group-hover:opacity-100`）——
-                对这么大的卡来说太小（用户 2026-10-02 反馈），而且**触屏上根本没有 hover**，
-                那个按钮永远不出现。 */}
-            <span className="absolute right-2.5 bottom-2.5 flex size-12 items-center justify-center rounded-full bg-accent text-white shadow-[0_4px_16px_rgba(0,0,0,.5)] transition-transform duration-200 group-hover:scale-110">
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M5 3.5v9L13 8z" />
-              </svg>
+            {/* 播放按钮：**居中** + 悬停才浮现（Spotify / Apple Music 的通行做法）。
+                实心整块卡片本身就是播放按钮，所以这个圆钮只是「看得见的提示」，
+                不是唯一入口 —— 触屏上直接点卡片就行，不依赖它。 */}
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span className="flex size-12 scale-90 items-center justify-center rounded-full bg-accent text-white opacity-0 shadow-[0_6px_20px_rgba(0,0,0,.55)] transition-all duration-200 group-hover:scale-100 group-hover:opacity-100">
+                <svg className="ico-md" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M5 3.5v9L13 8z" />
+                </svg>
+              </span>
             </span>
           </div>
-          <div className={['mt-2 overflow-hidden text-[13.5px] font-medium text-ellipsis whitespace-nowrap', player.song?.id === s.id ? 'text-accent' : 'group-hover:text-ink'].join(' ')}>
+          <div className={['mt-2 overflow-hidden text-nav font-medium text-ellipsis whitespace-nowrap', player.song?.id === s.id ? 'text-accent' : 'group-hover:text-ink'].join(' ')}>
             {s.title ?? '（无标题）'}
           </div>
           <div className="overflow-hidden text-xs text-ellipsis whitespace-nowrap text-ink-3">
@@ -104,7 +105,7 @@ export default function HomePage() {
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
           {user ? `${user.username}，晚上好` : '晚上好'}
         </h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {rec.data ? `共 ${rec.data.total} 首歌` : '读取中…'}
           {hist.data ? ` · 最近播放 ${hist.data.total} 次` : ''}
         </div>
@@ -120,10 +121,10 @@ export default function HomePage() {
             className="flex h-[104px] flex-col items-start justify-between rounded-xl p-[14px] text-white transition-[filter] hover:brightness-110 min-[901px]:h-[138px]
                        max-[640px]:h-[92px] max-[640px]:p-3"
           >
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="opacity-90">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="ico-lg opacity-90">
               <path d={t.d} />
             </svg>
-            <b className="text-[15px] font-medium tracking-[.02em]">{t.label}</b>
+            <b className="text-lead font-medium tracking-[.02em]">{t.label}</b>
           </Link>
         ))}
       </div>
@@ -134,7 +135,7 @@ export default function HomePage() {
       {hist.loading ? (
         <LoadingNote />
       ) : recentPlayed.length === 0 ? (
-        <p className="py-6 text-[13px] text-ink-3">
+        <p className="py-6 text-nav text-ink-3">
           还没有播放记录。{hist.data?.total ? '（有记录但曲目已不在库里）' : '去音乐库点一首试试。'}
         </p>
       ) : (

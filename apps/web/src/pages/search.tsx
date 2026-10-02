@@ -24,7 +24,7 @@ export default function SearchPage() {
     <div className="flex-1 overflow-auto px-[22px] pt-1.5 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">搜索</h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {!q
             ? '在顶栏的搜索框里输入关键词'
             : loading
@@ -40,7 +40,7 @@ export default function SearchPage() {
       ) : loading ? (
         <LoadingNote />
       ) : !q ? null : (data?.items.length ?? 0) === 0 ? (
-        <p className="py-6 text-[13px] text-ink-3">没有找到匹配的歌曲。</p>
+        <p className="py-6 text-nav text-ink-3">没有找到匹配的歌曲。</p>
       ) : (
         <SongTable songs={data?.items ?? []} />
       )}

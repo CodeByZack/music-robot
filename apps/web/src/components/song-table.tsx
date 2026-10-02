@@ -107,7 +107,7 @@ function RowMenu({ state, writeFiles, onRescrape }: {
       title="更多操作"
       header={
         state?.phase === 'err' ? (
-          <p className="max-w-[230px] text-[11.5px] leading-4 text-accent">{state.message}</p>
+          <p className="max-w-[230px] text-cap leading-4 text-accent">{state.message}</p>
         ) : undefined
       }
       items={[
@@ -120,7 +120,7 @@ function RowMenu({ state, writeFiles, onRescrape }: {
         },
       ]}
     >
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+      <svg className="ico-sm" viewBox="0 0 16 16" fill="currentColor">
         <circle cx="3.4" cy="8" r="1.3" />
         <circle cx="8" cy="8" r="1.3" />
         <circle cx="12.6" cy="8" r="1.3" />
@@ -174,11 +174,11 @@ export default function SongTable({
   const rows = songs.map((s) => patched.get(s.id) ?? s);
 
   if (songs.length === 0) {
-    return <p className="py-8 text-[13px] text-ink-3">这里还没有歌。</p>;
+    return <p className="py-8 text-nav text-ink-3">这里还没有歌。</p>;
   }
 
   return (
-    <table className="w-full border-collapse text-[13.5px] max-[900px]:[table-layout:fixed]">
+    <table className="w-full border-collapse text-nav max-[900px]:[table-layout:fixed]">
       <thead>
         <tr>
           {showIndex && (
@@ -196,7 +196,7 @@ export default function SongTable({
           <th className="w-[62px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
             时长
           </th>
-          <th className="w-[60px] border-b border-line px-3 pb-[9px] text-left text-[11px] tracking-[.06em] text-ink-4 max-[1024px]:hidden">
+          <th className="w-[60px] border-b border-line px-3 pb-[9px] text-left text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
             格式
           </th>
           {/* ⋯ 放**最后一列**（以前夹在 ♡ 与 时长 中间，把数据列切断了）。
@@ -229,7 +229,7 @@ export default function SongTable({
                   id={s.id}
                   className="size-[34px]"
                   rounded="rounded-md"
-                  glyphClass="text-[13px]"
+                  glyphClass="text-nav"
                 />
                 <span className="min-w-0">
                   <div
@@ -243,7 +243,7 @@ export default function SongTable({
                   <div className="overflow-hidden text-xs leading-4 text-ellipsis whitespace-nowrap text-ink-3">
                     {s.artists ?? '（未知歌手）'}
                     {isDirtyArtist(s.artists) && (
-                      <span className="ml-1.5 inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-[10px] tracking-[.04em] text-accent">
+                      <span className="ml-1.5 inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-micro tracking-[.04em] text-accent">
                         脏标签
                       </span>
                     )}
@@ -263,7 +263,7 @@ export default function SongTable({
                   fav.ids.has(s.id) ? 'text-accent' : 'text-ink-4',
                 ].join(' ')}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill={fav.ids.has(s.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.4}>
+                <svg className="ico-sm" viewBox="0 0 16 16" fill={fav.ids.has(s.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.4}>
                   <path d="M8 13.5S2.5 10.2 2.5 6.4A2.9 2.9 0 0 1 8 5a2.9 2.9 0 0 1 5.5 1.4c0 3.8-5.5 7.1-5.5 7.1z" />
                 </svg>
               </button>
@@ -271,7 +271,7 @@ export default function SongTable({
             <td className="border-b border-line-weak px-3 text-right text-ink-3 tabular-nums">
               {mmss(s.duration_ms)}
             </td>
-            <td className="border-b border-line-weak px-3 text-[11px] tracking-[.06em] text-ink-4 max-[1024px]:hidden">
+            <td className="border-b border-line-weak px-3 text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
               {s.format ?? '—'}
             </td>
             <td className="border-b border-line-weak px-3 text-center">

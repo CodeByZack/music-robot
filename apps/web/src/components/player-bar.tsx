@@ -20,14 +20,14 @@ const MODE_LABEL: Record<PlayMode, string> = {
 function ModeIcon({ mode }: { mode: PlayMode }) {
   if (mode === 'order') {
     return (
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+      <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
         <path d="M2 4h12M2 8h12M2 12h7" />
       </svg>
     );
   }
   if (mode === 'shuffle') {
     return (
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
         <path d="M2 5h2.5l7 6H14" />
         <path d="M2 11h2.5l7-6H14" />
         <path d="M12 3.2 14 5l-2 1.8" />
@@ -36,7 +36,7 @@ function ModeIcon({ mode }: { mode: PlayMode }) {
     );
   }
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 8a5 5 0 0 1 5-5h3.5" />
       <path d="M9.5 1.2 11.7 3 9.5 4.8" />
       <path d="M13 8a5 5 0 0 1-5 5H4.5" />
@@ -99,7 +99,7 @@ export default function PlayerBar() {
         title="上一首"
         className="flex size-[30px] shrink-0 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <svg className="ico-sm" viewBox="0 0 16 16" fill="currentColor">
           <path d="M12.5 4v8l-6-4z" />
           <path d="M3.5 4h1.2v8H3.5z" />
         </svg>
@@ -111,11 +111,11 @@ export default function PlayerBar() {
         className="flex size-[34px] shrink-0 items-center justify-center rounded-full bg-ink text-[#14121b] transition-transform hover:scale-105"
       >
         {playing ? (
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <svg className="ico-xs" viewBox="0 0 16 16" fill="currentColor">
             <path d="M5 3.5h2.4v9H5zM8.6 3.5H11v9H8.6z" />
           </svg>
         ) : (
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <svg className="ico-xs" viewBox="0 0 16 16" fill="currentColor">
             <path d="M5 3.5v9L13 8z" />
           </svg>
         )}
@@ -126,14 +126,14 @@ export default function PlayerBar() {
         title="下一首"
         className="flex size-[30px] shrink-0 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <svg className="ico-sm" viewBox="0 0 16 16" fill="currentColor">
           <path d="M3.5 4v8l6-4z" />
           <path d="M11.3 4h1.2v8h-1.2z" />
         </svg>
       </button>
 
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <span className="shrink-0 text-[11px] text-ink-3 tabular-nums max-[900px]:hidden">
+        <span className="shrink-0 text-cap text-ink-3 tabular-nums max-[900px]:hidden">
           {clock(positionMs)}
         </span>
         <div
@@ -148,7 +148,7 @@ export default function PlayerBar() {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="shrink-0 text-[11px] text-ink-3 tabular-nums max-[900px]:hidden">
+        <span className="shrink-0 text-cap text-ink-3 tabular-nums max-[900px]:hidden">
           {clock(durationMs)}
         </span>
       </div>

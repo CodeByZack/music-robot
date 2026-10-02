@@ -22,7 +22,7 @@ export default function LibraryPage() {
           <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
             音乐库
           </h1>
-          <div className="mt-1 text-[13px] text-ink-3">
+          <div className="mt-1 text-nav text-ink-3">
             {error ? '读取失败' : loading ? '读取中…' : `共 ${data?.total ?? 0} 首`}
           </div>
         </div>

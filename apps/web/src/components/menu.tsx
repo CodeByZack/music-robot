@@ -103,14 +103,14 @@ export function MenuButton({
           {header && <div className="border-b border-line-weak px-3 pt-2 pb-2.5">{header}</div>}
           {items.map((it) => {
             const cls = [
-              'flex w-full items-center justify-between gap-3 px-3 py-[7px] text-left text-[13px] transition-colors',
+              'flex w-full items-center justify-between gap-3 px-3 py-[7px] text-left text-nav transition-colors',
               it.disabled ? 'cursor-not-allowed text-ink-4' : 'hover:bg-surface-hover',
               !it.disabled && it.danger ? 'text-accent' : !it.disabled ? 'text-ink-2' : '',
             ].join(' ');
             const inner = (
               <>
                 <span>{it.label}</span>
-                {it.hint && <span className="shrink-0 text-[11px] text-ink-4">{it.hint}</span>}
+                {it.hint && <span className="shrink-0 text-cap text-ink-4">{it.hint}</span>}
               </>
             );
             return it.to ? (

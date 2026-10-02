@@ -39,18 +39,17 @@ function readRail(): boolean {
   }
 }
 
-function Icon({ d, size = 15 }: { d: string; size?: number }) {
+/** 导航图标。尺寸走 `.ico-*`（值来自 `--icon-*`），不写死像素。 */
+function Icon({ d, size = 'sm' }: { d: string; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   return (
     <svg
-      width={size}
-      height={size}
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="shrink-0"
+      className={`ico-${size} shrink-0`}
     >
       <path d={d} />
     </svg>
@@ -74,7 +73,7 @@ function SideNav({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void 
         ].join(' ')}
       >
         <span className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-accent text-white">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <svg className="ico-sm" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 12.5a2 2 0 1 1-1.5-1.94V4.2l7-1.6v7.4a2 2 0 1 1-1.5-1.94V5.1L6 6.1z" />
           </svg>
         </span>
@@ -91,7 +90,7 @@ function SideNav({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void 
             onClick={onNavigate}
             className={({ isActive }) =>
               [
-                'flex items-center rounded-md py-2 text-[13px] transition-colors',
+                'flex items-center rounded-md py-2 text-nav transition-colors',
                 rail ? 'justify-center' : 'gap-[10px] px-[10px]',
                 isActive ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
               ].join(' ')
@@ -116,8 +115,8 @@ function UserMenu() {
       title="账号"
       header={
         <div>
-          <div className="text-[13px] text-ink">{user?.username ?? '未登录'}</div>
-          <div className="text-[11px] text-ink-4">{user?.role === 'admin' ? '管理员' : '普通用户'}</div>
+          <div className="text-nav text-ink">{user?.username ?? '未登录'}</div>
+          <div className="text-cap text-ink-4">{user?.role === 'admin' ? '管理员' : '普通用户'}</div>
         </div>
       }
       items={[
@@ -137,7 +136,7 @@ function UserMenu() {
         },
       ]}
     >
-      <span className="flex size-7 items-center justify-center rounded-full bg-surface text-[12px] font-medium text-ink-2">
+      <span className="flex size-7 items-center justify-center rounded-full bg-surface text-note font-medium text-ink-2">
         {initial}
       </span>
     </MenuButton>
@@ -161,9 +160,9 @@ function SearchBox() {
         const v = q.trim();
         if (v) navigate(`/search?q=${encodeURIComponent(v)}`);
       }}
-      className="flex h-9 w-full max-w-[460px] items-center gap-[9px] rounded-full bg-surface px-[14px] text-[13px] text-ink-4 transition-colors focus-within:bg-surface-hover"
+      className="flex h-9 w-full max-w-[460px] items-center gap-[9px] rounded-full bg-surface px-[14px] text-nav text-ink-4 transition-colors focus-within:bg-surface-hover"
     >
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+      <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
         <circle cx="7" cy="7" r="4.6" />
         <path d="m10.6 10.6 3 3" />
       </svg>
@@ -188,7 +187,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
         onClick={onMenu}
         className="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink min-[901px]:hidden"
       >
-        <Icon d="M2 4h12M2 8h12M2 12h12" size={17} />
+        <Icon d="M2 4h12M2 8h12M2 12h12" size="md" />
       </button>
 
       <SearchBox />
@@ -239,7 +238,7 @@ export function Shell({ children }: { children: ReactNode }) {
           title={rail ? '展开' : '收起'}
           aria-label={rail ? '展开侧边栏' : '收起侧边栏'}
           className={[
-            'flex items-center rounded-md py-2 text-[13px] text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
+            'flex items-center rounded-md py-2 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
             rail ? 'justify-center' : 'gap-[10px] px-[10px]',
           ].join(' ')}
         >

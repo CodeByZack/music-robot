@@ -13,7 +13,7 @@ export default function FavoritesPage() {
     <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">收藏</h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {error ? '读取失败' : loading ? '读取中…' : `${data?.total ?? 0} 首`}
         </div>
       </div>
@@ -23,7 +23,7 @@ export default function FavoritesPage() {
       ) : loading ? (
         <LoadingNote />
       ) : (data?.items ?? []).length === 0 ? (
-        <p className="py-6 text-[13px] text-ink-3">
+        <p className="py-6 text-nav text-ink-3">
           还没有收藏。去<Link to="/library" className="text-accent">音乐库</Link>点心形标记。
         </p>
       ) : (

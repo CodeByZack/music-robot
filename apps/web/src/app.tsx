@@ -28,7 +28,7 @@ function Gate() {
 
   // 没问完 /auth/me 之前先别渲染 —— 否则刷新页面会闪一下登录页
   if (!ready) {
-    return <div className="grid h-full place-items-center text-[13px] text-ink-4">载入中…</div>;
+    return <div className="grid h-full place-items-center text-nav text-ink-4">载入中…</div>;
   }
   if (!user) return <LoginPage />;
 

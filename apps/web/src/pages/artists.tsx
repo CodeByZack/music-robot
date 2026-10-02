@@ -13,7 +13,7 @@ export default function ArtistsPage() {
     <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">歌手</h1>
-        <div className="mt-1 text-[13px] text-ink-3">
+        <div className="mt-1 text-nav text-ink-3">
           {error ? '读取失败' : loading ? '读取中…' : `${data?.total ?? 0} 位`}
         </div>
       </div>
@@ -23,7 +23,7 @@ export default function ArtistsPage() {
       ) : loading ? (
         <LoadingNote />
       ) : (
-        <table className="w-full border-collapse text-[13.5px]">
+        <table className="w-full border-collapse text-nav">
           <thead>
             <tr>
               <th className="w-[46px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4" />
@@ -55,7 +55,7 @@ export default function ArtistsPage() {
                     <div className="overflow-hidden font-medium text-ellipsis whitespace-nowrap">{a.name}</div>
                     {isDirtyArtist(a.name) && (
                       <div className="text-xs leading-4 text-ink-3">
-                        <span className="inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-[10px] tracking-[.04em] text-accent">
+                        <span className="inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-micro tracking-[.04em] text-accent">
                           脏标签
                         </span>
                       </div>
