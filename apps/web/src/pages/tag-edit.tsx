@@ -291,22 +291,6 @@ export default function TagEditPage() {
 
       {/* 刮削建议：**就地展开**在编辑区上方，不是浮层 ——
           一边看候选、一边看下面的表单，才是这个动作的真实用法。 */}
-      {scrapeOpen && (
-        <ScrapeSuggestions
-          data={scrape}
-          busy={scrapeBusy}
-          error={scrapeError}
-          currentOf={currentOf}
-          onApply={applyProposal}
-          onUseCover={(d) => {
-            setNewCover(d);
-            setDropCover(false);
-            setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
-          }}
-          onResearch={() => void runScrape()}
-          onCollapse={() => setScrapeOpen(false)}
-        />
-      )}
 
       {loading ? (
         <div className="p-6">
@@ -317,10 +301,39 @@ export default function TagEditPage() {
           <ErrorNote message={error} />
         </div>
       ) : !form || !data ? null : (
-        /* 宽屏两栏、窄屏上下。审查栏在下方时仍是「结果在上、按钮在下」。 */
+        /* 宽屏两栏（编辑列 | 审查栏）、窄屏上下。 */
         <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
-          {/* 编辑区 */}
+          {/* 编辑区（滚动）。
+              刮削建议就放在这个滚动容器**里面**并吸顶（见下方），
+              而不是当兄弟节点 —— 那样它的宽度盒与编辑内容差一个滚动条宽，
+              两张卡会错开 4px 左右。放里面就自动一模一样，不用手算。 */}
           <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
+            {scrapeOpen && (
+              /* 吸顶：滚动表单时建议不会跑掉（它是「看着候选决定填什么」的工具）。
+                 `-mx-5 -mt-5` + `px-5 pt-5`：把不透明底色铺满滚动口（含四周留白），
+                 否则内容会从卡片两侧/上方滑过去。底色与页面同色，看不出是一条带。
+                 `-top-5`：滚动容器的顶内边距也算在吸顶基准里（实测 sticky 以
+                 content-box 顶为基准），不减这 20px 的话吸顶后上方会多空一截。 */
+              <div className="sticky -top-5 z-10 -mx-5 -mt-5 mb-5 bg-[#14121b] px-5 pt-5">
+                <div className="mx-auto max-w-[940px]">
+                  <ScrapeSuggestions
+                    data={scrape}
+                    busy={scrapeBusy}
+                    error={scrapeError}
+                    currentOf={currentOf}
+                    onApply={applyProposal}
+                    onUseCover={(d) => {
+                      setNewCover(d);
+                      setDropCover(false);
+                      setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
+                    }}
+                    onResearch={() => void runScrape()}
+                    onCollapse={() => setScrapeOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="mx-auto flex max-w-[940px] flex-col gap-5 min-[760px]:flex-row min-[760px]:items-start">
               {/* 左栏：封面 + 文件信息。窄屏落到最上面。 */}
               <aside className="w-full shrink-0 min-[760px]:w-[210px]">
@@ -450,7 +463,7 @@ export default function TagEditPage() {
 
           {/* 审查栏：宽屏在右（固定宽度、撑满高度），窄屏落到下方。
               这样「点按钮 → 结果就在正上方」，不用来回滚。 */}
-          <aside className="flex shrink-0 flex-col bg-black/15 border-line-weak max-[1099px]:max-h-[46vh] max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
+          <aside className="flex shrink-0 flex-col border-line-weak bg-black/15 max-[1099px]:max-h-[46vh] max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
             <ReviewPane
               preview={preview}
               fresh={previewFresh}
