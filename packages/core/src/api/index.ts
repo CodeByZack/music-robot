@@ -122,8 +122,17 @@ export function createApi(http: Http) {
           name,
           ...(description ? { description } : {}),
         }),
-      update: (id: number, patch: { name?: string; description?: string; is_public?: boolean }) =>
-        http.put<{ playlist: Playlist }>(`/api/playlists/${id}`, patch),
+      /**
+       * 部分更新：**字段缺席即不动**。
+       *
+       * ⚠️ `description: null` 有特殊语义 —— 它是「清空描述」（后端落成 NULL），
+       * 与「缺席」（保持原值）**不是一回事**。所以这个字段的类型是 `string | null`
+       * 而不是可选 string：省略键 = 别动，显式给 null = 清空。
+       */
+      update: (
+        id: number,
+        patch: { name?: string; description?: string | null; is_public?: boolean },
+      ) => http.put<{ playlist: Playlist }>(`/api/playlists/${id}`, patch),
       remove: (id: number) => http.del<{ id: number; deleted: boolean }>(`/api/playlists/${id}`),
       /** ⚠️ 一次**只加一首**（`song_id` 是整数不是数组）；`position` 省略表示追加到末尾。 */
       addSong: (id: number, songId: number, position?: number) =>

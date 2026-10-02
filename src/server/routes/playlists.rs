@@ -211,12 +211,22 @@ fn same_song_set(current: &[i64], requested: &[i64]) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 歌单的对外 JSON（不含 user_id 等内部信息，见模块头）。
-fn playlist_json(playlist: &Playlist) -> Value {
+///
+/// `is_owner` 是**必需的**，不是可有可无的装饰：模块头写着「403 语义准确，前端也能
+/// 据此提示『这是别人的歌单』」—— 但**光靠 403 做不到**：那个提示要在**打开歌单之前**
+/// 就出现在列表页上，而列表页不会为了每条去试一次写请求。前端需要的是「我能不能改这个
+/// 歌单」这一个布尔量。
+///
+/// 为什么给布尔量而不是 `user_id`：`user_id` 是内部标识（也是别人的账号 id），
+/// 而前端要回答的问题只有「是不是我的」。两者信息量不同 —— 前者会把「谁建的」
+/// 也漏出去。所以这里传 `viewer_id` 算一次比较，而不是把原始字段递出去。
+fn playlist_json(playlist: &Playlist, viewer_id: i64) -> Value {
     json!({
         "id": playlist.id,
         "name": playlist.name,
         "description": playlist.description,
         "is_public": playlist.is_public,
+        "is_owner": playlist.user_id == viewer_id,
         "created_at": playlist.created_at,
         "updated_at": playlist.updated_at,
     })
@@ -259,7 +269,7 @@ pub async fn list(auth: AuthUser, State(state): State<AppState>) -> ApiResult<Js
     })
     .await?;
 
-    let items: Vec<Value> = rows.iter().map(playlist_json).collect();
+    let items: Vec<Value> = rows.iter().map(|p| playlist_json(p, viewer)).collect();
     let total = items.len();
     Ok(Json(json!({ "items": items, "total": total })))
 }
@@ -303,7 +313,7 @@ pub async fn create(
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "playlist": playlist_json(&created) })),
+        Json(json!({ "playlist": playlist_json(&created, user_id) })),
     ))
 }
 
@@ -333,7 +343,7 @@ pub async fn detail(
     .await?;
 
     Ok(Json(json!({
-        "playlist": playlist_json(&playlist),
+        "playlist": playlist_json(&playlist, viewer),
         "songs": tracks,
     })))
 }
@@ -378,7 +388,7 @@ pub async fn update(
     })
     .await?;
 
-    Ok(Json(json!({ "playlist": playlist_json(&updated) })))
+    Ok(Json(json!({ "playlist": playlist_json(&updated, viewer) })))
 }
 
 /// DELETE /api/playlists/{id} —— 删除歌单。
@@ -745,6 +755,63 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "owner 读自己的歌单必须 200：{body}");
+        // 属主视角：is_owner = true（界面据此显示「编辑 / 删除」）
+        assert_eq!(body["playlist"]["is_owner"], true, "owner 看自己应 is_owner=true：{body}");
+
+        // 同一个公开歌单，换外人来看：看得见，但 is_owner = false。
+        // 这条是**界面正确性的前提** —— 列表页要在这条歌单上少画两个按钮，
+        // 而它只发了这一个 GET，不会为了每条去试写请求（靠 403 反推在列表上做不到）。
+        let (status, body) = call(
+            &state,
+            api(
+                "GET",
+                &format!("/api/playlists/{public_id}"),
+                Some(&bob),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "公开歌单外人读得到：{body}");
+        assert_eq!(body["playlist"]["is_owner"], false, "外人看应 is_owner=false：{body}");
+        // 仍然不泄漏 user_id（is_owner 是布尔量，不是原始标识）
+        assert!(
+            body["playlist"].get("user_id").is_none(),
+            "响应里不能出现 user_id：{body}"
+        );
+
+        // 列表接口同样带上 is_owner（列表页就是靠它决定画不画编辑入口）。
+        // 两个视角看**同一条歌单**，拿到的布尔量必须相反 —— 这是这个字段的全部意义。
+        let (status, body) = call(&state, api("GET", "/api/playlists", Some(&bob), None)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let seen_by_bob = body["items"]
+            .as_array()
+            .expect("items 是数组")
+            .iter()
+            .find(|p| p["id"] == public_id)
+            .expect("bob 应能在列表里看到 alice 的公开歌单")
+            .clone();
+        assert_eq!(
+            seen_by_bob["is_owner"], false,
+            "外人视角的列表里应 is_owner=false：{seen_by_bob}"
+        );
+
+        let (status, body) = call(&state, api("GET", "/api/playlists", Some(&alice), None)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let seen_by_alice = body["items"]
+            .as_array()
+            .expect("items 是数组")
+            .iter()
+            .find(|p| p["id"] == public_id)
+            .expect("alice 应能在列表里看到自己的歌单")
+            .clone();
+        assert_eq!(
+            seen_by_alice["is_owner"], true,
+            "属主视角的列表里应 is_owner=true：{seen_by_alice}"
+        );
+        assert!(
+            body.to_string().find("user_id").is_none(),
+            "列表里也不能出现 user_id：{body}"
+        );
 
         let (status, body) = call(
             &state,

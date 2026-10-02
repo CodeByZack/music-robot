@@ -687,6 +687,11 @@ async function main() {
     // 表还在吗 —— 直接查库确认
     const n = countSongs();
     checkTrue('注入后 songs 表仍在且有数据', n >= 3, `songs 行数=${brief(n)}`);
+    // 第二首歌 id：给「多于一首」的场景用（歌单排序 / 移除都要两首以上才看得出效果）。
+    // ⚠️ 必须**重新取一次列表** —— 上面那个 `body` 已经被 `page=99` 那次请求改成空数组了。
+    [, , body] = await c.json('GET', '/api/library');
+    const secondId = (body?.items ?? [])[1]?.id ?? null;
+    checkTrue('库里有第二首歌（后续排序断言要用）', Number.isInteger(secondId), brief(body?.items?.length));
 
     [st] = await c.json('GET', `/api/songs/${firstId}`);
     check('GET /api/songs/{id} → 200', st, 200);
@@ -899,6 +904,74 @@ async function main() {
     const anon2 = new Client(base);
     [st] = await anon2.json('GET', '/api/playlists');
     check('未登录看歌单 → 401', st, 401);
+
+    // ── is_owner：界面「画不画编辑按钮」就靠这一个布尔量 ──
+    // 后端刻意**不回 user_id**（内部标识 + 别人的账号 id），只回答「是不是你的」。
+    [st, , body] = await c.json('GET', `/api/playlists/${plId}`);
+    check('属主看详情 is_owner=true', body?.playlist?.is_owner, true);
+    checkTrue('详情里没有 user_id', body?.playlist?.user_id === undefined, brief(body?.playlist));
+    [st, , body] = await c2.json('GET', `/api/playlists/${plId}`);
+    check('外人看同一个公开歌单 is_owner=false', body?.playlist?.is_owner, false);
+    [st, , body] = await c2.json('GET', '/api/playlists');
+    const seenByOutsider = (body?.items ?? []).find((p) => p?.id === plId);
+    checkTrue('列表里外人视角 is_owner=false', seenByOutsider?.is_owner === false, brief(seenByOutsider));
+    [st, , body] = await c.json('GET', '/api/playlists');
+    const seenByOwner = (body?.items ?? []).find((p) => p?.id === plId);
+    checkTrue('列表里属主视角 is_owner=true', seenByOwner?.is_owner === true, brief(seenByOwner));
+
+    // ── 移除曲目 与 整表重排（界面的「从歌单移除」「拖动排序」）──
+    // 用一个**独立的歌单**，不动上面那个（它的曲目数被前面的幂等断言钉住了）。
+    [st, , body] = await c.json('POST', '/api/playlists', { name: '排序与移除' });
+    const ordId = body?.playlist?.id ?? null;
+    checkTrue('新建第二个歌单', Number.isInteger(ordId), brief(body));
+    for (const sid of [firstId, secondId]) {
+      [st] = await c.json('POST', `/api/playlists/${ordId}/items`, { song_id: sid });
+      check(`加歌 ${sid} → 201`, st, 201);
+    }
+    [st, , body] = await c.json('GET', `/api/playlists/${ordId}`);
+    check('详情按加入顺序返回两首', (body?.songs ?? []).map((s) => s.id).join(','), `${firstId},${secondId}`);
+
+    // 重排：整表给新顺序
+    [st, , body] = await c.json('PUT', `/api/playlists/${ordId}/items`, { song_ids: [secondId, firstId] });
+    check('重排 → 200', st, 200);
+    check('重排返回 count', body?.count, 2);
+    [st, , body] = await c.json('GET', `/api/playlists/${ordId}`);
+    check('重排后顺序真的反了', (body?.songs ?? []).map((s) => s.id).join(','), `${secondId},${firstId}`);
+
+    // 重排的集合必须与现有完全一致 —— 界面若拿着过期数据重排会 400，
+    // 而不是「部分生效」（静默忽略差异会让用户以为存上了）
+    [st] = await c.json('PUT', `/api/playlists/${ordId}/items`, { song_ids: [firstId] });
+    check('重排少一首 → 400', st, 400);
+    [st] = await c.json('PUT', `/api/playlists/${ordId}/items`, { song_ids: [firstId, secondId, 999999] });
+    check('重排多一个不存在的 id → 400', st, 400);
+
+    // 移除曲目：幂等
+    [st, , body] = await c.json('DELETE', `/api/playlists/${ordId}/items/${firstId}`);
+    check('移除曲目 → 200', st, 200);
+    check('移除返回 removed=true', body?.removed, true);
+    [st, , body] = await c.json('DELETE', `/api/playlists/${ordId}/items/${firstId}`);
+    check('重复移除 → 200（幂等）', st, 200);
+    check('重复移除 removed=false', body?.removed, false);
+    [st, , body] = await c.json('GET', `/api/playlists/${ordId}`);
+    check('移除后只剩一首', (body?.songs ?? []).length, 1);
+
+    // 外人不能动别人的歌单。**404 与 403 的分界要对**（见 routes::playlists.rs 头注释）：
+    // 私有歌单外人看不见 → 一律 404（连它存在都不知道）；转成公开后 → 403（存在性不是秘密，
+    // 缺的确实只是写权限）。移除与重排两条写路径都要守这个口径。
+    [st] = await c2.json('DELETE', `/api/playlists/${ordId}/items/${secondId}`);
+    check('外人移除私有歌单曲目 → 404（不泄漏存在性）', st, 404);
+    [st] = await c2.json('PUT', `/api/playlists/${ordId}/items`, { song_ids: [secondId] });
+    check('外人重排私有歌单 → 404', st, 404);
+
+    [st] = await c.json('PUT', `/api/playlists/${ordId}`, { is_public: true });
+    check('把第二个歌单改成公开 → 200', st, 200);
+    [st] = await c2.json('DELETE', `/api/playlists/${ordId}/items/${secondId}`);
+    check('外人移除公开歌单曲目 → 403', st, 403);
+    [st] = await c2.json('PUT', `/api/playlists/${ordId}/items`, { song_ids: [secondId] });
+    check('外人重排公开歌单 → 403', st, 403);
+
+    [st] = await c.json('DELETE', `/api/playlists/${ordId}`);
+    check('清理第二个歌单 → 200', st, 200);
 
     // 删除级联：直接查库确认曲目没了
     [st] = await c.json('DELETE', `/api/playlists/${plId}`);

@@ -77,7 +77,13 @@ export default function PlaylistsPage() {
                 {p.name}
               </div>
               <div className="overflow-hidden text-xs leading-4 text-ellipsis whitespace-nowrap text-ink-3">
-                {p.description || (p.is_public ? '公开' : '私有')}
+                {/* 「公开 / 私有」是**歌单自身**的属性，「别人的」是**相对我**的关系。
+                    两者的组合决定我能不能改（见后端 playlist_json 的 is_owner），
+                    所以两个都要显示 —— 别人的公开歌单点进去是只读的，不标出来会让人
+                    以为是页面坏了。 */}
+                {p.is_public ? '公开' : '私有'}
+                {!p.is_owner && ' · 别人的'}
+                {p.description ? ` · ${p.description}` : ''}
               </div>
             </Link>
           ))}

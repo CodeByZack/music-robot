@@ -97,11 +97,17 @@ async function awaitScrape(batchId: string): Promise<{ failed: number; message: 
  * 状态只影响**菜单里的那一项**（文字 + 禁用），trigger 始终是「⋯」——
  * 按钮字形变来变去反而认不出是同一个东西。
  */
-function RowMenu({ state, writeFiles, song, onRescrape }: {
+function RowMenu({ state, writeFiles, song, onRescrape, onRemove, onMoveUp, onMoveDown }: {
   state: ScrapeState | undefined;
   writeFiles: boolean;
   song: Song;
   onRescrape: () => void;
+  /** 传了才显示「从歌单移除」——只有歌单详情页会传（见 SongTable 的 onRemove）。 */
+  onRemove?: () => void;
+  /** 传了才显示「上移」。第一行不传（已经是最上面）。 */
+  onMoveUp?: () => void;
+  /** 传了才显示「下移」。最后一行不传。 */
+  onMoveDown?: () => void;
 }) {
   const running = state?.phase === 'running';
   const { user } = useSession();
@@ -169,6 +175,13 @@ function RowMenu({ state, writeFiles, song, onRescrape }: {
           disabled: running,
           onClick: onRescrape,
         },
+        // 本行自己能动的位置（拖动排序的兜底入口）。顺序 = 表格里的上下，别写反。
+        ...(onMoveUp ? ([{ label: '上移', onClick: onMoveUp }] satisfies MenuItem[]) : []),
+        ...(onMoveDown ? ([{ label: '下移', onClick: onMoveDown }] satisfies MenuItem[]) : []),
+        // 放在最后：它和上面几项不是一个类别（上面动的是**歌**，这一项动的是**这个歌单**）
+        ...(onRemove
+          ? ([{ label: '从歌单移除', danger: true, onClick: onRemove }] satisfies MenuItem[])
+          : []),
       ]}
     >
       <svg className="ico-sm" viewBox="0 0 16 16" fill="currentColor">
@@ -192,9 +205,30 @@ function RowMenu({ state, writeFiles, song, onRescrape }: {
 export default function SongTable({
   songs,
   showIndex = true,
+  onRemove,
+  onReorder,
 }: {
   songs: Song[];
   showIndex?: boolean;
+  /**
+   * 「从某个集合里移除」的回调（歌单详情页传：把这首移出歌单）。
+   *
+   * 做成可选属性而不是另写一个表：曲目表的列、播放交互、脏标签标记**必须处处一致**
+   * （见上面那段注释），为歌单页再抄一份是迟早漂移的那种重复。
+   * 不传时这一项**根本不出现**，其余六个调用点的行为一字未变。
+   */
+  onRemove?: (song: Song) => void;
+  /**
+   * 拖动排序：把第 `from` 首挪到第 `to` 位（歌单详情页传）。
+   *
+   * 同样做成可选属性 —— 只有「顺序本身就是数据」的集合才该能拖。曲库 / 收藏 / 搜索
+   * 这些页面的顺序是查询结果，拖它没有意义，所以它们**不传**，也就不会变成可拖的。
+   *
+   * 行的点击是「播放」：HTML5 拖拽在指针移动后不会触发 click，
+   * 所以这两件事不冲突（但**触屏上 HTML5 拖拽根本不工作**，
+   * 所以 ⋯ 菜单里另有「上移 / 下移」——见 RowMenu）。
+   */
+  onReorder?: (from: number, to: number) => void;
 }) {
   const player = usePlayer();
   const playingId = player.song?.id ?? null;
@@ -204,6 +238,12 @@ export default function SongTable({
   const [scrape, setScrape] = useState<Map<number, ScrapeState>>(() => new Map());
   // 重刮后的新数据。页面传进来的 songs 是旧的，这里按 id 覆盖。
   const [patched, setPatched] = useState<Map<number, Song>>(() => new Map());
+  /**
+   * 拖动排序的进行态：正在拖第几行、当前悬停在第几行。
+   *
+   * 用 state 而不是纯 CSS：需要给「落点」画一条线，否则用户不知道会插到哪儿。
+   */
+  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null);
 
   async function rescrape(song: Song) {
     setScrape((m) => new Map(m).set(song.id, { phase: 'running' }));
@@ -260,10 +300,51 @@ export default function SongTable({
           <tr
             key={`${s.id}-${i}`}
             onClick={() => player.playList(songs, i)}
+            // 只有传了 onReorder 的行才可拖。加了 draggable 之后浏览器会给整行
+            // 一个「可拖」的指针提示，所以不能无条件打开。
+            draggable={onReorder ? true : undefined}
+            onDragStart={
+              onReorder
+                ? (e) => {
+                    // 拖整行；不设 dataTransfer 的话 Firefox 不认这次拖动。
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', String(i));
+                    setDrag({ from: i, over: i });
+                  }
+                : undefined
+            }
+            onDragOver={
+              onReorder
+                ? (e) => {
+                    // 必须 preventDefault，否则 drop 事件根本不会触发。
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (drag && drag.over !== i) setDrag({ from: drag.from, over: i });
+                  }
+                : undefined
+            }
+            onDragEnd={onReorder ? () => setDrag(null) : undefined}
+            onDrop={
+              onReorder
+                ? (e) => {
+                    e.preventDefault();
+                    const from = drag?.from;
+                    setDrag(null);
+                    if (from !== undefined && from !== i) onReorder(from, i);
+                  }
+                : undefined
+            }
             className={[
               'h-14 cursor-pointer transition-colors hover:bg-surface-hover',
               i % 2 === 1 ? 'bg-white/[.017]' : '',
               playingId === s.id ? 'bg-accent-soft' : '',
+              // 落点提示：拖到哪儿就在哪一行画上边线（往下拖时画在下边，符合直觉）。
+              drag && drag.over === i && drag.from !== i
+                ? drag.from > i
+                  ? 'shadow-[inset_0_2px_0_var(--color-accent)]'
+                  : 'shadow-[inset_0_-2px_0_var(--color-accent)]'
+                : '',
+              drag && drag.from === i ? 'opacity-40' : '',
             ].join(' ')}
           >
             {showIndex && (
@@ -331,6 +412,12 @@ export default function SongTable({
                 writeFiles={writeFiles}
                 song={s}
                 onRescrape={() => void rescrape(s)}
+                onRemove={onRemove ? () => onRemove(s) : undefined}
+                /* 上移 / 下移是拖动排序的**无障碍与触屏兜底**：
+                   HTML5 拖拽在触屏上完全不工作，键盘用户也拖不了。
+                   两处调的是同一个 onReorder，不存在两套逻辑。 */
+                onMoveUp={onReorder && i > 0 ? () => onReorder(i, i - 1) : undefined}
+                onMoveDown={onReorder && i < rows.length - 1 ? () => onReorder(i, i + 1) : undefined}
               />
             </td>
           </tr>

@@ -105,6 +105,15 @@ export interface Playlist {
   name: string;
   description: string | null;
   is_public: boolean;
+  /**
+   * 当前登录用户是不是这个歌单的属主。
+   *
+   * **界面靠它决定画不画编辑 / 删除入口**。不要试图用「试一下写请求，收到 403 再说」
+   * 代替：列表页上每条都试一次是不可能的，而看图就能知道该不该给按钮。
+   *
+   * 后端**不返回 `user_id`**（内部标识，也是别人的账号 id）——它只回答「是不是你的」。
+   */
+  is_owner: boolean;
   created_at?: number;
   updated_at?: number;
 }
