@@ -352,7 +352,7 @@ gh api repos/CodeByZack/music-robot/commits/<远端SHA> --jq '.commit.tree.sha,.
 
 | | |
 |---|---|
-| 分支 | `main`，本地领先远端 **18 个提交**（远端还停在 `63be874` —— 一直没 push）；`git rev-list --count origin/main..HEAD` |
+| 分支 | `main`，**本地 = 远端 = `e5d688b`**（已 push）。核对用 `git status -sb` 或 `git rev-list --count origin/main..HEAD` |
 | 工作树 | **干净**（`pnpm-lock.yaml` 故意没提交，用户说不管） |
 | 最近三个提交 | `8ed75f0` 音乐库分节（库根 + 概况） · `8d42aa6` 画布 S25/S26 标绿 · `abb00e7` 管理入口按角色收敛 |
 | 未提交/未跟踪 | 无 |
