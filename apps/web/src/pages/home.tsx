@@ -100,7 +100,7 @@ export default function HomePage() {
     .filter((s): s is Song => Boolean(s));
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
+    <div className="flex-1 overflow-auto px-5 pt-2 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
           {user ? `${user.username}，晚上好` : '晚上好'}
@@ -118,7 +118,7 @@ export default function HomePage() {
             key={t.to}
             to={t.to}
             style={{ backgroundImage: t.grad }}
-            className="flex h-[104px] flex-col items-start justify-between rounded-xl p-[14px] text-white transition-[filter] hover:brightness-110 min-[901px]:h-[138px]
+            className="flex h-[104px] flex-col items-start justify-between rounded-2xl p-4 text-white transition-[filter] hover:brightness-110 min-[901px]:h-[138px]
                        max-[640px]:h-[92px] max-[640px]:p-3"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="ico-lg opacity-90">

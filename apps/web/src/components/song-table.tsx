@@ -182,26 +182,26 @@ export default function SongTable({
       <thead>
         <tr>
           {showIndex && (
-            <th className="w-[38px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden">
+            <th className="w-[38px] border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4 max-[640px]:hidden">
               #
             </th>
           )}
-          <th className="border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4">
+          <th className="border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4">
             歌曲 / 歌手
           </th>
-          <th className="border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[900px]:hidden">
+          <th className="border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4 max-[900px]:hidden">
             专辑
           </th>
-          <th className="w-[42px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
-          <th className="w-[62px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
+          <th className="w-[42px] border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4 max-[640px]:hidden" />
+          <th className="w-[62px] border-b border-line px-3 pb-2 text-right text-xs font-normal text-ink-4">
             时长
           </th>
-          <th className="w-[60px] border-b border-line px-3 pb-[9px] text-left text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
+          <th className="w-[60px] border-b border-line px-3 pb-2 text-left text-cap tracking-[.06em] text-ink-4 max-[1024px]:hidden">
             格式
           </th>
           {/* ⋯ 放**最后一列**（以前夹在 ♡ 与 时长 中间，把数据列切断了）。
               窄屏也保留 —— 它是那一行唯一的操作入口。 */}
-          <th className="w-[38px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4" />
+          <th className="w-[38px] border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4" />
         </tr>
       </thead>
       <tbody>
@@ -221,7 +221,7 @@ export default function SongTable({
               </td>
             )}
             <td className="overflow-hidden border-b border-line-weak px-3">
-              <div className="flex min-w-0 items-center gap-[11px]">
+              <div className="flex min-w-0 items-center gap-3">
                 {/* 真封面（没内嵌封面时 Cover 自己退回 ♪ 占位）。
                     以前这里只是一个 ♪ / ⚠ 方块 —— 列表是音乐，应该有图。
                     「脏标签」徽标留在下面歌手那行，信息一点没丢。 */}
@@ -243,7 +243,7 @@ export default function SongTable({
                   <div className="overflow-hidden text-xs leading-4 text-ellipsis whitespace-nowrap text-ink-3">
                     {s.artists ?? '（未知歌手）'}
                     {isDirtyArtist(s.artists) && (
-                      <span className="ml-1.5 inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-micro tracking-[.04em] text-accent">
+                      <span className="ml-1.5 inline-flex h-[15px] items-center rounded-xs bg-accent-soft px-1 text-micro tracking-[.04em] text-accent">
                         脏标签
                       </span>
                     )}
@@ -259,7 +259,7 @@ export default function SongTable({
                 onClick={(e) => void fav.toggle(s, e)}
                 title={fav.ids.has(s.id) ? '取消收藏' : '收藏'}
                 className={[
-                  'inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-surface-hover',
+                  'inline-flex size-6 items-center justify-center rounded-xs transition-colors hover:bg-surface-hover',
                   fav.ids.has(s.id) ? 'text-accent' : 'text-ink-4',
                 ].join(' ')}
               >

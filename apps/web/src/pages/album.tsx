@@ -12,7 +12,7 @@ export default function AlbumPage() {
   const { data, error, loading } = useAsync<{ album: Album; songs: Song[] }>(load);
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
+    <div className="flex-1 overflow-auto px-5 pt-2 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <Link to="/albums" className="text-nav text-ink-3 hover:text-ink">
           ← 专辑

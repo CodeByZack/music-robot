@@ -233,7 +233,7 @@ export default function NowPage() {
                 type="button"
                 onClick={() => setPane(k)}
                 className={[
-                  'rounded-full px-4 py-[6px] text-nav transition-colors',
+                  'rounded-full px-4 py-2 text-nav transition-colors',
                   pane === k ? 'bg-surface text-ink' : 'text-ink-3',
                 ].join(' ')}
               >
@@ -244,7 +244,7 @@ export default function NowPage() {
 
           {/* m-auto 居中：内容装得下就居中，装不下就从顶部开始并可滚动
               （给滚动容器加 items-center 时溢出会裁掉顶部且滚不上去）。 */}
-          <div className="m-auto flex w-full flex-col gap-5 px-6 pb-6 min-[901px]:flex-row min-[901px]:items-center min-[901px]:justify-center min-[901px]:gap-11 min-[901px]:px-[38px] min-[901px]:py-6">
+          <div className="m-auto flex w-full flex-col gap-5 px-6 pb-6 min-[901px]:flex-row min-[901px]:items-center min-[901px]:justify-center min-[901px]:gap-11 min-[901px]:px-10 min-[901px]:py-6">
             <div
               className={[
                 'flex w-full max-w-[440px] flex-col items-center text-center min-[901px]:w-[380px] min-[901px]:shrink-0',
@@ -258,7 +258,7 @@ export default function NowPage() {
               glyphClass="text-glyph"
             />
 
-            <div className="mt-[18px] text-xl leading-7 font-semibold min-[901px]:mt-[26px] min-[901px]:text-2xl min-[901px]:leading-8">
+            <div className="mt-5 text-xl leading-7 font-semibold min-[901px]:mt-6 min-[901px]:text-2xl min-[901px]:leading-8">
               {p.song.title ?? '（无标题）'}
             </div>
             <div className="mt-1 text-nav text-ink-3">
@@ -280,12 +280,12 @@ export default function NowPage() {
                   style={{ left: `${pct}%` }}
                 />
                 {p.song.format && (
-                  <span className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[3px] bg-white/10 px-[6px] py-[1px] text-micro tracking-[.1em] text-ink-3 uppercase backdrop-blur-sm">
+                  <span className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xs bg-white/10 px-2 py-px text-micro tracking-[.1em] text-ink-3 uppercase backdrop-blur-sm">
                     {p.song.format}
                   </span>
                 )}
               </div>
-              <div className="mt-[9px] flex justify-between text-cap text-ink-3 tabular-nums">
+              <div className="mt-2 flex justify-between text-cap text-ink-3 tabular-nums">
                 <span>{clock(p.positionMs)}</span>
                 <span>{clock(p.durationMs)}</span>
               </div>
@@ -361,7 +361,7 @@ export default function NowPage() {
       {p.queueSongs.length > 0 && (
         <div className="absolute right-5 bottom-5 z-20 flex flex-col items-end gap-2">
           {queueOpen && (
-            <div className="max-h-[min(60vh,420px)] w-[min(360px,calc(100vw-40px))] overflow-auto rounded-xl border border-line bg-[#0a0a0ee6] p-2 shadow-[0_8px_32px_#000a] backdrop-blur-xl">
+            <div className="max-h-[min(60vh,420px)] w-[min(360px,calc(100vw-40px))] overflow-auto rounded-2xl border border-line bg-[#0a0a0ee6] p-2 shadow-[0_8px_32px_#000a] backdrop-blur-xl">
               <div className="flex items-center gap-2 px-2.5 py-1.5">
                 <b className="text-note font-normal text-ink-2">播放队列</b>
                 <span className="text-cap text-ink-4">{p.queueSongs.length}</span>
@@ -384,7 +384,7 @@ export default function NowPage() {
                   key={`${s.id}-${i}`}
                   onClick={() => p.jumpToQueueIndex(i)}
                   className={[
-                    'flex w-full items-center gap-[11px] rounded-md px-2.5 py-2 text-left transition-colors hover:bg-surface',
+                    'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-surface',
                     p.song?.id === s.id ? 'bg-accent-soft' : '',
                   ].join(' ')}
                 >

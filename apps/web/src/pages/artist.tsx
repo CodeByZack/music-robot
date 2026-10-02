@@ -15,7 +15,7 @@ export default function ArtistPage() {
   }>(load);
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
+    <div className="flex-1 overflow-auto px-5 pt-2 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <Link to="/artists" className="text-nav text-ink-3 hover:text-ink">
           ← 歌手
@@ -41,7 +41,7 @@ export default function ArtistPage() {
                   <div className="flex aspect-square items-center justify-center rounded-md bg-surface text-display text-ink-4">
                     ♪
                   </div>
-                  <div className="mt-[9px] overflow-hidden text-nav font-medium text-ellipsis whitespace-nowrap">
+                  <div className="mt-2 overflow-hidden text-nav font-medium text-ellipsis whitespace-nowrap">
                     {a.name}
                   </div>
                   <div className="text-xs leading-4 text-ink-3">{a.song_count} 首</div>

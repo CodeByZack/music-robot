@@ -182,6 +182,27 @@ Tailwind 自带的 `text-xs / sm / base / xl / 2xl` **也已校准到同一档**
 
 **不确定就用 8 或 12。** 它没有 6/10/14 这种值。
 
+#### 3.1 落地：基底就是 `--spacing` 一个变量（2026-10-02）
+
+上面是**参考值**。真写代码时，**基底是 `global.css` 里的 `--spacing: 0.25rem`**（4px），
+Tailwind 的间距工具类全部由它派生：
+
+```
+gap-2  = calc(var(--spacing) * 2) = 8px
+px-3   = 12px      mt-5 = 20px      pb-32 = 128px
+```
+
+所以：
+
+- **不要写 `gap-[14px]` / `px-[22px]` 这类任意值** —— 用离它最近的档。
+- 要**整体收紧 / 放松间距，只改 `--spacing` 那一行**，全站跟着变。
+- 用 `rem` 不用 `px`：浏览器改字号时会跟着缩放（无障碍）。
+
+2026-10-02 已把全站 81 处任意值收敛到档位上（±≤2px）：
+`px-[22px]`→`px-5`、`pb-[130px]`→`pb-32`、`pb-[9px]`→`pb-2`、`gap-[14px]`→`gap-4` …
+
+> 唯一保留 1px 的地方是 `py-px`（格式徽标那种发丝级内边距）。
+
 ---
 
 ## 4. 圆角
@@ -199,6 +220,23 @@ Tailwind 自带的 `text-xs / sm / base / xl / 2xl` **也已校准到同一档**
 
 Semi 的 token 里另有 `extra-small:3 / small:10 / medium:24 / large:32`，
 但**实际界面用得最多的还是 4–16**，24/32 基本只在模态上。
+
+#### 4.1 落地：命名档见 `--radius-*`（2026-10-02）
+
+界面里**不要写 `rounded-[3px]`**，用 `global.css` 里这套名字：
+
+| 工具类 | 变量 | 值 | 用途 |
+|---|---|---|---|
+| `rounded-xs` | `--radius-xs` | 4px | 极小元素、徽标 |
+| `rounded-sm` | `--radius-sm` | 6px | 小控件、封面缩略图 |
+| `rounded-md` | `--radius-md` | 8px | 按钮、图标按钮 |
+| `rounded-lg` | `--radius-lg` | 10px | 卡片 |
+| `rounded-xl` | `--radius-xl` | 12px | 面板 |
+| `rounded-2xl` | `--radius-2xl` | 16px | 悬浮条、大卡片 |
+| `rounded-full` | （Tailwind 内建） | 9999px | 胶囊 / 圆形：头像、开关、图标按钮 |
+
+⚠️ **注意这比 Tailwind 默认档位整体上移了一档**（默认 `sm`=4 / `md`=6 / `lg`=8 / `xl`=12 /`2xl`=16）。
+所以从别处拷 Tailwind 代码进来时要看一下圆角对不对得上。
 
 ---
 
@@ -294,6 +332,12 @@ box-shadow: 0 8px 32px #00000047;
 ---
 
 ## 9. 落到 CSS 变量（可直接抄进项目）
+
+> ⚠️ **这一节是「飞牛原始提取」的草稿快照，变量名跟项目里实际用的不一样。**
+> 项目里落地的名字是 `--color-ink / --color-surface / --color-line / --color-accent /
+> --text-* / --icon-* / --radius-* / --spacing`，且都在
+> `apps/web/src/global.css` 的 `@theme` 里（那才是唯一来源）。
+> 本节只作**取值参考**，别照抄变量名。
 
 ```css
 :root{

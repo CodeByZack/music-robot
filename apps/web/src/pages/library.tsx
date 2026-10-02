@@ -16,8 +16,8 @@ export default function LibraryPage() {
   const { data, error, loading } = useAsync<Page<Song>>(load);
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-1.5 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
-      <div className="flex items-end gap-[14px] pt-2.5 pb-5 max-[640px]:flex-wrap">
+    <div className="flex-1 overflow-auto px-5 pt-1.5 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
+      <div className="flex items-end gap-4 pt-2.5 pb-5 max-[640px]:flex-wrap">
         <div>
           <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">
             音乐库

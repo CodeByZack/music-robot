@@ -69,7 +69,7 @@ function SideNav({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void 
         title="music-robot"
         className={[
           'flex items-center pt-1 pb-4',
-          rail ? 'justify-center' : 'gap-[9px] px-2',
+          rail ? 'justify-center' : 'gap-2 px-2',
         ].join(' ')}
       >
         <span className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-accent text-white">
@@ -91,7 +91,7 @@ function SideNav({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void 
             className={({ isActive }) =>
               [
                 'flex items-center rounded-md py-2 text-nav transition-colors',
-                rail ? 'justify-center' : 'gap-[10px] px-[10px]',
+                rail ? 'justify-center' : 'gap-3 px-3',
                 isActive ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
               ].join(' ')
             }
@@ -160,7 +160,7 @@ function SearchBox() {
         const v = q.trim();
         if (v) navigate(`/search?q=${encodeURIComponent(v)}`);
       }}
-      className="flex h-9 w-full max-w-[460px] items-center gap-[9px] rounded-full bg-surface px-[14px] text-nav text-ink-4 transition-colors focus-within:bg-surface-hover"
+      className="flex h-9 w-full max-w-[460px] items-center gap-2 rounded-full bg-surface px-4 text-nav text-ink-4 transition-colors focus-within:bg-surface-hover"
     >
       <svg className="ico-sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
         <circle cx="7" cy="7" r="4.6" />
@@ -179,7 +179,7 @@ function SearchBox() {
 /** 常驻顶栏。窄屏左边多一颗汉堡（侧边栏收进抽屉）。 */
 function TopBar({ onMenu }: { onMenu: () => void }) {
   return (
-    <header className="flex h-[76px] shrink-0 items-center gap-3 px-[22px] max-[1024px]:px-4 max-[900px]:h-[60px] max-[900px]:gap-2 max-[900px]:px-3">
+    <header className="flex h-[76px] shrink-0 items-center gap-3 px-5 max-[1024px]:px-4 max-[900px]:h-[60px] max-[900px]:gap-2 max-[900px]:px-3">
       <button
         type="button"
         title="菜单"
@@ -239,7 +239,7 @@ export function Shell({ children }: { children: ReactNode }) {
           aria-label={rail ? '展开侧边栏' : '收起侧边栏'}
           className={[
             'flex items-center rounded-md py-2 text-nav text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink',
-            rail ? 'justify-center' : 'gap-[10px] px-[10px]',
+            rail ? 'justify-center' : 'gap-3 px-3',
           ].join(' ')}
         >
           <Icon d={rail ? 'M6 3.5 11 8l-5 4.5' : 'M10 3.5 5 8l5 4.5'} />

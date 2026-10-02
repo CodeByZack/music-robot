@@ -10,7 +10,7 @@ export default function ArtistsPage() {
   const { data, error, loading } = useAsync<Page<ArtistRow>>(load);
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
+    <div className="flex-1 overflow-auto px-5 pt-2 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">歌手</h1>
         <div className="mt-1 text-nav text-ink-3">
@@ -26,12 +26,12 @@ export default function ArtistsPage() {
         <table className="w-full border-collapse text-nav">
           <thead>
             <tr>
-              <th className="w-[46px] border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4" />
-              <th className="border-b border-line px-3 pb-[9px] text-left text-xs font-normal text-ink-4">歌手</th>
-              <th className="w-[90px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
+              <th className="w-[46px] border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4" />
+              <th className="border-b border-line px-3 pb-2 text-left text-xs font-normal text-ink-4">歌手</th>
+              <th className="w-[90px] border-b border-line px-3 pb-2 text-right text-xs font-normal text-ink-4">
                 专辑
               </th>
-              <th className="w-[90px] border-b border-line px-3 pb-[9px] text-right text-xs font-normal text-ink-4">
+              <th className="w-[90px] border-b border-line px-3 pb-2 text-right text-xs font-normal text-ink-4">
                 歌曲
               </th>
             </tr>
@@ -55,7 +55,7 @@ export default function ArtistsPage() {
                     <div className="overflow-hidden font-medium text-ellipsis whitespace-nowrap">{a.name}</div>
                     {isDirtyArtist(a.name) && (
                       <div className="text-xs leading-4 text-ink-3">
-                        <span className="inline-flex h-[15px] items-center rounded-[3px] bg-accent-soft px-[5px] text-micro tracking-[.04em] text-accent">
+                        <span className="inline-flex h-[15px] items-center rounded-xs bg-accent-soft px-1 text-micro tracking-[.04em] text-accent">
                           脏标签
                         </span>
                       </div>

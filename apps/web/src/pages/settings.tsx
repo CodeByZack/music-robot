@@ -48,7 +48,7 @@ function Progress({ job }: { job: Job }) {
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-4 rounded-lg bg-surface p-[18px]">
+    <div className="mb-4 rounded-lg bg-surface p-5">
       <div className="mb-3 text-micro tracking-[.24em] text-ink-4 uppercase">{title}</div>
       {children}
     </div>
@@ -57,7 +57,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function Row({ label, hint, children }: { label: string; hint?: string; children?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3.5 border-b border-line-weak py-[13px] last:border-b-0">
+    <div className="flex items-center gap-3.5 border-b border-line-weak py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
         <b className="block text-nav font-normal">{label}</b>
         {hint && <span className="text-xs text-ink-3">{hint}</span>}
@@ -179,7 +179,7 @@ export default function SettingsPage() {
           </nav>
 
           <div className="min-h-0 flex-1 overflow-auto p-5">
-            {err && <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-note text-accent">{err}</p>}
+            {err && <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note text-accent">{err}</p>}
 
             {section === 'library' && (
               <>
@@ -217,7 +217,7 @@ export default function SettingsPage() {
 
         {writeFiles && (
           <>
-            <div className="mt-3.5 flex items-start gap-3 rounded-md bg-accent-soft px-[14px] py-3 leading-[18px] text-accent">
+            <div className="mt-3.5 flex items-start gap-3 rounded-md bg-accent-soft px-4 py-3 leading-[18px] text-accent">
               <input
                 id="ack"
                 type="checkbox"
@@ -267,12 +267,12 @@ export default function SettingsPage() {
             {section === 'playback' && (
               <Panel title="播放">
         <Row label="音量" hint={vol === undefined ? '后端没有这个键' : `settings.volume = ${vol}`}>
-          <span className="rounded-sm bg-black/30 px-2.5 py-[7px] font-mono text-xs text-ink-3">
+          <span className="rounded-sm bg-black/30 px-2.5 py-2 font-mono text-xs text-ink-3">
             {vol ?? '—'}
           </span>
         </Row>
         <Row label="播放模式" hint={mode === undefined ? '后端没有这个键' : `settings.play_mode = ${mode}`}>
-          <span className="rounded-sm bg-black/30 px-2.5 py-[7px] font-mono text-xs text-ink-3">
+          <span className="rounded-sm bg-black/30 px-2.5 py-2 font-mono text-xs text-ink-3">
             {mode ?? '—'}
           </span>
         </Row>

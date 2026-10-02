@@ -63,7 +63,7 @@ export default function PlayerBar() {
        进「正在播放」的入口只有一个：左边那块封面 + 歌名（通行手势，够用了）。 */
     <div
       className={[
-        'absolute bottom-[18px] left-1/2 flex h-[62px] -translate-x-1/2 items-center gap-[14px]',
+        'absolute bottom-[18px] left-1/2 flex h-[62px] -translate-x-1/2 items-center gap-4',
         'w-[min(720px,calc(100%-56px))] rounded-2xl border border-line px-4',
         'bg-glass shadow-[0_8px_32px_rgba(0,0,0,.42)] backdrop-blur-[18px] backdrop-saturate-150',
         'max-[900px]:bottom-3 max-[900px]:h-14 max-[900px]:w-[calc(100%-24px)] max-[900px]:gap-2.5 max-[900px]:px-3',
@@ -75,7 +75,7 @@ export default function PlayerBar() {
       <Link
         to="/now"
         title="正在播放"
-        className="group flex shrink-0 cursor-pointer items-center gap-[14px] max-[900px]:min-w-0 max-[900px]:flex-1 max-[900px]:gap-2.5"
+        className="group flex shrink-0 cursor-pointer items-center gap-4 max-[900px]:min-w-0 max-[900px]:flex-1 max-[900px]:gap-2.5"
       >
         {/* 真封面。没内嵌封面的歌由 Cover 自己退回 ♪ 占位。 */}
         <Cover

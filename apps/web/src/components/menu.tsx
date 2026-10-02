@@ -83,7 +83,7 @@ export function MenuButton({
           toggle();
         }}
         className={[
-          'inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-surface-hover',
+          'inline-flex size-6 items-center justify-center rounded-xs transition-colors hover:bg-surface-hover',
           open ? 'bg-surface text-ink' : 'text-ink-4',
         ].join(' ')}
       >
@@ -103,7 +103,7 @@ export function MenuButton({
           {header && <div className="border-b border-line-weak px-3 pt-2 pb-2.5">{header}</div>}
           {items.map((it) => {
             const cls = [
-              'flex w-full items-center justify-between gap-3 px-3 py-[7px] text-left text-nav transition-colors',
+              'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-nav transition-colors',
               it.disabled ? 'cursor-not-allowed text-ink-4' : 'hover:bg-surface-hover',
               !it.disabled && it.danger ? 'text-accent' : !it.disabled ? 'text-ink-2' : '',
             ].join(' ');

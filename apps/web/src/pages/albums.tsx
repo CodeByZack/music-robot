@@ -9,7 +9,7 @@ export default function AlbumsPage() {
   const { data, error, loading } = useAsync<Page<AlbumSummary>>(load);
 
   return (
-    <div className="flex-1 overflow-auto px-[22px] pt-2 pb-[130px] max-[1024px]:px-4 max-[640px]:px-3">
+    <div className="flex-1 overflow-auto px-5 pt-2 pb-32 max-[1024px]:px-4 max-[640px]:px-3">
       <div className="pt-2.5 pb-5">
         <h1 className="text-2xl leading-8 font-semibold tracking-[-.2px] max-[640px]:text-xl">专辑</h1>
         <div className="mt-1 text-nav text-ink-3">
@@ -30,7 +30,7 @@ export default function AlbumsPage() {
               <div className="flex aspect-square items-center justify-center rounded-md bg-surface text-display text-ink-4">
                 ♪
               </div>
-              <div className="mt-[9px] overflow-hidden text-nav font-medium text-ellipsis whitespace-nowrap">
+              <div className="mt-2 overflow-hidden text-nav font-medium text-ellipsis whitespace-nowrap">
                 {a.name}
               </div>
               <div className="overflow-hidden text-xs leading-4 text-ellipsis whitespace-nowrap text-ink-3">

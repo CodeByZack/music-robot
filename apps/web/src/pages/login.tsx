@@ -42,8 +42,8 @@ export default function LoginPage() {
         onSubmit={submit}
         className="mr-[14%] ml-auto w-[340px] self-center max-[900px]:mx-auto max-[640px]:w-[calc(100%-40px)]"
       >
-        <div className="mb-[34px] flex items-center gap-[13px]">
-          <span className="flex size-[52px] items-center justify-center rounded-[14px] bg-accent text-white shadow-[0_1px_4px_#0006]">
+        <div className="mb-8 flex items-center gap-3">
+          <span className="flex size-[52px] items-center justify-center rounded-2xl bg-accent text-white shadow-[0_1px_4px_#0006]">
             <svg className="ico-xl" viewBox="0 0 16 16" fill="currentColor">
               <path d="M6 12.5a2 2 0 1 1-1.5-1.94V4.2l7-1.6v7.4a2 2 0 1 1-1.5-1.94V5.1L6 6.1z" />
             </svg>
@@ -55,36 +55,36 @@ export default function LoginPage() {
         </div>
 
         <label className="mb-4 block">
-          <span className="mb-[7px] block text-xs text-ink-3">用户名</span>
+          <span className="mb-2 block text-xs text-ink-3">用户名</span>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
             placeholder="请输入用户名"
-            className="h-11 w-full rounded-lg border-0 bg-surface px-[14px] text-ink outline-0 transition-shadow placeholder:text-ink-4 focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_34%,transparent)]"
+            className="h-11 w-full rounded-lg border-0 bg-surface px-4 text-ink outline-0 transition-shadow placeholder:text-ink-4 focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_34%,transparent)]"
           />
         </label>
 
         <label className="mb-4 block">
-          <span className="mb-[7px] block text-xs text-ink-3">密码</span>
+          <span className="mb-2 block text-xs text-ink-3">密码</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             placeholder="请输入密码"
-            className="h-11 w-full rounded-lg border-0 bg-surface px-[14px] text-ink outline-0 transition-shadow placeholder:text-ink-4 focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_34%,transparent)]"
+            className="h-11 w-full rounded-lg border-0 bg-surface px-4 text-ink outline-0 transition-shadow placeholder:text-ink-4 focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_34%,transparent)]"
           />
         </label>
 
         {error && (
-          <p className="mb-4 rounded-md bg-accent-soft px-[14px] py-3 text-note leading-[18px] text-accent">
+          <p className="mb-4 rounded-md bg-accent-soft px-4 py-3 text-note leading-[18px] text-accent">
             {error}
           </p>
         )}
 
-        <div className="mt-1 mb-[22px] flex items-center justify-between text-xs text-ink-3">
-          <label className="flex cursor-pointer items-center gap-[7px]">
+        <div className="mt-1 mb-5 flex items-center justify-between text-xs text-ink-3">
+          <label className="flex cursor-pointer items-center gap-2">
             <input type="checkbox" className="accent-accent" />
             记住账号
           </label>
