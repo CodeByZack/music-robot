@@ -253,7 +253,7 @@ export default function TagEditPage() {
   return (
     <div
       className={[
-        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-[#14121b]',
+        'app-bg fixed inset-0 z-50 flex flex-col overflow-hidden',
         closing ? 'anim-overlay-out' : 'anim-overlay-in',
       ].join(' ')}
     >

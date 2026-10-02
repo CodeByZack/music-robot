@@ -68,12 +68,16 @@ export default function RequestsPage() {
   return (
     <OverlayShell
       title="点歌请求"
-      subtitle={data ? <span className="text-cap text-ink-4">{data.total} 条</span> : undefined}
+      description={
+        isAdmin
+          ? '大家想听但库里没有的歌。按想要的人数排序。'
+          : '你提交的点歌请求与处理进度。'
+      }
       actions={
         <button
           type="button"
           onClick={() => setComposing(true)}
-          className="h-8 rounded-full bg-accent px-3.5 text-cap font-medium text-white transition-colors hover:brightness-110"
+          className="h-9 shrink-0 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110"
         >
           点一首
         </button>
@@ -87,15 +91,22 @@ export default function RequestsPage() {
             onClick={() => setFilter(f.id)}
             className={[
               'rounded-full px-3 py-1.5 text-cap transition-colors',
-              filter === f.id ? 'bg-surface text-ink' : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
+              filter === f.id
+                ? 'bg-surface text-ink'
+                : 'text-ink-3 hover:bg-surface-hover hover:text-ink',
             ].join(' ')}
           >
             {f.label}
           </button>
         ))}
+        {/* 总数与「只看我的」跟在**同一个** `ml-auto` 后面：窄屏换行时两者一起
+            被推到行尾，而不是只剩一个勾选框孤零零挂在右边。 */}
+        <span className="ml-auto text-cap text-ink-4 tabular-nums">
+          {data ? `${data.total} 条` : ''}
+        </span>
         {/* 「只看我的」只对 admin 有意义 —— 普通用户拿到的本来就只有自己的 */}
         {isAdmin && (
-          <label className="ml-auto flex cursor-pointer items-center gap-2 text-cap text-ink-3">
+          <label className="flex cursor-pointer items-center gap-2 text-cap text-ink-3">
             <input
               type="checkbox"
               checked={mineOnly}
@@ -112,27 +123,41 @@ export default function RequestsPage() {
       )}
 
       {error ? (
-        <p className="py-10 text-center text-nav text-ink-3">{error}</p>
+        <p className="rounded-xl bg-surface py-10 text-center text-nav text-ink-3">{error}</p>
       ) : loading ? (
         <p className="py-10 text-center text-nav text-ink-4">读取中…</p>
       ) : items.length === 0 ? (
         /* 空状态写得具体点：区分「筛出来是空的」与「压根没人点过」，
            否则用户会以为筛选坏了。 */
-        <p className="py-10 text-center text-nav text-ink-4">
-          {filter === 'all' && !mineOnly
-            ? '还没有人点歌。'
-            : mineOnly
-              ? '你没有符合这个筛选的请求。'
-              : '这个状态下没有请求。'}
-        </p>
+        <div className="rounded-xl bg-surface px-6 py-12 text-center">
+          <p className="text-nav text-ink-3">
+            {filter === 'all' && !mineOnly
+              ? '还没有人点歌。'
+              : mineOnly
+                ? '你没有符合这个筛选的请求。'
+                : '这个状态下没有请求。'}
+          </p>
+          {filter === 'all' && !mineOnly && (
+            <button
+              type="button"
+              onClick={() => setComposing(true)}
+              className="mt-4 rounded-full bg-accent px-4 py-2 text-nav font-medium text-white transition-colors hover:brightness-110"
+            >
+              点一首
+            </button>
+          )}
+        </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          {items.map((r) => (
-            <RequestCard
+        /* 一个容器 + 内部行，行间用淡内嵌阴影分隔 —— 与用户管理页同一套写法。
+           独立卡片一排浮在暗色上更像「面板」，行式列表才像「页面里的列表」。 */
+        <div className="overflow-hidden rounded-xl bg-surface">
+          {items.map((r, i) => (
+            <RequestRow
               key={r.id}
               req={r}
               isAdmin={isAdmin}
               busy={busy}
+              first={i === 0}
               action={action?.id === r.id ? action.kind : null}
               onAction={(kind) => setAction({ id: r.id, kind })}
               onCancel={() => setAction(null)}
@@ -168,10 +193,11 @@ function StatusChip({ status }: { status: RequestStatus }) {
   return <span className={['rounded-full px-2.5 py-1 text-micro', cls].join(' ')}>{label}</span>;
 }
 
-function RequestCard({
+function RequestRow({
   req,
   isAdmin,
   busy,
+  first,
   action,
   onAction,
   onCancel,
@@ -182,6 +208,8 @@ function RequestCard({
   req: SongRequest;
   isAdmin: boolean;
   busy: boolean;
+  /** 第一行不画分隔线。 */
+  first: boolean;
   action: 'reject' | 'link' | null;
   onAction: (kind: 'reject' | 'link') => void;
   onCancel: () => void;
@@ -193,7 +221,14 @@ function RequestCard({
   const settled = req.status === 'done' || req.status === 'rejected';
 
   return (
-    <div className="rounded-xl bg-surface px-4 py-3.5">
+    <div
+      className={[
+        'px-4 py-3.5 transition-colors hover:bg-surface-hover',
+        // 行分隔用**内嵌阴影**而不是 border：深色底上 border 比行背景更亮，
+        // 会看成一条亮线（项目里表格那套写法，见 docs/design.md §6.2）
+        first ? '' : 'shadow-[inset_0_1px_0_var(--color-line-weak)]',
+      ].join(' ')}
+    >
       <div className="flex items-baseline gap-3">
         <span className="min-w-0 flex-1 truncate text-lead text-ink">{req.title}</span>
         {/* 票数 = 有多少人想要。新建时就是 1，所以「1 人」是正常状态，不是异常。 */}
@@ -201,7 +236,7 @@ function RequestCard({
           {req.vote_count} 人想要
         </span>
       </div>
-      <div className="mt-1 text-note text-ink-3">
+      <div className="mt-0.5 text-note text-ink-3">
         {req.artist || '（没填歌手）'}
         {req.album ? ` · ${req.album}` : ''}
       </div>

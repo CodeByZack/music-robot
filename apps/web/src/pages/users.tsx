@@ -29,12 +29,12 @@ export default function UsersPage() {
   return (
     <OverlayShell
       title="用户管理"
-      subtitle={data ? <span className="text-cap text-ink-4">{data.total} 个</span> : undefined}
+      description="管理谁能登录这个服务。管理员可改标签、跑扫描刮削。"
       actions={
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="h-8 rounded-full bg-accent px-3.5 text-cap font-medium text-white transition-colors hover:brightness-110"
+          className="h-9 shrink-0 rounded-full bg-accent px-4 text-nav font-medium text-white transition-colors hover:brightness-110"
         >
           新建用户
         </button>
@@ -42,13 +42,21 @@ export default function UsersPage() {
     >
       {error ? (
         /* 普通用户直接敲地址进来会看到这个。把话说清楚，别只说「读取失败」。 */
-        <p className="py-10 text-center text-nav text-ink-3">{error}</p>
+        <p className="rounded-xl bg-surface py-10 text-center text-nav text-ink-3">{error}</p>
       ) : loading ? (
         <p className="py-10 text-center text-nav text-ink-4">读取中…</p>
       ) : (
-        <div className="flex flex-col gap-2">
-          {items.map((u) => (
-            <div key={u.id} className="flex items-center gap-3.5 rounded-xl bg-surface px-4 py-3">
+        <div className="overflow-hidden rounded-xl bg-surface">
+          {items.map((u, i) => (
+            <div
+              key={u.id}
+              className={[
+                'flex items-center gap-3.5 px-4 py-3.5 transition-colors hover:bg-surface-hover',
+                // 行之间用淡内嵌阴影分隔（项目里表格那套写法），不用 border ——
+                // 深色底上 border 会显得比行背景更亮，反而像「竖线」
+                i > 0 ? 'shadow-[inset_0_1px_0_var(--color-line-weak)]' : '',
+              ].join(' ')}
+            >
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-hover text-note text-ink-2">
                 {u.username.trim().charAt(0).toUpperCase()}
               </span>
@@ -64,7 +72,9 @@ export default function UsersPage() {
               <span
                 className={[
                   'shrink-0 rounded-full px-2.5 py-1 text-micro',
-                  u.role === 'admin' ? 'bg-accent-soft text-accent' : 'bg-surface-hover text-ink-3',
+                  u.role === 'admin'
+                    ? 'bg-accent-soft text-accent'
+                    : 'bg-surface-hover text-ink-3',
                 ].join(' ')}
               >
                 {u.role === 'admin' ? '管理员' : '普通用户'}

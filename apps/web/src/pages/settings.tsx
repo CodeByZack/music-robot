@@ -140,7 +140,7 @@ export default function SettingsPage() {
        关：右上角 ✕ / Esc。进场 / 退场动画见 global.css 的 .anim-overlay-*。 */
     <div
       className={[
-        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-[#14121b]',
+        'app-bg fixed inset-0 z-50 flex flex-col overflow-hidden',
         closing ? 'anim-overlay-out' : 'anim-overlay-in',
       ].join(' ')}
     >

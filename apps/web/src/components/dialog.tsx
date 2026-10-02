@@ -28,6 +28,11 @@ export function isDialogOpen(): boolean {
  * **没做焦点陷阱**（Tab 循环在弹窗内）—— 那是 Radix 的活，手写容易做出
  * 「Tab 进去出不来」。这里的表单最多两个字段，Tab 跑出去再点回来不算事故。
  *
+ * 居中写法说明：**不是** `flex items-center` 直接套面板 —— 那样内容比视口高时
+ * 会把顶部裁掉且滚不上去（flex 居中 + overflow 的经典坑）。
+ * 正确写法是「滚动容器 → `min-h-full` 的居中行 → 面板」：内容矮时居中，
+ * 高时从顶部开始且能滚。
+ *
  * ⚠️ 遮罩的 z-index 必须**高于**全屏浮层页（`z-50`）—— 点歌请求**页面**里也要
  * 能弹出它（页内「点一首」按钮）。用 `z-60`。
  */
@@ -72,42 +77,44 @@ export function Dialog({
         setOpen(false);
         onClose();
       }}
-      className="fixed inset-0 z-60 flex items-start justify-center overflow-auto bg-black/55 p-5 backdrop-blur-sm"
+      className="fixed inset-0 z-60 overflow-y-auto bg-black/55 backdrop-blur-sm"
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-        className={[
-          'mt-[8vh] w-full max-w-[440px] rounded-2xl border border-line bg-[#1b1922] shadow-[0_18px_60px_rgba(0,0,0,.6)]',
-          open ? 'anim-overlay-in' : 'anim-overlay-out',
-        ].join(' ')}
-      >
-        <div className="flex items-center gap-2 border-b border-line-weak px-4 py-3">
-          <h3 className="text-nav font-medium">{title}</h3>
-          <span className="flex-1" />
-          <button
-            type="button"
-            onClick={onClose}
-            title="关闭"
-            aria-label={`关闭${title}`}
-            className="flex size-7 items-center justify-center rounded-full text-ink-4 transition-colors hover:bg-surface-hover hover:text-ink"
-          >
-            <svg
-              className="ico-xs"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.6}
-              strokeLinecap="round"
+      <div className="flex min-h-full items-center justify-center p-5">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          onClick={(e) => e.stopPropagation()}
+          className={[
+            'w-full max-w-[440px] rounded-2xl border border-line bg-[#1b1922] shadow-[0_18px_60px_rgba(0,0,0,.6)]',
+            open ? 'anim-overlay-in' : 'anim-overlay-out',
+          ].join(' ')}
+        >
+          <div className="flex items-center gap-2 border-b border-line-weak px-4 py-3">
+            <h3 className="text-nav font-medium">{title}</h3>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={onClose}
+              title="关闭"
+              aria-label={`关闭${title}`}
+              className="flex size-7 items-center justify-center rounded-full text-ink-4 transition-colors hover:bg-surface-hover hover:text-ink"
             >
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
+              <svg
+                className="ico-xs"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
       </div>
     </div>
   );

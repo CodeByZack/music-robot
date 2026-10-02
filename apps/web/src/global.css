@@ -100,6 +100,21 @@
   --icon-xl: 28px;
 }
 
+/* 应用底色（**单一来源**）：是渐变而不是纯色 —— 顶部带一点冷紫、向下沉到近黑，
+   纯黑会显得「死」（见 `docs/design.md` §1.1）。
+
+   为什么要抽成变量：全屏浮层页（设置 / 播放 / 标签编辑 / 点歌请求 / 用户管理）
+   盖住整个应用，如果它们在底色上自己写一个 `#14121b` 纯黑，就会比主界面暗一层，
+   于是读起来是「盖上来的一块黑板」而不是「同一个应用的另一个页面」——
+   用户 2026-10-02 的反馈「看起来就像一个弹出层，怪怪的」就有这一份原因。
+
+   放普通 `:root` 而非 `@theme`：Tailwind 会 tree-shake「没被 utility 用到的」主题变量，
+   而这个值只被下面的 `body` 和 `@utility app-bg` 通过 `var()` 引用，
+   静态解析不出来（踩不到这个坑，但别把它搬进 `@theme`）。 */
+:root {
+  --app-bg: linear-gradient(180deg, #2d293a 0%, #14121b 62%) fixed, #14121b;
+}
+
 @layer base {
   html,
   body,
@@ -109,8 +124,8 @@
   body {
     margin: 0;
     color: var(--color-ink);
-    /* 底色是渐变不是纯色 —— 纯黑会显得"死" */
-    background: linear-gradient(180deg, #2d293a 0%, #14121b 62%) fixed, #14121b;
+    /* 底色是渐变不是纯色 —— 纯黑会显得"死"（与全屏浮层页共用，见 :root 的 --app-bg） */
+    background: var(--app-bg);
     font:
       14px/20px -apple-system,
       BlinkMacSystemFont,
@@ -254,4 +269,14 @@
   tbody tr:hover > .divider-row {
     box-shadow: none;
   }
+}
+
+/**
+ * 全屏浮层页的底色 —— 和应用主界面**同一个** `--app-bg`。
+ *
+ * 别在浮层页上写 `bg-[#14121b]`：那是纯黑，比主界面暗一层，于是整页读起来像
+ * 「盖上来的一块黑板」。用这个类，浮层页才像「应用的另一个页面」。
+ */
+@utility app-bg {
+  background: var(--app-bg);
 }
