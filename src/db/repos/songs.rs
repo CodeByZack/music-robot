@@ -227,6 +227,50 @@ pub fn count_deleted(conn: &Connection) -> RepoResult<i64> {
     )?)
 }
 
+/// 按刮削状态各有多少首。
+///
+/// **不含软删**（`deleted_at IS NULL`）—— 它回答的是「库里这些歌刮到什么程度了」，
+/// 软删的歌已经不在库，混进来会让四个数加起来大于总数。要软删数就调 [count_deleted]。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScrapeBreakdown {
+    pub pending: i64,
+    pub processing: i64,
+    pub done: i64,
+    pub failed: i64,
+}
+
+impl ScrapeBreakdown {
+    /// 四个状态之和（= 统计范围内的总行数）。
+    pub fn total(&self) -> i64 {
+        self.pending + self.processing + self.done + self.failed
+    }
+}
+
+/// 数每种刮削状态各有多少首。一次 `GROUP BY`，不查四遍。
+///
+/// 状态串走 [ScrapeStatus::parse]：库里出现非法值时报 `RepoError::Model`
+/// 而不是静默归到某一档 —— 与 `song_from_row` 同一口径（那是数据损坏，不该被吞掉）。
+pub fn count_by_scrape_status(conn: &Connection) -> RepoResult<ScrapeBreakdown> {
+    let mut stmt = conn.prepare(
+        "SELECT scrape_status, COUNT(*) AS n FROM songs
+          WHERE deleted_at IS NULL
+          GROUP BY scrape_status",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut out = ScrapeBreakdown::default();
+    while let Some(row) = rows.next()? {
+        let raw: String = row.get("scrape_status")?;
+        let n: i64 = row.get("n")?;
+        match ScrapeStatus::parse(&raw)? {
+            ScrapeStatus::Pending => out.pending = n,
+            ScrapeStatus::Processing => out.processing = n,
+            ScrapeStatus::Done => out.done = n,
+            ScrapeStatus::Failed => out.failed = n,
+        }
+    }
+    Ok(out)
+}
+
 /// 按 search_text 做子串搜索；默认不含软删行。
 ///
 /// 行为约定（都与测试一一对应）：
@@ -640,6 +684,60 @@ mod tests {
             added_at: 0,
             updated_at: 0,
         }
+    }
+
+    /// 按刮削状态计数：四档各归各的、**软删不计**、非法状态是 Model 错误。
+    #[test]
+    fn count_by_scrape_status_buckets_states_and_ignores_deleted() {
+        let db = TestDb::new("songs-scrape-breakdown");
+        let conn = db.conn();
+
+        // 两首 pending、一首 processing、三首 done、一首 failed
+        let ids: Vec<i64> = (0..7)
+            .map(|i| {
+                let mut s = sample_song(&format!("/music/{i}.mp3"));
+                s.scrape_status = ScrapeStatus::Pending;
+                insert(&conn, &s).expect("插")
+            })
+            .collect();
+        for (id, status) in [
+            (ids[2], ScrapeStatus::Processing),
+            (ids[3], ScrapeStatus::Done),
+            (ids[4], ScrapeStatus::Done),
+            (ids[5], ScrapeStatus::Done),
+            (ids[6], ScrapeStatus::Failed),
+        ] {
+            update_scrape_status(&conn, id, status, None).expect("改状态");
+        }
+
+        let b = count_by_scrape_status(&conn).expect("计数");
+        assert_eq!(b.pending, 2);
+        assert_eq!(b.processing, 1);
+        assert_eq!(b.done, 3);
+        assert_eq!(b.failed, 1);
+        assert_eq!(b.total(), 7, "四档之和应等于在库总数");
+        assert_eq!(b.total(), count(&conn, false).expect("总数"), "与 count 对得上");
+
+        // 软删的歌**不进这四档**（否则四数之和会大于库内总数）
+        mark_deleted(&conn, ids[0]).expect("标记删除");
+        let b2 = count_by_scrape_status(&conn).expect("软删后计数");
+        assert_eq!(b2.pending, 1, "软删那首不再计入");
+        assert_eq!(b2.total(), 6);
+        assert_eq!(count_deleted(&conn).expect("软删数"), 1, "软删要单独数");
+
+        // 非法状态串**插不进去** —— schema 上就有 CHECK 约束（比在读取侧兜底更早）。
+        // 所以 `count_by_scrape_status` 里那个「parse 失败 → Model 错误」的分支是
+        // **纵深防御**：只要 CHECK 还在，它就走不到。这里把 CHECK 本身钉住 ——
+        // 哪天有人把约束去了，这条测试会红，提醒他读取侧还有一层。
+        let rejected = conn.execute(
+            "INSERT INTO songs (file_path, scrape_status, added_at, updated_at)
+             VALUES ('/music/weird.mp3', 'not-a-status', 1, 1)",
+            [],
+        );
+        assert!(
+            rejected.is_err(),
+            "schema 应当拒绝非法 scrape_status（现在是 CHECK 约束）"
+        );
     }
 
     #[test]

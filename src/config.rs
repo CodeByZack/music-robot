@@ -55,6 +55,15 @@ fn data_dir_path(leaf: &str) -> String {
 /// 插件目录缺省值。**相对进程 cwd**，所以不做 `~` 展开（也允许用户显式写 `~/plugins`）。
 const DEFAULT_PLUGINS_DIR: &str = "plugins";
 
+/// 库根的环境变量名。
+///
+/// 单独提成常量是因为它不只在这里被读：`GET /api/library/stats` 要把
+/// **「环境变量这一层压过了 config.json」**这件事告诉界面 —— 配置优先级是
+/// CLI > 环境变量 > config.json > 默认值，而 `serve` 是「先读文件、再
+/// apply_env()」。所以环境变量一旦设了，用户改 config.json 就是白改。
+/// 界面上要显示变量名，两处写死的字符串迟早会漂，引用同一个常量才是单一口径。
+pub const LIBRARY_ROOTS_ENV: &str = "MR_LIBRARY_ROOTS";
+
 /// 服务端配置总入口。
 ///
 /// 每个顶层段对应设计稿里的一个 JSON 段，字段类型都是具体类型（不用 `Option` 兜底）：
@@ -569,7 +578,7 @@ impl Config {
         if let Some(x) = env_string(get, "MR_JWT_SECRET", "server.jwt_secret")? {
             self.server.jwt_secret = x;
         }
-        if let Some(x) = env_string(get, "MR_LIBRARY_ROOTS", "storage.library_roots")? {
+        if let Some(x) = env_string(get, LIBRARY_ROOTS_ENV, "storage.library_roots")? {
             let roots = split_roots(&x);
             if roots.is_empty() {
                 return Err(ConfigError::Empty {

@@ -112,12 +112,16 @@ pub fn build_router(state: AppState) -> AppRouter {
             get(auth::admin_list_users).post(auth::admin_create_user),
         )
         // ── S16 曲库 API ──────────────────────────────────────────────────
-        // 画布：所有 API 先过 JWT。这 5 条一律放在受保护子 Router 里，由下面的
+        // 画布：所有 API 先过 JWT。这 6 条一律放在受保护子 Router 里，由下面的
         // require_auth 中间件统一拦截；handler 里还各自提取 AuthUser 兜底，
         // 免得将来有人把路由挪去公开组时静默变成匿名可用。
         //
         // 路径参数用 axum 0.8 的花括号写法（旧写法 :id 在 matchit 0.8 下会 panic）。
         .route("/api/library", get(library::library))
+        // 曲库概况（库根 + 计数）。**必须与 /api/library 分开注册**：静态段
+        // 不能和同级的动态参数混在一个 route 里，而且这条要 AdminUser
+        // （它要吐服务器绝对路径），/api/library 是登录即可。
+        .route("/api/library/stats", get(library::library_stats))
         .route("/api/songs/{id}", get(library::song))
         // S26 标签编辑：GET 读当前**文件**标签（登录即可），PATCH 预览 / 写入标签。
         // PATCH 会**直接覆盖原文件**且不可撤销（atomic_replace 无备份），所以它

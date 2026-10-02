@@ -3,6 +3,7 @@
 //! 路径（取自画布 API 清单）：
 //!
 //! * GET /api/library?page=&page_size=&sort=  曲库分页列表
+//! * GET /api/library/stats                   曲库概况（库根 + 计数，仅 admin）
 //! * GET /api/songs/:id                       单曲详情（不存在 404）
 //! * GET /api/albums/:id                      专辑详情（含曲目列表；不存在 404）
 //! * GET /api/artists/:name                   某歌手名下的歌曲 / 专辑
@@ -12,9 +13,10 @@
 //!
 //! ## 鉴权（画布：所有 API 先过 JWT）
 //!
-//! 这 5 条路由挂在 routes::build_router 的**受保护子 Router** 上（require_auth
+//! 这 6 条路由挂在 routes::build_router 的**受保护子 Router** 上（require_auth
 //! 中间件）；此外每个 handler 都显式提取 AuthUser —— 双重保险：即使将来有人
 //! 把路由顺手挪进公开 Router，handler 仍会 401，而不是悄悄匿名可用。
+//! `library_stats` 更是直接要 AdminUser（它吐服务器绝对路径）。
 //!
 //! ## 分页规范（画布「⚠ 补」第一条）
 //!
@@ -62,6 +64,7 @@
 //! （S14 铁律），绝不在 async 上下文里直接碰连接池。
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{FromRequestParts, Path, Query, State};
@@ -74,7 +77,7 @@ use crate::db::models::{Album, Song};
 use crate::db::pool::DbPool;
 use crate::db::repos::albums::{self, AlbumSummary};
 use crate::db::repos::songs::{self, SongFilter, SongSort};
-use crate::server::auth::AuthUser;
+use crate::server::auth::{AdminUser, AuthUser};
 use crate::server::error::{ApiError, ApiResult};
 use crate::server::state::AppState;
 
@@ -314,6 +317,134 @@ fn paginated_json(items: Vec<Value>, page: i64, page_size: i64, total: i64) -> V
 // ─────────────────────────────────────────────────────────────────────────────
 // handlers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// GET /api/library/stats —— 曲库概况：现在的库根 + 各类计数（**仅 admin**）。
+///
+/// 为什么是 admin 而不是「登录即可」：它要回**服务器上的绝对路径**，而
+/// `song_json` 特意不吐 `file_path`（见上面那段注释：绝对路径 = 部署结构）。
+/// 曲目列表谁都看得到，但「这台机器的音乐放在哪」属于部署信息，只给管理员。
+///
+/// 响应：
+/// ```json
+/// {
+///   "roots": [
+///     { "path": "./fixtures", "resolved": "/abs/fixtures", "readable": true, "nested_in": null }
+///   ],
+///   "roots_env": { "var": "MR_LIBRARY_ROOTS", "value": "./fixtures" },
+///   "counts": {
+///     "songs": 9, "deleted": 0, "albums": 3, "artists": 5,
+///     "scrape": { "pending": 1, "processing": 0, "done": 3, "failed": 5 }
+///   }
+/// }
+/// ```
+///
+/// ⚠️ **`roots_env` 是给界面说人话用的，不是装饰**：配置的优先级是
+/// **CLI > 环境变量 > config.json > 默认值**，而 `serve` 会先读 config.json
+/// 再 `apply_env()`。所以**只要环境变量在，改 config.json 就是无效的** ——
+/// 界面上必须把这件事说出来，否则用户改了文件、重启、什么都没变，还查不出原因。
+/// `value` 为 null = 环境变量没设（那才轮到 config.json / 默认值）。
+/// 这里只报「环境变量层在不在」，不假装能分辨 config.json 与默认值
+/// （那两层没留溯源信息，编一个出来就是假数据）。
+pub async fn library_stats(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> ApiResult<Json<Value>> {
+    // 库根：来自配置的**原始字符串**（`./fixtures` 这种相对路径照原样给，
+    // 同时给一份按 cwd 解析后的绝对路径 —— 两者都显示，用户才知道相对路径指到哪了）。
+    let raw_roots = state.config.storage.library_roots.clone();
+    // stat / canonicalize 都是阻塞调用，按 S14 铁律搬进 spawn_blocking。
+    let roots = tokio::task::spawn_blocking(move || inspect_roots(&raw_roots))
+        .await
+        .map_err(|join| ApiError::internal(format!("库根检查任务异常退出：{join}")))?;
+
+    let counts = run_db(Arc::clone(&state.db), |conn| {
+        let songs = songs::count(conn, false)?;
+        let deleted = songs::count_deleted(conn)?;
+        let albums = albums::count(conn)?;
+        let artists = songs::count_artists(conn)?;
+        let scrape = songs::count_by_scrape_status(conn)?;
+        Ok((songs, deleted, albums, artists, scrape))
+    })
+    .await?;
+    let (songs_count, deleted, albums_count, artists_count, scrape) = counts;
+
+    Ok(Json(json!({
+        "roots": roots,
+        "roots_env": roots_env_json(),
+        "counts": {
+            "songs": songs_count,
+            "deleted": deleted,
+            "albums": albums_count,
+            "artists": artists_count,
+            "scrape": {
+                "pending": scrape.pending,
+                "processing": scrape.processing,
+                "done": scrape.done,
+                "failed": scrape.failed,
+            },
+        },
+    })))
+}
+
+/// 库根在进程环境里的覆盖情况（见 `library_stats` 的注释）。
+///
+/// 取值拆成 [`roots_env_json_with`] 是为了能单测 —— 环境变量是**进程全局**的，
+/// 在并行跑的测试里 `set_var` / `remove_var` 会互相串台，所以把「查到的值」
+/// 当参数传进来，只留一行读取；那一行由
+/// `roots_env_json_reads_the_real_process_environment` 单独覆盖。
+fn roots_env_json() -> Value {
+    roots_env_json_with(std::env::var(crate::config::LIBRARY_ROOTS_ENV).ok())
+}
+
+/// [`roots_env_json`] 的实际实现：`value` = 环境变量当前值（没设就是 None）。
+fn roots_env_json_with(value: Option<String>) -> Value {
+    json!({
+        "var": crate::config::LIBRARY_ROOTS_ENV,
+        "value": value,
+    })
+}
+
+/// 检查每个库根：能不能读、解析到哪个绝对路径、有没有与另一个根嵌套。
+///
+/// 抽成独立函数是为了能单测（`library_stats` 拿不到受控的 cwd / 文件系统）。
+/// **纯函数 + 文件系统读取**，不碰数据库。
+fn inspect_roots(raw: &[String]) -> Vec<Value> {
+    // 先各自裁掉两侧空白 —— 配置层（split_roots / str_vec_at）本来就会裁，
+    // 这里再裁一次是**防御**；关键是把裁剪后的字符串**只算一次**再到处用：
+    // 分开写（一处 trim 一处不 trim）会让「能解析出绝对路径」和「报告可读」
+    // 对同一条路径给出矛盾结论。
+    let raw: Vec<&str> = raw.iter().map(|r| r.trim()).collect();
+    // 解析成绝对路径才能互相比较 —— 嵌套要拿解析结果比才有意义
+    let resolved: Vec<Option<PathBuf>> = raw
+        .iter()
+        .map(|r| std::fs::canonicalize(r).ok())
+        .collect();
+
+    raw.iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let me = resolved[i].as_ref();
+            // 「嵌在哪个根里」：存在另一个根是它的前缀（且不是它自己）。
+            // 取**最长**的那个 —— 嵌套两层时，说「嵌在更具体的那个里」才有用。
+            let nested_in = me.and_then(|mine| {
+                resolved
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .filter_map(|(_, other)| other.as_ref())
+                    .filter(|other| mine != *other && mine.starts_with(other))
+                    .max_by_key(|other| other.as_os_str().len())
+                    .map(|other| other.display().to_string())
+            });
+            json!({
+                "path": r,
+                "resolved": me.map(|p| p.display().to_string()),
+                "readable": std::path::Path::new(r).is_dir(),
+                "nested_in": nested_in,
+            })
+        })
+        .collect()
+}
 
 /// GET /api/library?page=&page_size=&sort= —— 曲库分页列表。
 ///
@@ -685,21 +816,30 @@ mod tests {
 
     /// 预置一个用户并签一个可用令牌（不走注册接口，省掉 argon2 的开销）。
     fn issue_token(state: &AppState) -> String {
+        issue_token_with_role(state, Role::Admin)
+    }
+
+    /// 同上，但可以指定角色 —— 用来验证「管理员专属」的边界。
+    fn issue_token_with_role(state: &AppState, role: Role) -> String {
+        let role_str = match role {
+            Role::Admin => "admin",
+            Role::User => "user",
+        };
         let id = {
             let conn = state.db.acquire().expect("借连接");
             conn.execute(
                 "INSERT INTO users (username, password_hash, role, created_at)
-                 VALUES ('tester', 'hash', 'admin', ?1)",
-                params![crate::db::now_unix_ms()],
+                 VALUES (?1, 'hash', ?2, ?3)",
+                params![format!("tester-{role_str}"), role_str, crate::db::now_unix_ms()],
             )
             .expect("预置用户");
             conn.last_insert_rowid()
         };
         let user = User {
             id,
-            username: "tester".to_string(),
+            username: format!("tester-{role_str}"),
             password_hash: "hash".to_string(),
-            role: Role::Admin,
+            role,
             created_at: 0,
             last_login: None,
         };
@@ -1495,15 +1635,17 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. 鉴权（5 个接口逐个断言）
+    // 7. 鉴权（6 个接口逐个断言）
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// 我加的 UT：未登录访问这 5 个接口一律 401 + 统一错误形状。
+    /// 我加的 UT：未登录访问这 6 个接口一律 401 + 统一错误形状。
     #[tokio::test]
     async fn every_library_route_requires_authentication() {
         let (state, _temp) = test_state("s16-auth");
         let routes = [
             "/api/library",
+            // 概况是 admin 专属，但**没登录先撞的是 401**（中间件在读角色之前就拦了）
+            "/api/library/stats",
             "/api/songs/1",
             "/api/albums/1",
             "/api/artists/%E5%91%A8",
@@ -1644,5 +1786,218 @@ mod tests {
         let (status, body) = authed(&state, &token, &format!("/api/songs/{gone}")).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "软删的歌按 id 取必须是 404：{body}");
         assert_eq!(body["error"]["code"], "NOT_FOUND");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10. 曲库概况（GET /api/library/stats）
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// 概况接口同时吐库根和计数，且**只有管理员**能拿。
+    ///
+    /// 普通用户被拒不是走形式：这条响应里有服务器上的绝对路径。
+    #[tokio::test]
+    async fn library_stats_exposes_roots_and_counts_to_admins_only() {
+        let (mut state, _temp) = test_state("s16-stats");
+        // 换成一个**真实存在**的目录：readable 要能与「路径不存在」区分开。
+        let dir = std::env::temp_dir().join("s16-stats-root");
+        std::fs::create_dir_all(&dir).expect("建库根目录");
+        let mut cfg = (*state.config).clone();
+        cfg.storage.library_roots = vec![
+            dir.display().to_string(),
+            "/tmp/s16-不存在的库根".to_string(),
+        ];
+        state = AppState::new(Arc::clone(&state.db), Arc::new(cfg));
+
+        {
+            let conn = state.db.acquire().expect("借连接");
+            let album = seed_album(&conn, "专辑", "某歌手");
+            // 4 首在库 + 1 首软删。软删那首的状态是 done，**不能被计进 done**，
+            // 否则四个状态加起来会大于总数（count_by_scrape_status 的口径）。
+            let ids: Vec<i64> = (0..5)
+                .map(|i| {
+                    seed(
+                        &conn,
+                        SeedSong {
+                            path: format!("/music/s{i}.mp3"),
+                            title: format!("歌{i}"),
+                            artists: Some(if i < 2 { "某歌手".into() } else { "别的歌手".into() }),
+                            album_id: Some(album),
+                            added_at: i as i64,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+            for (id, status) in [
+                (ids[0], "done"),
+                (ids[1], "done"),
+                (ids[2], "processing"),
+                (ids[3], "failed"),
+            ] {
+                conn.execute(
+                    "UPDATE songs SET scrape_status = ?1 WHERE id = ?2",
+                    params![status, id],
+                )
+                .expect("改刮削状态");
+            }
+            songs::mark_deleted(&conn, ids[4]).expect("标记软删");
+        }
+
+        let admin = issue_token(&state);
+        let (status, body) = authed(&state, &admin, "/api/library/stats").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        // 库根：原样路径 + 解析后的绝对路径 + 可读性
+        let roots = body["roots"].as_array().expect("roots 是数组");
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0]["path"], dir.display().to_string());
+        assert_eq!(roots[0]["readable"], true, "真目录应报可读");
+        assert_eq!(
+            roots[0]["resolved"],
+            dir.canonicalize()
+                .expect("目录可解析")
+                .display()
+                .to_string(),
+            "要给解析后的绝对路径，相对路径才说得清指到哪"
+        );
+        assert_eq!(roots[1]["readable"], false, "不存在的目录必须报不可读");
+        assert!(roots[1]["resolved"].is_null(), "解析不了就是 null，不编一个出来");
+        assert!(
+            roots[0]["nested_in"].is_null(),
+            "两个根互不嵌套时不该报嵌套"
+        );
+
+        // 计数
+        let counts = &body["counts"];
+        assert_eq!(counts["songs"], 4, "软删的不算入库数");
+        assert_eq!(counts["deleted"], 1);
+        assert_eq!(counts["albums"], 1);
+        assert_eq!(counts["artists"], 2, "artist 是去重的 artists 串数");
+        let scrape = &counts["scrape"];
+        assert_eq!(scrape["done"], 2);
+        assert_eq!(scrape["processing"], 1);
+        assert_eq!(scrape["failed"], 1);
+        assert_eq!(scrape["pending"], 0);
+        // 自洽：四档之和 == 在库总数（软删的既不进总数也不进四档）
+        let sum = ["pending", "processing", "done", "failed"]
+            .iter()
+            .map(|k| scrape[*k].as_i64().expect("整数"))
+            .sum::<i64>();
+        assert_eq!(sum, counts["songs"].as_i64().expect("整数"));
+
+        // 环境变量那一层：这里**只验形状**，不验具体值 —— 进程环境是全局的，
+        // 另一个测试（下面那条）会临时设置这个变量，两边抢同一格会 flake。
+        // 「真读到环境变量」由那条测试单独钉住。
+        assert_eq!(body["roots_env"]["var"], crate::config::LIBRARY_ROOTS_ENV);
+        assert!(
+            body["roots_env"]["value"].is_null() || body["roots_env"]["value"].is_string(),
+            "value 只能是字符串或 null：{}",
+            body["roots_env"]
+        );
+
+        // 普通用户拿不到（响应里有服务器绝对路径）
+        let user = issue_token_with_role(&state, Role::User);
+        let (status, body) = authed(&state, &user, "/api/library/stats").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "普通用户不该看到库根：{body}");
+        assert!(
+            !body.to_string().contains(&dir.display().to_string()),
+            "403 的响应体里也不能带路径：{body}"
+        );
+    }
+
+    /// 概况里的嵌套提示：一个根嵌在另一个根里时要说清楚**嵌在哪个**。
+    ///
+    /// 这直接对应界面上的警告文案 —— 两个根嵌套会导致同一批文件被扫两遍。
+    #[test]
+    fn inspect_roots_flags_nesting_and_picks_the_most_specific_parent() {
+        let base = std::env::temp_dir().join("s16-nest");
+        let inner = base.join("inner");
+        std::fs::create_dir_all(&inner).expect("建嵌套目录");
+
+        let raw: Vec<String> = vec![
+            base.display().to_string(),
+            inner.display().to_string(),
+            "/tmp/s16-nest-unrelated".to_string(),
+        ];
+        let roots = inspect_roots(&raw);
+        assert_eq!(roots.len(), 3);
+        assert!(
+            roots[0]["nested_in"].is_null(),
+            "外层根不该说嵌在别人里"
+        );
+        assert_eq!(
+            roots[1]["nested_in"],
+            base.canonicalize().expect("可解析").display().to_string(),
+            "内层根要报出外层根"
+        );
+        assert!(roots[2]["nested_in"].is_null(), "无关目录不该误报嵌套");
+
+        // 两侧带空白的路径要裁干净再报，而且裁剪结果在三个字段里必须一致
+        // （resolved 有值、readable 却是 false 就是自相矛盾）
+        let padded = inspect_roots(&[format!("  {}  ", base.display())]);
+        assert_eq!(padded[0]["path"], base.display().to_string(), "路径要裁空白");
+        assert_eq!(padded[0]["readable"], true, "裁完就能认出来是个目录");
+        assert!(padded[0]["resolved"].is_string(), "裁完也要能解析");
+
+        // 最长前缀优先：inner/deep 同时嵌在 inner 与 base 里，报更具体的那个
+        let deep = inner.join("deep");
+        std::fs::create_dir_all(&deep).expect("建三级目录");
+        let raw3: Vec<String> = vec![
+            base.display().to_string(),
+            inner.display().to_string(),
+            deep.display().to_string(),
+        ];
+        let roots3 = inspect_roots(&raw3);
+        assert_eq!(
+            roots3[2]["nested_in"],
+            inner.canonicalize().expect("可解析").display().to_string(),
+            "嵌套两层时要报最具体的那层"
+        );
+    }
+
+    /// `roots_env` 必须**如实**报环境变量：设了要给出值，没设才是 null。
+    ///
+    /// 这一层是界面文案的依据 —— 「环境变量在的话，改 config.json 没用」。
+    /// 如果它无脑吐 null（或反过来无脑说「设了」），界面就会把用户往错的方向指。
+    #[test]
+    fn roots_env_json_reports_the_value_verbatim() {
+        let unset = roots_env_json_with(None);
+        assert_eq!(unset["var"], crate::config::LIBRARY_ROOTS_ENV);
+        assert!(unset["value"].is_null(), "没设就是 null");
+
+        let set = roots_env_json_with(Some("/a:/b".to_string()));
+        assert_eq!(set["var"], crate::config::LIBRARY_ROOTS_ENV);
+        assert_eq!(set["value"], "/a:/b", "设了要原样报出来");
+    }
+
+    /// `roots_env_json()` 真的去读了进程环境（**唯一**碰真环境变量的测试）。
+    ///
+    /// 为什么必须有这一条：上面那条注入值只能证明「JSON 拼得对」，证明不了
+    /// 「有没有真去读」。把读取那行改成无脑 `None`（最省事的偷懒写法）时，
+    /// 上面那条照样绿，只有这条会红。
+    ///
+    /// 为什么不在接口测试里断言：环境变量是进程全局的，而 `cargo test` 默认
+    /// 多线程 —— 设置它期间别的测试读到的值会跟着变。所以接口测试那边只验形状
+    /// （字符串或 null），不断言「当前没设」；真读取只在这条里验，并恢复现场。
+    #[test]
+    fn roots_env_json_reads_the_real_process_environment() {
+        let key = crate::config::LIBRARY_ROOTS_ENV;
+        let saved = std::env::var(key).ok();
+
+        std::env::set_var(key, "/probe:/roots");
+        assert_eq!(
+            roots_env_json()["value"],
+            "/probe:/roots",
+            "设了环境变量却没读出来 —— 探针没接上"
+        );
+
+        std::env::remove_var(key);
+        assert!(roots_env_json()["value"].is_null(), "移掉之后应报 null");
+
+        // 恢复现场：万一外部本来就设着，别让后面的测试看到被改过的世界
+        match saved {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 }

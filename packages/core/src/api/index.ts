@@ -8,6 +8,7 @@ import type {
   HistoryPage,
   Job,
   JobAccepted,
+  LibraryStats,
   LoginResponse,
   Page,
   PlayStats,
@@ -65,6 +66,13 @@ export function createApi(http: Http) {
       streamUrl: (id: number) => `/api/stream/${id}`,
       /** 封面地址。同上，靠 cookie。 */
       coverUrl: (id: number) => `/api/songs/${id}/cover`,
+      /**
+       * 曲库概况：库根（含解析后的绝对路径 / 可读性 / 嵌套提示）+ 各类计数。
+       *
+       * ⚠️ **仅管理员**（普通用户 403）—— 响应里有服务器上的绝对路径，
+       * 而 `song_json` 是特意不吐 `file_path` 的。入口那侧要按角色藏起来。
+       */
+      stats: () => http.get<LibraryStats>('/api/library/stats'),
     },
 
     /**

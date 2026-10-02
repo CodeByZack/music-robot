@@ -209,6 +209,70 @@ export interface SettingsResponse {
 export type JobKind = 'scan' | 'scrape';
 export type JobStatus = 'running' | 'done' | 'failed';
 
+/**
+ * 一个曲库根（`GET /api/library/stats` 的 `roots[]`）。
+ *
+ * ⚠️ **这条接口只有管理员拿得到** —— 它吐服务器上的绝对路径。
+ */
+export interface LibraryRoot {
+  /** 配置里写的**原样字符串**（可能是 `./fixtures` 这种相对路径）。 */
+  path: string;
+  /** 按服务端 cwd 解析出的绝对路径；解析不出来就是 `null`。 */
+  resolved: string | null;
+  /** 服务端看它是不是一个存在的目录。false = 扫不到东西。 */
+  readable: boolean;
+  /**
+   * 这个根嵌在**另一个根**里时，给出外层根的绝对路径，否则 `null`。
+   *
+   * 嵌套会让同一批文件被扫两遍，所以界面要提醒。
+   */
+  nested_in: string | null;
+}
+
+/**
+ * 「库根是从哪一层配置来的」——只报**环境变量**这一层。
+ *
+ * 为什么不报全：优先级是 CLI > 环境变量 > config.json > 默认值，但后两层
+ * 没留溯源信息，硬编一个出来就是假数据。
+ *
+ * ⚠️ 它回答的是「进程环境里**现在**有没有这个变量」。只要它非 null，
+ * **改 config.json 就是无效的** —— 后端 `serve` 是先读文件、再 `apply_env()`。
+ * `value` 为 null 时，前端的提示才应该指向 config.json。
+ */
+export interface LibraryRootsEnv {
+  /** 环境变量名（`MR_LIBRARY_ROOTS`），直接拿去显示，别在前端再写死一份。 */
+  var: string;
+  /** 当前值（未设置 = `null`）。 */
+  value: string | null;
+}
+
+/**
+ * 曲库概况（`GET /api/library/stats`，**仅管理员**）。
+ *
+ * 口径（后端 `songs::count_by_scrape_status` 等）：
+ * - `counts.songs` / `counts.artists` / `counts.albums` / `counts.scrape.*`
+ *   **都不含软删**，所以 `scrape` 四档之和恰等于 `counts.songs`；
+ * - `counts.deleted` 是单独一格的**软删行数**（磁盘上已消失、数据库还留着）；
+ * - `counts.artists` 数的是**去重后的 `artists` 字符串个数**，不是拆开的人头数。
+ */
+export interface LibraryStats {
+  roots: LibraryRoot[];
+  roots_env: LibraryRootsEnv;
+  counts: {
+    songs: number;
+    deleted: number;
+    albums: number;
+    artists: number;
+    /** 四种刮削状态各多少首。 */
+    scrape: {
+      pending: number;
+      processing: number;
+      done: number;
+      failed: number;
+    };
+  };
+}
+
 export interface Job {
   batch_id: string;
   kind: JobKind;

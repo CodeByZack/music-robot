@@ -63,14 +63,14 @@ curl -X POST localhost:8080/api/auth/register -H 'content-type: application/json
 
 | 项 | 实测值 | 怎么复现 |
 |---|---|---|
-| `cargo test --lib` | **514 passed / 0 failed / 1 ignored** | `cargo test` |
+| `cargo test --lib` | **524 passed / 0 failed / 1 ignored** | `cargo test` |
 | `cargo test`（`tests/`，11 个文件） | **131 passed / 0 failed** | 同上 |
-| Rust 合计 | **645 passed / 1 ignored**（另有 3 条 doc test 是 ignored） | 同上 |
+| Rust 合计 | **655 passed / 1 ignored**（另有 3 条 doc test 是 ignored） | 同上 |
 | 编译警告 | **0** | `cargo check --lib --bins` |
-| 端到端 API 脚本 | **195 通过 / 1 失败**（那 1 条是既有的「封面同样认 cookie」） | `node scripts/api_test.mjs` |
-| core 单测（零依赖，node:test） | **34 通过 / 0 失败** | `cd packages/core && node --test 'src/**/*.test.ts'` |
-| Web 构建 | **121 modules**，JS 317.50 kB（gzip 97.10）· CSS 30.57 kB（gzip 6.57） | `pnpm --filter @music-robot/web build` |
-| HTTP 接口 | **34 条路径 / 43 个操作**（`/api/admin/users` 的 GET 与 `/api/history/stats` 是 2026-10-02 新增） | 对着 `src/server/routes/mod.rs` 数 |
+| 端到端 API 脚本 | **262 通过 / 1 失败**（那 1 条是既有的「封面同样认 cookie」） | `node scripts/api_test.mjs` |
+| core 单测（零依赖，node:test） | **34 通过 / 0 失败** | `cd packages/core && node --test src/*.test.ts` |
+| Web 构建 | **137 modules**，JS 394.46 kB（gzip 116.91）· CSS 47.84 kB（gzip 8.98） | `pnpm --filter @music-robot/web build` |
+| HTTP 接口 | **38 条路径 / 47 个操作**（`/api/library/stats` 是 2026-10-02 新增） | `grep -ohE '"/api[^"]*"' src/server/routes/mod.rs \| sort -u` 数路径；再数 `get(handler)` 个数 |
 | 前端页面 | **15 条路由 = 15 个页面文件**（含 3 个全屏浮层页：`/settings` `/now` `/songs/:id/tags`） | `ls apps/web/src/pages/` |
 | 画布进度 | **26 / 28**（`st_*` 卡里 `backgroundColor === "#bbf7d0"` 的个数）；未绿的是 **S27 文件整理** 与 **S28 集成打包** | `music-server-architecture.excalidraw` |
 | 代码量 | Rust 39864 行 · `apps/web` 2671 行 · `packages/core` 1097 行 | `wc -l` |
@@ -129,7 +129,7 @@ history / song_requests 一串 CASCADE —— 没有需求就别动。
 
 | 项 | 说明 |
 |---|---|
-| **shadcn/ui 没装** | 所有 UI 都是手写 Tailwind。**决策没落地** —— 用户说过「换吧」，但装依赖那步一直卡着（§6.3），所以到目前为止全是手写的。见 §3.3 |
+| ~~shadcn/ui 没装~~ | ✅ **已决定：不换（2026-10-02）** —— 用户明确说不需要了。所有 UI 继续手写 Tailwind。见 §3.3 |
 | 设置页的「写文件」开关不持久化 | 内存级（`lib/scrape-prefs.ts`），F5 后回默认的安全档 `false`。要持久化就存进后端 `settings`（通用键值表，`resume:<id>` 就是这么用的） |
 | 设置页的「音量 / 播放模式」是死 UI | 那两行永远显示「后端没有这个键」—— `volume` / `play_mode` **从来没有被写过**（画布 ④ 要求它们存 `user_settings`）。要么接上、要么把两行删掉 |
 | ~~播放统计没有页面~~ | ✅ **已完成（2026-10-02）**：后端 `GET /api/history/stats`
@@ -138,33 +138,42 @@ history / song_requests 一串 CASCADE —— 没有需求就别动。
 | ~~播放列表缺一半操作~~ | ✅ **已完成（2026-10-02）**：改名 / 描述 / 可见性、删歌单、
 从歌单移除、拖动排序（含「上移 / 下移」兼容触屏与键盘）全做了。
 一并补了后端的 `is_owner` —— 前端靠它决定给不给编辑入口（见 `routes::playlists.rs`） |
+| ~~设置页的音乐库分节没有库根与计数~~ | ✅ **已完成（2026-10-02）**：后端新增
+`GET /api/library/stats`（**仅 admin**，吐库根 + 解析后绝对路径 + 可读性 +
+嵌套提示，以及入库 / 已刮削 / 待刮削 / 刮削中 / 失败 / 软删 / 专辑 / 歌手 计数）；
+前端 `apps/web/src/pages/settings/library-section.tsx` 把「曲库路径 / 曲库概况 /
+扫描 / 刮削」四块收在一节里（原先扫描与刮削内联在 `settings.tsx`，已搬过来）。
+⚠️ **库根是只读展示，界面不写任何配置文件** —— 理由见该文件 `RootsPanel` 的注释
+（环境变量优先于 config.json，代写文件会出现「看着成功了、重启没变化」） |
 | `api.jobs.list` 从未被调用 | 任务列表接口有客户端，界面只轮询单个 batch |
 | ~~画布 S25/S26 卡片文字过时~~ | ✅ **已修（2026-10-02）**：S25/S26 已标绿，标题带
   「已完成 · 前端 UT 未写」。⛔ 但卡片上的「交付 / UT」那两行仍是**当初的计划原文**
   （画布上所有绿卡都是这个规矩）—— 实际交付有出入，别把计划当现状：
   S26 的「请求页」现已并入设置页，不是一个页面；「前端 UT」全部未写 |
 
-### 3.3 UI 库这件事（**接手的第一个决策点**）
+### 3.3 UI 库这件事 —— **已定：不换（2026-10-02）**
 
-用户明确说过要换 shadcn/ui，但**没落地**，原因很具体：
+用户 2026-10-02 明确说「shadcn/ui 这个不需要了」。所以：
 
-1. 他的机器上 `pnpm install` 卡在 24h 供应链策略（§6.3），**加了依赖等于把「能不能跑起来」压在一件没验证的事上**；
-2. shadcn 的默认令牌是中性 zinc + oklch，本项目有一套从**飞牛音乐**抽出来的令牌
-   （`docs/design.md` §9 是可直接粘的 CSS 变量），**真拷进来得先对齐两套色系**。
+- 所有 UI **继续手写 Tailwind**，设计令牌的唯一来源是 `apps/web/src/global.css` 的 `@theme`；
+- 前端依赖**继续保持四个**（`@music-robot/core` / react / react-dom / react-router）；
+- ⛔ 别再把这当成一个「待办」——它已经是一个**已做的决定**，见 §1 的「加依赖前先问用户」。
 
-**我的建议（不是结论，你可以推翻）**：不要全量迁移。
-按需拷 Radix 那几个手写不出来的：`Dialog` / `DropdownMenu` / `Select` / `Slider` / `Toast`。
-本仓库现在有一处**手写的 popover**（`apps/web/src/components/menu.tsx`），
-它就是第一个该换成 Radix `DropdownMenu` 的候选 —— 手写版**刻意没做键盘导航**
-（上下键在菜单内移动、首字母跳转），只做了「点外面关 / Esc 关 / 点项关 / 粗略向上翻转」。
+当初没落地的两个原因是**历史记录，不是待办**：① 装依赖卡在 pnpm 的 24h 供应链策略（§6.3）；
+② shadcn 的默认令牌是中性 zinc + oklch，而本项目有一套从**飞牛音乐**抽出来的令牌
+（`docs/design.md` §9 是可直接粘的 CSS 变量）。
+
+已知的**代价**（知道就行，不用去补）：`apps/web/src/components/menu.tsx` 那个手写 popover
+**刻意没做键盘导航**（上下键在菜单内移动、首字母跳转），只做了「点外面关 / Esc 关 /
+点项关 / 粗略向上翻转」。
 
 ### 3.4 测试缺口（**这个项目最在意的事**）
 
 - **`apps/web` 一个测试都没有。** 画布 S25/S26 明写着要 UT（列表渲染 / 播放器状态机 /
   seek 触发 Range / 表单校验 / 轮询进度渲染），**一条没写**。
 - 已覆盖的部分：纯逻辑全在 `packages/core`（34 个 node:test），
-  接口层靠 `scripts/api_test.mjs`（171 项，**起真服务逐条打 HTTP**），
-  Rust 侧 635 项。
+  接口层靠 `scripts/api_test.mjs`（263 项，**起真服务逐条打 HTTP**），
+  Rust 侧 655 项。
 - 规矩见 §7.1：**没有变异验证过的「全绿」不算证据**。
 
 ---
@@ -336,11 +345,11 @@ gh api repos/CodeByZack/music-robot/commits/<远端SHA> --jq '.commit.tree.sha,.
 
 | | |
 |---|---|
-| 分支 | `main`，本地 = 远端 = **`63be874`** |
-| 工作树 | **干净** |
-| 最近三个提交 | `63be874` 前端四处界面反馈 · `3a70a47` 界面缺口修复 · `1280b51` 依赖钉版本 |
+| 分支 | `main`，本地比远端**多若干提交**（远端还是 `63be874`，见 §8 末行） |
+| 工作树 | **干净**（`pnpm-lock.yaml` 故意没提交，用户说不管） |
+| 最近三个提交 | 曲库概况接口 + 音乐库分节 · 画布 S25/S26 标绿 · 管理入口按角色收敛 |
 | 未提交/未跟踪 | 无 |
-| 待用户确认 | ① `pnpm install` 在他机器上到底过没过 ② shadcn 换不换、换哪几个 |
+| 待用户确认 | ① `pnpm install` 在他机器上到底过没过（② shadcn 已定：不换） |
 
 **建议的第一步**：先跑 §1 的命令把服务起起来，用 `fixtures/` 当曲库（9 个真音频，
 扫进去 8 首），把 14 个页面点一遍。**亲眼看过再动手** —— 这个项目里

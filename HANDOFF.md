@@ -196,7 +196,7 @@ music-robot/
 │                       # 内部直接用了 unwrap —— examples/ 不算生产路径（§7.5 只约束 src/）
 ├── .dsh/skills/         # **项目级 agent skill**（DSH 扫这一层，`<名>/SKILL.md`，不递归）
 │                       # 24 个 Expo 官方 skill（expo-*/eas-*），来源与更新方式见 .dsh/README.md
-├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，171 项；非交互，给回归用）
+├── scripts/api_test.mjs # 端到端 API 脚本（起临时服务逐条断言，263 项；非交互，给回归用）
 ├── scripts/api_cli.mjs  # 交互式 API 客户端（方向键菜单，连**已在跑**的服务；只用 node:readline，零依赖）
 │                       # 曲库菜单里有：扫描入库 / 刮削 / 重刮失败项 / 重刮单曲
 ├── fixtures/           # 9 个样本：6 音乐 + 3 小 WAV，65M（**不入库**，重建见 §8.3）

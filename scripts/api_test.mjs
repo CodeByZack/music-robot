@@ -1121,6 +1121,45 @@ async function main() {
     [st] = await anon3.json('GET', '/api/history/stats');
     check('未登录看统计 → 401', st, 401);
 
+    // ── 曲库概况（/api/library/stats，仅 admin）──
+    [st, , body] = await c.json('GET', '/api/library/stats');
+    check('曲库概况 → 200', st, 200);
+    const roots = body?.roots ?? [];
+    check('库根是个数组', Array.isArray(roots), true);
+    check('至少有一个库根', roots.length > 0, true);
+    check(
+      '每个根都有 path/resolved/readable/nested_in 四个字段',
+      roots.every(
+        (r) =>
+          typeof r.path === 'string' &&
+          (r.resolved === null || typeof r.resolved === 'string') &&
+          typeof r.readable === 'boolean' &&
+          (r.nested_in === null || typeof r.nested_in === 'string'),
+      ),
+      true,
+    );
+    check('概况回的根数与库列表口径无关但非空', roots.length >= 1, true);
+    // 环境变量那一层：形状对就行 —— 命令行跑这个脚本时到底设没设是环境决定的
+    check('roots_env.var 就是 MR_LIBRARY_ROOTS', body?.roots_env?.var ?? null, 'MR_LIBRARY_ROOTS');
+    check(
+      'roots_env.value 是字符串或 null',
+      body?.roots_env?.value === null || typeof body?.roots_env?.value === 'string',
+      true,
+    );
+    // 自洽：四档之和 == 入库数（软删的既不进总数也不进这四档）
+    const scrapeCounts = body?.counts?.scrape ?? {};
+    const sumScrape = ['pending', 'processing', 'done', 'failed'].reduce(
+      (n, k) => n + (scrapeCounts[k] ?? 0),
+      0,
+    );
+    check('四档刮削之和 == 入库数', sumScrape, body?.counts?.songs ?? -1);
+    check('计数都是非负整数', ['songs', 'deleted', 'albums', 'artists'].every((k) => Number.isInteger(body?.counts?.[k]) && body?.counts?.[k] >= 0), true);
+    // 曲目列表不吐 file_path，所以曲库概况不能把绝对路径泄给普通用户
+    [st] = await c2.json('GET', '/api/library/stats');
+    check('普通用户看曲库概况 → 403', st, 403);
+    [st] = await anon3.json('GET', '/api/library/stats');
+    check('未登录看曲库概况 → 401', st, 401);
+
     // ───────────────────────── 歌曲请求 ─────────────────────────
     section('9. 歌曲请求（S23）');
 
