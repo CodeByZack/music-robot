@@ -1,25 +1,30 @@
 /**
- * 审查栏：**改动预览 + 备份开关 + 两个动作按钮**。
+ * 改动预览拆成两个组件：**详情**（`ReviewDetail`）与**动作栏**（`ActionBar`）。
  *
- * ## 为什么这三样必须在一起
+ * ## 为什么要拆
  *
- * 上一版把两个按钮钉在最底部的横条上，而预览结果渲染在滚动内容的最末尾（歌词下面）——
- * 用户点完「预览改动」得往下滚才看得见结果，看完再滚回底部点「写入文件」。
- * 操作与结果被隔开了。
+ * 窄屏时这两者的诉求是相反的：
  *
- * 现在整个审查栏固定在右侧（窄屏落到下方），点按钮**结果就出现在按钮正上方**。
+ * * **动作**（预览 / 写入 / 备份）是这个页面的出口，**必须常显**；
+ * * **详情**（diff 列表、空状态提示）只在需要时看，平时常开着纯占地方
+ *   —— 实测在 450px 宽的手机上，"改动预览 + 一行提示 + 备份 + 两个按钮"
+ *   加起来接近 190px，把编辑字段挤掉了半屏。
  *
- * ## 四态提示（两步闸门的可视化）
+ * 所以窄屏把详情做成**可折叠**、动作留在下面一条约 80px 的栏里；
+ * 宽屏（≥1100px）两者仍是右栏的上下两段，看起来和以前一样。
  *
- * | 状态 | 显示 |
+ * ## 四态
+ *
+ * | 状态 | 含义 |
  * |---|---|
- * | 没改动 | 「改点东西，会在这里告诉你将写入什么」 |
- * | 改过但没预览 | 「点『预览改动』看看会写成什么」← 此时「写入文件」是灰的 |
- * | 预览过、字段又改了 | 「字段又改了，之前的预览已过期」← 同样是灰的 |
- * | 预览是最新的 | 逐行 diff + 「写入文件」可用 |
+ * | `clean` | 还没改任何字段 |
+ * | `unpreviewed` | 改了但没点过「预览改动」 |
+ * | `stale` | 预览过、之后字段又改了（预览作废） |
+ * | `ready` | 预览对应当前改动 |
  *
- * 这个状态机是这个页面最重要的一条约束（写文件不可撤销），所以它得**看得见**，
- * 不能只藏在按钮的 disabled 里。
+ * 写文件不可撤销，所以这个状态机是页面最重要的一条约束 ——
+ * 它必须在**窄屏折叠后也看得见**，这就是 `reviewChip` 存在的理由
+ * （折叠时那一行显示「未预览 / 预览已过期 / 已预览 3 处」）。
  */
 import type { TagDiff, TagPatchResult } from '@music-robot/core';
 
@@ -41,6 +46,41 @@ const FIELD_LABEL: Record<string, string> = {
   cover: '封面',
 };
 
+export type ReviewState = 'clean' | 'unpreviewed' | 'stale' | 'ready';
+
+/** 由三个输入推出状态。**唯一一处**算这个的地方，两个组件都用它。 */
+export function reviewStateOf(
+  dirty: boolean,
+  fresh: boolean,
+  preview: TagPatchResult | null,
+): ReviewState {
+  if (!dirty) return 'clean';
+  if (preview !== null && !fresh) return 'stale';
+  if (fresh) return 'ready';
+  return 'unpreviewed';
+}
+
+/** 改动条数（封面单独算一条：引擎的 diff 只比张数，换封面是 1 → 1、没有 diff 行）。 */
+export function changeCount(preview: TagPatchResult | null): number {
+  if (!preview) return 0;
+  return preview.diffs.length + (preview.cover_op ? 1 : 0);
+}
+
+/** 空状态那一句（详情区里显示）。 */
+const STATE_HINT: Record<Exclude<ReviewState, 'ready'>, string> = {
+  clean: '改点东西，这里会逐行告诉你将写入什么。',
+  unpreviewed: '点下面的「预览改动」，先看清会写成什么。',
+  stale: '字段又改了，之前的预览已过期 —— 重新点一次「预览改动」。',
+};
+
+/** 折叠时那一行的短文案。 */
+export function reviewChip(state: ReviewState, count: number, applied: boolean): string {
+  if (state === 'clean') return '未改动';
+  if (state === 'unpreviewed') return '未预览';
+  if (state === 'stale') return '预览已过期';
+  return applied ? '已写入文件' : `已预览 ${count} 处`;
+}
+
 function DiffRow({ label, before, after }: { label: string; before: string; after: string }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-note">
@@ -52,49 +92,31 @@ function DiffRow({ label, before, after }: { label: string; before: string; afte
   );
 }
 
-export function ReviewPane({
+/** 详情：标题 + 逐行 diff（没得看时显示一句状态说明）。 */
+export function ReviewDetail({
   preview,
-  fresh,
-  dirty,
-  busy,
-  backup,
-  onBackup,
-  onPreview,
-  onWrite,
-  invalid,
-  notice,
-  failure,
+  state,
 }: {
   preview: TagPatchResult | null;
-  /** 预览是否仍对应当前改动（字段一改就过期）。 */
-  fresh: boolean;
-  dirty: boolean;
-  busy: boolean;
-  backup: boolean;
-  onBackup: (v: boolean) => void;
-  onPreview: () => void;
-  onWrite: () => void;
-  /** 非负整数校验失败的字段标签。 */
-  invalid: string[];
-  notice: string | null;
-  failure: string | null;
+  state: ReviewState;
 }) {
-  const showDiffs = preview !== null && fresh && (preview.diffs.length > 0 || preview.cover_op);
-  const count = preview ? preview.diffs.length + (preview.cover_op ? 1 : 0) : 0;
+  const ready = state === 'ready';
+  const count = changeCount(preview);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* 面板标题 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-line-weak px-4 py-3">
         <b className="text-note font-medium">改动预览</b>
-        {showDiffs && (
-          <span className="text-cap text-ink-4">{preview?.applied ? '已写入文件' : `共 ${count} 处`}</span>
+        {ready && (
+          <span className="text-cap text-ink-4">
+            {preview?.applied ? '已写入文件' : `共 ${count} 处`}
+          </span>
         )}
       </div>
 
-      {/* diff 区（可滚动，免得字段多时把按钮挤出去） */}
+      {/* diff 区（可滚动，免得字段多时把动作栏挤出可视区） */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-        {showDiffs ? (
+        {ready && preview ? (
           <>
             {preview.diffs.map((d: TagDiff) => (
               <DiffRow key={d.key} label={FIELD_LABEL[d.key] ?? d.key} before={d.before} after={d.after} />
@@ -114,57 +136,120 @@ export function ReviewPane({
           </>
         ) : (
           <p className="text-cap leading-5 text-ink-4">
-            {!dirty
-              ? '改点东西，这里会逐行告诉你将写入什么。'
-              : preview !== null
-                ? '字段又改了，之前的预览已过期 —— 重新点一次「预览改动」。'
-                : '点下面的「预览改动」，先看清会写成什么。'}
+            {state === 'clean' ? STATE_HINT.clean : state === 'stale' ? STATE_HINT.stale : STATE_HINT.unpreviewed}
           </p>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* 反馈 + 动作 */}
-      <div className="shrink-0 border-t border-line-weak px-4 py-3">
-        {failure && (
-          <p className="mb-2.5 rounded-md bg-accent-soft px-3 py-2 text-cap leading-4 text-accent">{failure}</p>
-        )}
-        {notice && (
-          <p className="mb-2.5 rounded-md bg-black/25 px-3 py-2 text-cap leading-4 text-ink-2">{notice}</p>
-        )}
+/**
+ * 动作栏：反馈 + 备份 + 两个按钮（+ 窄屏的折叠开关）。
+ *
+ * `collapsible` 为真时（窄屏），额外渲染一行「状态短文案 + 详情开关」；
+ * 宽屏那一行不渲染（详情本来就常显，没有可折叠的东西）。
+ */
+export function ActionBar({
+  state,
+  preview,
+  busy,
+  dirty,
+  fresh,
+  backup,
+  onBackup,
+  onPreview,
+  onWrite,
+  invalid,
+  notice,
+  failure,
+  expanded,
+  onToggleExpanded,
+}: {
+  state: ReviewState;
+  preview: TagPatchResult | null;
+  busy: boolean;
+  dirty: boolean;
+  fresh: boolean;
+  backup: boolean;
+  onBackup: (v: boolean) => void;
+  onPreview: () => void;
+  onWrite: () => void;
+  /** 非负整数校验失败的字段标签。 */
+  invalid: string[];
+  notice: string | null;
+  failure: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-line-weak px-4 py-3">
+      {failure && (
+        <p className="mb-2.5 rounded-md bg-accent-soft px-3 py-2 text-cap leading-4 text-accent">{failure}</p>
+      )}
+      {notice && (
+        <p className="mb-2.5 rounded-md bg-black/25 px-3 py-2 text-cap leading-4 text-ink-2">{notice}</p>
+      )}
 
-        <label className="mb-2.5 flex cursor-pointer items-center gap-2 text-cap text-ink-2">
-          <input
-            type="checkbox"
-            checked={backup}
-            onChange={(e) => onBackup(e.target.checked)}
-            className="accent-accent"
-          />
-          写入前备份 .bak
-        </label>
+      {/* 这一行**只在窄屏渲染**（`min-[1100px]:hidden`）—— 宽屏详情常显，没有可折叠的东西。
+          用纯 CSS 控制而不读 JS 媒体查询：少一个会重渲染的状态，也少一处不一致。 */}
+      <button
+        type="button"
+        onClick={onToggleExpanded}
+        aria-expanded={expanded}
+        className="mb-2 flex w-full items-center gap-2 rounded-md bg-black/20 px-2.5 py-1.5 text-left text-cap text-ink-3 transition-colors hover:bg-black/30 min-[1100px]:hidden"
+      >
+        {/* 折叠时这一行是**四态唯一的落点** —— 写文件不可撤销，状态必须看得见，
+            不能只藏在按钮的 disabled 里。 */}
+        <span className={state === 'ready' || state === 'stale' ? 'text-ink-2' : ''}>
+          {reviewChip(state, changeCount(preview), preview?.applied ?? false)}
+        </span>
+        <span className="flex-1" />
+        <span>{expanded ? '收起详情' : '查看详情'}</span>
+        <svg
+          className={`ico-xs transition-transform ${expanded ? 'rotate-180' : ''}`}
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        >
+          <path d="M3.5 6 8 10.5 12.5 6" />
+        </svg>
+      </button>
 
-        {invalid.length > 0 && (
-          <p className="mb-2 text-cap leading-4 text-accent">{invalid.join('、')} 需要非负整数</p>
-        )}
+      <label className="mb-2.5 flex cursor-pointer items-center gap-2 text-cap text-ink-2">
+        <input
+          type="checkbox"
+          checked={backup}
+          onChange={(e) => onBackup(e.target.checked)}
+          className="accent-accent"
+        />
+        写入前备份 .bak
+      </label>
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={busy || !dirty}
-            onClick={onPreview}
-            className="h-9 flex-1 rounded-full bg-surface px-3 text-note transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? '处理中…' : '预览改动'}
-          </button>
-          <button
-            type="button"
-            // 必须先预览过、且预览结果对应当前改动，才能写 —— 这是这个页面最重要的一条约束
-            disabled={busy || !fresh || !preview?.changed}
-            onClick={onWrite}
-            className="h-9 flex-1 rounded-full bg-accent px-3 text-note font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            写入文件
-          </button>
-        </div>
+      {invalid.length > 0 && (
+        <p className="mb-2 text-cap leading-4 text-accent">{invalid.join('、')} 需要非负整数</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy || !dirty}
+          onClick={onPreview}
+          className="h-9 flex-1 rounded-full bg-surface px-3 text-note transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? '处理中…' : '预览改动'}
+        </button>
+        <button
+          type="button"
+          // 必须先预览过、且预览结果对应当前改动，才能写 —— 这是这个页面最重要的一条约束
+          disabled={busy || !fresh || !preview?.changed}
+          onClick={onWrite}
+          className="h-9 flex-1 rounded-full bg-accent px-3 text-note font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          写入文件
+        </button>
       </div>
     </div>
   );

@@ -57,7 +57,7 @@ import {
   propText,
   type Form,
 } from './tag-edit/parts.tsx';
-import { ReviewPane } from './tag-edit/review-pane.tsx';
+import { ReviewDetail, ActionBar, reviewStateOf } from './tag-edit/review-pane.tsx';
 import { ScrapeSuggestions } from './tag-edit/scrape-suggestions.tsx';
 
 export default function TagEditPage() {
@@ -82,6 +82,10 @@ export default function TagEditPage() {
   // 换封面用的缓存失效序号。为什么必要：写盘后同一个 URL 在浏览器缓存里还是旧图
   // （已踩）。端点现在给 `no-store`，这里是第二道保险。
   const [coverNonce, setCoverNonce] = useState(0);
+  // 窄屏时右栏详情区的展开状态（宽屏忽略它 —— 那边本来就常显）。
+  // 默认折叠：窄屏空间金贵，实测「改动预览标题 + 提示 + 备份 + 两个按钮」
+  // 加起来接近 190px，把编辑字段挤掉了半屏。
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // ── 刮削（只查不写）────────────────────────────────────────────────────
   //
@@ -155,6 +159,9 @@ export default function TagEditPage() {
       });
       setPreview(result);
       setPreviewOf(signature);
+      // 预览回来了就把详情展开 —— 两步闸门的重点就是「先看清再写」，
+      // 折叠着用户会以为没反应。
+      if (!write) setSheetOpen(true);
       if (result.applied) {
         // 写成功后：把「初值」挪到新状态，这样再次编辑只比新值。
         // 但**不重读文件** —— 后端的 diff 已经是权威的「改了什么」。
@@ -184,6 +191,9 @@ export default function TagEditPage() {
   }
 
   const fileName = data?.file.name ?? '';
+  // 四态（未改动 / 未预览 / 预览过期 / 预览最新）。算在 review-pane 里，
+  // 详情区与动作栏共用同一份判断，免得两处口径漂移。
+  const reviewState = reviewStateOf(dirty, previewFresh, preview);
   const format = data?.file.format ?? '';
   const sizes = data?.file.size ? `${(data.file.size / 1024 / 1024).toFixed(1)} MB` : '';
   // Vorbis（FLAC）没有同步歌词的键 —— 那个框直接禁用，免得用户白填一遍再被打回。
@@ -197,8 +207,8 @@ export default function TagEditPage() {
     setScrapeBusy(true);
     setScrapeError(null);
     try {
-      setScrape(await api.tags.queryScrape(songId));
-    } catch (e) {
+      setScrape(await api.tags.queryScrape(songId));      // 新内容到了就展开 —— 窄屏折叠着的话用户看不到有结果。
+      setSheetOpen(true);    } catch (e) {
       setScrapeError(e instanceof Error ? e.message : String(e));
     } finally {
       setScrapeBusy(false);
@@ -291,7 +301,8 @@ export default function TagEditPage() {
           {/* 编辑区（滚动）。这里只管编辑字段 —— 建议与预览都在右栏。 */}
           <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
             <div className="mx-auto flex max-w-[940px] flex-col gap-5 min-[760px]:flex-row min-[760px]:items-start">
-              {/* 左栏：封面 + 文件信息。窄屏落到最上面。 */}
+              {/* 左栏：封面 + 文件信息。窄屏（<760px）整块变成「图在左、描述在右」一行，
+                  文件信息作为 children 落进图的右侧 —— 见 CoverEditor 的说明。 */}
               <aside className="w-full shrink-0 min-[760px]:w-[210px]">
                 <CoverEditor
                   songId={songId}
@@ -301,20 +312,21 @@ export default function TagEditPage() {
                   onPick={setNewCover}
                   onRemove={() => setDropCover(true)}
                   onRefresh={() => setCoverNonce((n) => n + 1)}
-                />
-                <dl className="mt-4 space-y-1.5 text-cap">
-                  <Meta
-                    label="封面"
-                    value={
-                      newCover ? '待替换' : dropCover ? '待移除' : data.tags.has_cover ? data.tags.cover_mime ?? '有' : '无'
-                    }
-                  />
-                  <Meta label="歌词" value={data.tags.lyrics ? `有（${lyricsFrame}）` : '无'} />
-                  <Meta
-                    label="同步歌词"
-                    value={noTimedLyrics ? '不支持' : data.tags.lyrics_timed ? '有（SYLT）' : '无'}
-                  />
-                </dl>
+                >
+                  <dl className="space-y-1.5 text-cap">
+                    <Meta
+                      label="封面"
+                      value={
+                        newCover ? '待替换' : dropCover ? '待移除' : data.tags.has_cover ? data.tags.cover_mime ?? '有' : '无'
+                      }
+                    />
+                    <Meta label="歌词" value={data.tags.lyrics ? `有（${lyricsFrame}）` : '无'} />
+                    <Meta
+                      label="同步歌词"
+                      value={noTimedLyrics ? '不支持' : data.tags.lyrics_timed ? '有（SYLT）' : '无'}
+                    />
+                  </dl>
+                </CoverEditor>
               </aside>
 
               <div className="min-w-0 flex-1 space-y-4">
@@ -418,51 +430,68 @@ export default function TagEditPage() {
           </div>
 
           {/* 右栏：**检查与落盘**一条流程 —— 刮削建议（找值）→ 改动预览（看差异）
-              → 备份 + 两个按钮（写）。宽屏在右（固定 330px），窄屏落到下方。 */}
-          <aside className="flex shrink-0 flex-col border-line-weak bg-black/15 max-[1099px]:max-h-[72vh] max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
-            {canScrape && (
-              <div
-                className={[
-                  'flex flex-col border-b border-line-weak',
-                  // 展开时给列表一个上限，不把下面的改动预览挤没；收起时只占一行。
-                  scrapeOpen ? 'min-h-0 shrink-0 max-[1099px]:max-h-[34vh] min-[1100px]:max-h-[46%]' : 'shrink-0',
-                ].join(' ')}
-              >
-                <ScrapeSuggestions
-                  open={scrapeOpen}
-                  data={scrape}
-                  busy={scrapeBusy}
-                  error={scrapeError}
-                  currentOf={currentOf}
-                  onApply={applyProposal}
-                  onUseCover={(d) => {
-                    setNewCover(d);
-                    setDropCover(false);
-                    setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
-                  }}
-                  onResearch={() => {
-                    openScrape();
-                  }}
-                  onToggleOpen={() => setScrapeOpen((v) => !v)}
-                />
-              </div>
-            )}
+              → 备份 + 两个按钮（写）。
+              宽屏：固定 330px 在右，两段都常显。
+              窄屏：详情（刮削 + 预览）**默认折叠**、动作栏常显 ——
+                    空间金贵，详情常开着要占近 190px（实测）。折叠后约 80px。 */}
+          <aside className="flex shrink-0 flex-col border-line-weak bg-black/15 max-[1099px]:border-t min-[1100px]:w-[330px] min-[1100px]:border-l">
+            <div
+              className={[
+                'flex min-h-0 flex-col min-[1100px]:flex-1',
+                // 窄屏：详情自己滚，且限高（不把编辑区挤没）
+                'max-[1099px]:max-h-[44vh] max-[1099px]:overflow-auto',
+                sheetOpen ? '' : 'max-[1099px]:hidden',
+              ].join(' ')}
+            >
+              {canScrape && (
+                <div
+                  className={[
+                    'flex shrink-0 flex-col border-b border-line-weak',
+                    // 展开时给列表一个上限，不把下面的改动预览挤没；收起时只占一行。
+                    scrapeOpen ? 'min-h-0 max-[1099px]:max-h-[30vh] min-[1100px]:max-h-[46%]' : '',
+                  ].join(' ')}
+                >
+                  <ScrapeSuggestions
+                    open={scrapeOpen}
+                    data={scrape}
+                    busy={scrapeBusy}
+                    error={scrapeError}
+                    currentOf={currentOf}
+                    onApply={applyProposal}
+                    onUseCover={(d) => {
+                      setNewCover(d);
+                      setDropCover(false);
+                      setNotice('已把刮削到的封面放进封面栏 —— 还没写盘。');
+                    }}
+                    onResearch={() => {
+                      openScrape();
+                    }}
+                    onToggleOpen={() => setScrapeOpen((v) => !v)}
+                  />
+                </div>
+              )}
 
-            <div className="flex min-h-0 flex-1 flex-col">
-              <ReviewPane
-                preview={preview}
-                fresh={previewFresh}
-                dirty={dirty}
-                busy={busy}
-                backup={backup}
-                onBackup={setBackup}
-                onPreview={() => void run(false)}
-                onWrite={() => void run(true)}
-                invalid={patch.invalid}
-                notice={notice}
-                failure={failure}
-              />
+              <div className="flex min-h-0 flex-1 flex-col">
+                <ReviewDetail preview={preview} state={reviewState} />
+              </div>
             </div>
+
+            <ActionBar
+              state={reviewState}
+              preview={preview}
+              busy={busy}
+              dirty={dirty}
+              fresh={previewFresh}
+              backup={backup}
+              onBackup={setBackup}
+              onPreview={() => void run(false)}
+              onWrite={() => void run(true)}
+              invalid={patch.invalid}
+              notice={notice}
+              failure={failure}
+              expanded={sheetOpen}
+              onToggleExpanded={() => setSheetOpen((v) => !v)}
+            />
           </aside>
         </div>
       )}
