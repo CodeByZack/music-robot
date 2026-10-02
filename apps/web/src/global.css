@@ -133,6 +133,28 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* ── 可点区域的光标 ───────────────────────────────────────────────
+     Tailwind **v4 的 preflight 不再给 `<button>` 加 `cursor: pointer`**
+     （v3 有过这一条），于是落回浏览器 UA 默认的 `default` ——
+     全站按钮 hover 都不变小手（用户 2026-10-02 反馈）。
+
+     一行规则修全站，不要在几十个按钮上各写一遍 `cursor-pointer`。
+     ⚠️ 放 `@layer base`：优先级低于 utilities，所以某个按钮想显式用
+     `cursor-pointer` / `cursor-default` 仍然盖得住。
+     ───────────────────────────────────────────────────────────── */
+  button:not(:disabled),
+  [role='button']:not(:disabled),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='range']:not(:disabled) {
+    cursor: pointer;
+  }
+  /* 禁用态给「不可点」光标 —— 光靠变淡有时候看不出来 */
+  button:disabled,
+  [role='button'][aria-disabled='true'] {
+    cursor: not-allowed;
+  }
 }
 
 /* ── 全屏浮层的进出场 ────────────────────────────────────────────

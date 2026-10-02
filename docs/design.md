@@ -263,6 +263,32 @@ Semi 的 token 里另有 `extra-small:3 / small:10 / medium:24 / large:32`，
 
 缓动没特殊声明，用默认 `ease` 即可。**不要加弹跳、不要加延迟**。
 
+#### 6.1 可点区域的光标（2026-10-02）
+
+**Tailwind v4 的 preflight 不再给 `<button>` 加 `cursor: pointer`**（v3 有过这条），
+于是落回浏览器 UA 的 `default` —— 全站按钮 hover 都不变小手。
+
+修法在 `apps/web/src/global.css` 的 `@layer base` 里，**一行规则管全站**，
+不要在几十个按钮上各写一遍 `cursor-pointer`：
+
+```css
+button:not(:disabled),
+[role='button']:not(:disabled),
+input[type='checkbox']:not(:disabled),
+input[type='radio']:not(:disabled),
+input[type='range']:not(:disabled) {
+  cursor: pointer;
+}
+button:disabled,
+[role='button'][aria-disabled='true'] {
+  cursor: not-allowed; /* 禁用态给「不可点」，光靠变淡有时候看不出来 */
+}
+```
+
+放 `@layer base` 是为了让 utilities 仍然盖得住（个别地方想显式 `cursor-default` 时）。
+
+**例外**：全屏抽屉/弹层的**遮罩层**（点它关闭）保持默认箭头 —— 那是背景板不是操作项。
+
 ---
 
 ## 7. 值得直接抄的 5 个手法（跟配色无关，纯粹是技巧）
